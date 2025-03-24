@@ -1,6 +1,6 @@
 import { OpenAI } from "openai";
 import { getOrThrow } from "./utils.js";
-import type { ChatCompletionMessageParam, ChatCompletionSystemMessageParam } from "openai/resources/chat/completions";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 class LLMClient {
     private client: OpenAI;
@@ -17,67 +17,12 @@ class LLMClient {
         this.model = model;
     }
 
-    // async initializeChat() {
-    //     const currentDateTime = new Date().toLocaleString();
-    //     const systemMessage: ChatCompletionSystemMessageParam = {
-    //         role: "system",
-    //         content: `
-    //   #### CONTEXT
-    //   Nous sommes le ${currentDateTime}.
-
-    //   You are a friendly assistant that can help answer questions and help with tasks.
-    //   `,
-    //     };
-    //     const inputMessages: ChatCompletionMessageParam[] = [systemMessage];
-
-    //     try {
-    //         const chatCompletion = await this.client.chat.completions.create({
-    //             messages: inputMessages,
-    //             model: this.model,
-    //         });
-    //         console.log(chatCompletion);
-    //         console.log(chatCompletion.choices[0]?.message?.content);
-    //         return chatCompletion.choices[0]?.message?.content || "";
-    //     } catch (error) {
-    //         console.error(`Error initializing chat: ${error}`);
-    //         throw error;
-    //     }
-    // }
-
     async getResponse(messages: ChatCompletionMessageParam[]) {
-        console.log("MESSAGES", messages);
-        const currentDateTime = new Date().toLocaleString();
-        const systemMessage: ChatCompletionSystemMessageParam = {
-            role: "system",
-            content: `
-      #### CONTEXT
-      Nous sommes le ${currentDateTime}.
-      
-      You are a friendly assistant that can help answer questions and help with tasks.
-      `,
-        };
-        const inputMessages: ChatCompletionMessageParam[] = [systemMessage, ...messages];
-
         const completion = await this.client.chat.completions.create({
             model: this.model,
-            messages: inputMessages,
+            messages: messages,
         });
-        console.log(completion);
         return completion.choices[0]?.message?.content || "";
     }
-
-    // async getResponse(messages: ChatCompletionMessageParam[]) {
-    //     try {
-    //         const completion = await this.client.chat.completions.create({
-    //             model: "gpt-4o-mini",
-    //             messages: messages,
-    //         });
-    //         return completion.choices[0]?.message?.content || "";
-    //     } catch (error) {
-    //         console.error(`Error getting response from LLM: ${error}`);
-    //         throw error;
-    //     }
-    // }
 }
-
 export const llmClient = new LLMClient();

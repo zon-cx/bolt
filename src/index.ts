@@ -1,6 +1,9 @@
-import SlackMCPBot from "./SlackMcpBot.js";
+import SlackMcpBot from "./SlackMcpBot.js";
+import { MCPClient } from "./McpClient.js";
 
-const bot = new SlackMCPBot();
+const mcpClient = new MCPClient("mcp", { url: "http://localhost:3001/sse" });
+await mcpClient.initialize();
+const bot = new SlackMcpBot(mcpClient);
 
 (async () => {
     try {
