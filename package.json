@@ -16,12 +16,18 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.7.0",
     "@slack/bolt": "^4.2.1",
-    "dotenv": "^16.4.7"
+    "@slack/web-api": "^7.9.0",
+    "dotenv": "^16.4.7",
+    "openai": "^4.89.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.22.0",
     "@types/node": "^22.13.10",
+    "eslint": "^9.22.0",
+    "globals": "^16.0.0",
     "tsx": "^4.19.3",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.27.0"
   },
   "type": "module"
 }
