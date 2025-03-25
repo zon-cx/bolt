@@ -8,3 +8,11 @@ export function getOrThrow(key: string) {
     }
     return value;
 }
+
+export function get(key: string, defaultValue: string) {
+    const value = process.env[key];
+    if (!value) {
+        return defaultValue;
+    }
+    return value;
+}
