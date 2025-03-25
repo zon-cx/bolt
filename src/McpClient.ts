@@ -99,45 +99,22 @@ export class McpServer {
     }
 
     /**
-     * Execute a tool with retry mechanism.
-     * @param toolName Name of the tool to execute
+     * Execute a tool in this server.
+     * @param toolName Name of the tool to execute in format server.toolName
      * @param toolArgs Tool arguments
-     * @param retries Number of retry attempts
-     * @param delay Delay between retries in seconds
      * @returns Tool execution result
-     * @throws Error if server is not initialized or tool execution fails after all retries
+     * @throws Error if server is not initialized or tool execution fails
      */
-    async executeTool(toolName: string, toolArgs: Record<string, any>, retries: number = 0, delay: number = 2.0) {
+    async executeTool(toolName: string, toolArgs: Record<string, any>) {
         if (!this.client) {
             throw new Error(`Server ${this.name} not initialized`);
         }
 
-        const tool = this.tools[toolName];
-        if (!tool) {
-            throw new Error(`Tool ${toolName} not found for server ${this.name}`);
-        }
-
-        let attempt = 0;
-        while (attempt <= retries) {
-            try {
-                const result = await this.client.callTool({
-                    name: toolName,
-                    arguments: toolArgs,
-                });
-                return result;
-            } catch (error) {
-                logger.warn(`Error executing tool ${toolName}: ${error}. Attempt ${attempt} of ${retries}.`);
-                attempt += 1;
-
-                if (attempt < retries) {
-                    logger.info(`Retrying in ${delay} seconds...`);
-                    await new Promise((resolve) => setTimeout(resolve, delay * 1000));
-                } else {
-                    logger.error("Max retries reached. Failing.");
-                    throw error;
-                }
-            }
-        }
+        const result = await this.client.callTool({
+            name: toolName,
+            arguments: toolArgs,
+        });
+        return result;
     }
 }
 
@@ -176,46 +153,24 @@ export class MCPClient {
     }
 
     /**
-     * Execute a tool with retry mechanism.
-     * @param toolName Name of the tool to execute
+     * Execute a tool from a specific server.
+     * @param toolName Name of the tool to execute in format server.toolName
      * @param toolArgs Tool arguments
-     * @param retries Number of retry attempts
-     * @param delay Delay between retries in seconds
      * @returns Tool execution result
-     * @throws Error if server is not initialized or tool execution fails after all retries
+     * @throws Error if tool not found or execution fails
      */
-    async executeTool(
-        toolName: string,
-        toolArgs: Record<string, any>,
-        retries: number = 0,
-        delay: number = 1.0,
-    ): Promise<any> {
+    async executeTool(toolName: string, toolArgs: Record<string, any>): Promise<any> {
         if (!this.tools[toolName]) {
             throw new Error(`Tool ${toolName} not found`);
         }
 
         const tool = this.tools[toolName];
-        if (!tool) {
-            throw new Error(`Tool ${toolName} not found`);
-        }
-
-        let attempt = 0;
-        while (attempt <= retries) {
-            try {
-                const result = await tool.mcpServer.executeTool(tool.tool.name, toolArgs, retries, delay);
-                return result;
-            } catch (e) {
-                attempt += 1;
-                logger.warn(`Error executing tool: ${e}. Attempt ${attempt} of ${retries}.`);
-
-                if (attempt < retries) {
-                    logger.info(`Retrying in ${delay} seconds...`);
-                    await new Promise((resolve) => setTimeout(resolve, delay * 1000));
-                } else {
-                    logger.error("Max retries reached. Failing.");
-                    throw e;
-                }
-            }
+        try {
+            const result = await tool.mcpServer.executeTool(tool.tool.name, toolArgs);
+            return result;
+        } catch (e) {
+            logger.warn(`Error executing tool: ${e}.`);
+            throw e;
         }
     }
 }
