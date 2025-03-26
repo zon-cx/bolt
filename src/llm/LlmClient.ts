@@ -1,19 +1,15 @@
 import { OpenAI } from "openai";
-import { getOrThrow } from "./utils.js";
+import { getOrThrow } from "../shared/utils.js";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
-class LLMClient {
+class LlmClient {
     private client: OpenAI;
-    private timeout: number;
-    private maxRetries: number;
     private model: string;
 
-    constructor(model: string = "gpt-4o-mini", timeout: number = 10000, maxRetries: number = 3) {
+    constructor(model: string = "gpt-4o-mini") {
         this.client = new OpenAI({
             apiKey: getOrThrow("OPENAI_API_KEY"),
         });
-        this.timeout = timeout;
-        this.maxRetries = maxRetries;
         this.model = model;
     }
 
@@ -25,4 +21,4 @@ class LLMClient {
         return completion.choices[0]?.message?.content || "";
     }
 }
-export const llmClient = new LLMClient();
+export const llmClient = new LlmClient();

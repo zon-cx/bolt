@@ -4,11 +4,11 @@
   "description": "MCP client for Slack",
   "private": true,
   "scripts": {
-    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
-    "dev": "tsx watch src/index.ts"
+    "build": "tsc && node -e \"require('fs').chmodSync('build/app.js', '755')\"",
+    "dev": "tsx watch src/app.ts"
   },
   "bin": {
-    "slack-mcp-client": "./build/index.js"
+    "slack-mcp-client": "./build/app.js"
   },
   "files": [
     "build"

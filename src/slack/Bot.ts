@@ -1,10 +1,11 @@
 import bolt, { type AssistantThreadStartedMiddleware, type AssistantUserMessageMiddleware } from "@slack/bolt";
-import { getOrThrow } from "./utils.js";
-import { MCPClient, Tool, McpServer } from "./McpClient.js";
+import { getOrThrow } from "../shared/utils.js";
+import { McpClient } from "../mcp/McpClient.js";
+import type { Tool } from "../mcp/Tool.js";
 import type { ConversationsRepliesResponse } from "@slack/web-api";
-import { llmClient } from "./LlmClient.js";
+import { llmClient } from "../llm/LlmClient.js";
 import type { ChatCompletionMessageParam, ChatCompletionSystemMessageParam } from "openai/resources/chat/completions";
-import logger from "./Logger.js";
+import logger from "../shared/Logger.js";
 
 interface toolCallParams {
     toolname: string;
@@ -16,11 +17,11 @@ interface toolCallResult extends toolCallParams {
     toolResult: any;
 }
 
-class SlackMcpBot {
+export class Bot {
     public app: bolt.App;
-    public mcpClient: MCPClient;
+    public mcpClient: McpClient;
     public tools: Tool[];
-    constructor(mcpClient: MCPClient) {
+    constructor(mcpClient: McpClient) {
         this.app = new bolt.App({
             token: getOrThrow("SLACK_BOT_TOKEN"),
             appToken: getOrThrow("SLACK_APP_TOKEN"),
@@ -45,7 +46,12 @@ class SlackMcpBot {
 
     threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
         try {
-            await say("Hi, how can I help? 🏴‍☠️");
+            const welcomeMessage = `
+            Hi, how can I help? 🏴‍☠️
+            You can use the following tools:
+            ${this.tools.map((tool) => tool.formatForSlack()).join("\n")}
+            `;
+            await say(welcomeMessage);
         } catch (e) {
             logger.error(e);
         }
@@ -65,7 +71,7 @@ class SlackMcpBot {
                 channel: channel,
                 ts: thread_ts,
             });
-            const chatCompletionMessages = SlackMcpBot.toChatCompletionMessages(conversationReplies, this.tools);
+            const chatCompletionMessages = Bot.toChatCompletionMessages(conversationReplies, this.tools);
 
             // Get the LLM response
             let llmResponse = "";
@@ -126,7 +132,7 @@ You are a helpful assistant. You've just used a tool and received results. Inter
             toolResult: undefined,
         };
         try {
-            const toolCallParams = SlackMcpBot.extractToolCallParams(llmResponse);
+            const toolCallParams = Bot.extractToolCallParams(llmResponse);
             toolCallResult.toolname = toolCallParams.toolname;
             toolCallResult.toolArgs = toolCallParams.toolArgs;
         } catch (e) {
@@ -182,7 +188,7 @@ You are a helpful assistant. You've just used a tool and received results. Inter
             return [];
         }
 
-        const systemMessage = SlackMcpBot.getSystemMessage(tools);
+        const systemMessage = Bot.getSystemMessage(tools);
         const chatCompletionMessages = conversationReplies.messages
             .filter((message) => (message as any).subtype === undefined)
             .map((message) => {
@@ -220,4 +226,4 @@ After receiving tool results, interpret them for the user in a helpful way.
     }
 }
 
-export default SlackMcpBot;
+export default Bot;

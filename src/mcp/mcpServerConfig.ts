@@ -1,26 +1,8 @@
 import { readFileSync } from "fs";
 import { z } from "zod";
-import logger from "./Logger.js";
-const sseServerConfig = z.object({
-    url: z.string().url(),
-    env: z.record(z.string(), z.string()).optional(),
-});
-
-const stdioServerConfig = z.object({
-    command: z.string(),
-    args: z.array(z.string()).optional(),
-    env: z.record(z.string(), z.string()).optional(),
-});
-
-const serverConfig = z.union([stdioServerConfig, sseServerConfig]);
-
-const mcpConfig = z.object({
-    mcpServers: z.record(z.string(), serverConfig),
-});
-
-export type mcpConfig = z.infer<typeof mcpConfig>;
-export type mcpServerConfig = z.infer<typeof serverConfig>;
-
+import logger from "../shared/Logger.js";
+import type { mcpConfig } from "./mcp.types.js";
+import { McpConfig } from "./mcp.types.js";
 /**
  * Load server configuration from JSON file.
  * @param filePath - Path to the JSON configuration file.
@@ -33,7 +15,7 @@ export function loadConfig(filePath: string): mcpConfig {
         const fileContent = readFileSync(filePath, "utf-8");
         const config = JSON.parse(fileContent);
         logger.info("Loaded configuration: " + JSON.stringify(config));
-        return mcpConfig.parse(config);
+        return McpConfig.parse(config);
     } catch (error) {
         if (error instanceof Error) {
             if ("code" in error && error.code === "ENOENT") {
