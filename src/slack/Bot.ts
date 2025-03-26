@@ -1,4 +1,8 @@
-import bolt, { type AssistantThreadStartedMiddleware, type AssistantUserMessageMiddleware } from "@slack/bolt";
+import bolt, {
+    type AssistantThreadStartedMiddleware,
+    type AssistantUserMessageMiddleware,
+    type SayArguments,
+} from "@slack/bolt";
 import { getOrThrow } from "../shared/utils.js";
 import { McpClient } from "../mcp/McpClient.js";
 import type { Tool } from "../mcp/Tool.js";
@@ -6,6 +10,7 @@ import type { ConversationsRepliesResponse } from "@slack/web-api";
 import { llmClient } from "../llm/LlmClient.js";
 import type { ChatCompletionMessageParam, ChatCompletionSystemMessageParam } from "openai/resources/chat/completions";
 import logger from "../shared/Logger.js";
+import { formatToolList } from "./utils.js";
 
 interface toolCallParams {
     toolname: string;
@@ -46,12 +51,7 @@ export class Bot {
 
     threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
         try {
-            const welcomeMessage = `
-            Hi, how can I help? 🏴‍☠️
-            You can use the following tools:
-            ${this.tools.map((tool) => tool.formatForSlack()).join("\n")}
-            `;
-            await say(welcomeMessage);
+            await say(formatToolList(this.tools));
         } catch (e) {
             logger.error(e);
         }
