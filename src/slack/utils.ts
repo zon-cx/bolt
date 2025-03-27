@@ -1,6 +1,7 @@
+import { type } from "os";
 import type { Tool } from "../mcp/Tool.js";
 
-export function formatToolList(tools: Tool[]) {
+export function formatWelcomeMessage(tools: Tool[]) {
     const toolList = {
         blocks: [
             buildTextSection([{ text: "Hello! How can I help you today 🏴‍☠️?" }]),
@@ -20,6 +21,41 @@ export function formatToolList(tools: Tool[]) {
 function buildDivider() {
     return {
         type: "divider",
+    };
+}
+
+export function buildApprovalButtons(value: string) {
+    return {
+        text: "Do you want to use the tool?",
+        blocks: [
+            {
+                type: "actions",
+                elements: [
+                    {
+                        type: "button",
+                        text: {
+                            type: "plain_text",
+                            text: "Go for it",
+                            emoji: true,
+                        },
+                        value: value,
+                        action_id: "approve_tool_call",
+                        style: "primary",
+                    },
+                    {
+                        type: "button",
+                        text: {
+                            type: "plain_text",
+                            text: "Plz no",
+                            emoji: true,
+                        },
+                        value: value,
+                        action_id: "cancel_tool_call",
+                        style: "danger",
+                    },
+                ],
+            },
+        ],
     };
 }
 

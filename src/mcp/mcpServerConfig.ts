@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { z } from "zod";
-import logger from "../shared/Logger.js";
+import logger from "../shared/logger.js";
 import type { mcpConfig } from "./mcp.types.js";
 import { McpConfig } from "./mcp.types.js";
 /**

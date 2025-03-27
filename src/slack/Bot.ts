@@ -1,16 +1,18 @@
-import bolt, {
-    type AssistantThreadStartedMiddleware,
-    type AssistantUserMessageMiddleware,
-    type SayArguments,
-} from "@slack/bolt";
+import bolt, { type AssistantThreadStartedMiddleware, type AssistantUserMessageMiddleware } from "@slack/bolt";
 import { getOrThrow } from "../shared/utils.js";
 import { McpClient } from "../mcp/McpClient.js";
 import type { Tool } from "../mcp/Tool.js";
 import type { ConversationsRepliesResponse } from "@slack/web-api";
 import { llmClient } from "../llm/LlmClient.js";
-import type { ChatCompletionMessageParam, ChatCompletionSystemMessageParam } from "openai/resources/chat/completions";
-import logger from "../shared/Logger.js";
-import { formatToolList } from "./utils.js";
+import type {
+    ChatCompletionMessageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionMessageToolCall,
+} from "openai/resources/chat/completions";
+import logger from "../shared/logger.js";
+import { formatWelcomeMessage, buildApprovalButtons } from "./utils.js";
+import { OrderedFixedSizeMap } from "../shared/OrderedFixedSizeMap.js";
+import { stableHash } from "stable-hash";
 
 interface toolCallParams {
     toolname: string;
@@ -26,6 +28,7 @@ export class Bot {
     public app: bolt.App;
     public mcpClient: McpClient;
     public tools: Tool[];
+    private toolCallCache: OrderedFixedSizeMap<string, toolCallParams>;
     constructor(mcpClient: McpClient) {
         this.app = new bolt.App({
             token: getOrThrow("SLACK_BOT_TOKEN"),
@@ -36,6 +39,7 @@ export class Bot {
         });
         this.mcpClient = mcpClient;
         this.tools = [];
+        this.toolCallCache = new OrderedFixedSizeMap<string, toolCallParams>(50);
     }
 
     async start() {
@@ -46,105 +50,134 @@ export class Bot {
         });
 
         this.app.assistant(assistant);
+        this.app.action("approve_tool_call", this.proceedWithToolCallAction);
+        this.app.action("cancel_tool_call", this.cancelToolCallAction);
         await this.app.start(process.env.PORT || 3000);
     }
 
+    cancelToolCallAction = async ({
+        payload,
+        body,
+        ack,
+        respond,
+        say,
+    }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
+        ack();
+        const toolCallParams = this.toolCallCache.getAndDelete(payload.value || "");
+        await respond({
+            text: "Ok, I'm not going to use that tool. What else can I do for you?",
+        });
+    };
+
+    proceedWithToolCallAction = async ({
+        payload,
+        body,
+        action,
+        ack,
+        respond,
+        say,
+    }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
+        ack();
+        const toolCallParams = this.toolCallCache.getAndDelete(payload.value || "");
+        if (!toolCallParams) {
+            logger.error("Tool call params not found in cache");
+            await say({ text: "Sorry something went wrong. Please try again.", thread_ts: body.container.thread_ts });
+            return;
+        }
+        await respond({ text: "Ok, I'm working on it..." });
+        const toolCallResult = await this.processToolCall(toolCallParams);
+        if (!toolCallResult.success) {
+            await say({ text: "Sorry something went wrong. Please try again.", thread_ts: body.container.thread_ts });
+            return;
+        }
+        const chatCompletionMessages: ChatCompletionMessageParam[] = [];
+        chatCompletionMessages.push({
+            role: "system",
+            content: `
+            You are a helpful assistant. You've just used a tool and received results. Interpret these results for the user in a clear, helpful way.`,
+        });
+        chatCompletionMessages.push({
+            role: "user",
+            content: `I used the tool ${toolCallResult.toolname} with arguments "${toolCallResult.toolArgs}" and got this result:\n\n${toolCallResult.toolResult.content[0].text}\n\nPlease interpret this result for me.`,
+        });
+        const interpretation = await llmClient.getResponse(chatCompletionMessages, this.tools);
+        logger.debug("Tool call interpretation: - " + interpretation?.content);
+        await say({ text: interpretation?.content || "", thread_ts: body.container.thread_ts });
+    };
+
     threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
         try {
-            await say(formatToolList(this.tools));
+            await say(formatWelcomeMessage(this.tools));
         } catch (e) {
             logger.error(e);
         }
     };
 
     userMessage: AssistantUserMessageMiddleware = async ({ client, message, say }) => {
-        if (!message.subtype) {
-            // This means it's a message from the user
-            if (!message.thread_ts) {
-                logger.info("No thread ts on im message");
+        try {
+            const { isInThread, message: messageInThread } = Bot.isMessageInThread(message);
+            if (!isInThread) {
                 return;
             }
 
-            // Get the thread history and prepare it for the LLM with the system message
-            const { channel, thread_ts } = message;
+            // Get the last 5 messages in the thread and prepare it for the LLM with the system message
+            const { channel, thread_ts } = messageInThread;
             const conversationReplies = await client.conversations.replies({
                 channel: channel,
-                ts: thread_ts,
+                ts: thread_ts!,
+                limit: 5,
             });
-            const chatCompletionMessages = Bot.toChatCompletionMessages(conversationReplies, this.tools);
+            const chatCompletionMessages = Bot.toChatCompletionMessages(conversationReplies);
+            chatCompletionMessages.unshift(Bot.getSystemMessage(this.tools));
 
-            // Get the LLM response
-            let llmResponse = "";
-            try {
-                llmResponse = await llmClient.getResponse(chatCompletionMessages);
-                logger.debug("1st llm response: - " + llmResponse);
-            } catch (e) {
-                logger.error(e);
-                try {
-                    await say("I'm sorry, something went wrong. Please try again in a little while.");
-                } catch (e) {
-                    logger.error(e);
-                }
-            }
+            const llmResponse = await llmClient.getResponse(chatCompletionMessages, this.tools);
 
             // Handle tool calls
-            if (llmResponse.startsWith("[TOOL]")) {
-                const { success, toolname, toolArgs, toolResult } = await this.processToolCall(llmResponse);
-                if (!success) {
-                    try {
-                        await say("I'm sorry, something went wrong. Please try again in a little while.");
-                    } catch (e) {
-                        logger.error(e);
-                    }
-                    return;
-                }
-                chatCompletionMessages.push({
-                    role: "system",
-                    content: `
-You are a helpful assistant. You've just used a tool and received results. Interpret these results for the user in a clear, helpful way.`,
+            if (llmResponse?.tool_calls && llmResponse.tool_calls.length > 0) {
+                llmResponse.tool_calls.forEach(async (toolCall) => {
+                    const toolCallParams = Bot.extractToolCallParams(toolCall);
+                    const toolCallHash = stableHash(toolCallParams);
+                    this.toolCallCache.set(toolCallHash, toolCallParams);
+                    logger.debug("Tool call params: " + JSON.stringify(toolCallParams));
+                    await say({
+                        text:
+                            "I want to use the tool " +
+                            toolCallParams.toolname +
+                            " with arguments " +
+                            JSON.stringify(toolCallParams.toolArgs),
+                    });
+                    await say(buildApprovalButtons(toolCallHash));
                 });
-                chatCompletionMessages.push({
-                    role: "user",
-                    content: `I used the tool ${toolname} with arguments "${toolArgs}" and got this result:\n\n${toolResult.content[0].text}\n\nPlease interpret this result for me.`,
-                });
-                const interpretation = await llmClient.getResponse(chatCompletionMessages);
-                logger.debug("Tool call interpretation: - " + interpretation);
-                try {
-                    await say({ text: interpretation });
-                } catch (e) {
-                    logger.error(e);
-                }
             } else {
-                try {
-                    await say({ text: llmResponse });
-                } catch (e) {
-                    logger.error(e);
-                }
+                await say({ text: llmResponse?.content || "..." });
             }
+        } catch (e) {
+            logger.error(e);
+            await say("I'm sorry, something went wrong. Please try again in a little while.");
         }
     };
 
-    async processToolCall(llmResponse: string): Promise<toolCallResult> {
+    static isMessageInThread(message: bolt.KnownEventFromType<"message">): {
+        isInThread: boolean;
+        message: bolt.types.GenericMessageEvent;
+    } {
+        if (message.subtype !== undefined) {
+            return { isInThread: false, message: message as unknown as bolt.types.GenericMessageEvent };
+        }
+
+        if (message.thread_ts === undefined) {
+            return { isInThread: false, message: message as bolt.types.GenericMessageEvent };
+        }
+        return { isInThread: true, message: message };
+    }
+
+    async processToolCall(toolCallParams: toolCallParams): Promise<toolCallResult> {
         const toolCallResult: toolCallResult = {
             success: false,
-            toolname: "",
-            toolArgs: {},
+            toolname: toolCallParams.toolname,
+            toolArgs: toolCallParams.toolArgs,
             toolResult: undefined,
         };
-        try {
-            const toolCallParams = Bot.extractToolCallParams(llmResponse);
-            toolCallResult.toolname = toolCallParams.toolname;
-            toolCallResult.toolArgs = toolCallParams.toolArgs;
-        } catch (e) {
-            logger.error("Error extracting tool call params: " + e);
-            return toolCallResult;
-        }
-        logger.debug(
-            "Executing tool call: " +
-                toolCallResult.toolname +
-                " - with args: " +
-                JSON.stringify(toolCallResult.toolArgs),
-        );
         try {
             toolCallResult.toolResult = await this.mcpClient.executeTool(
                 toolCallResult.toolname,
@@ -158,38 +191,19 @@ You are a helpful assistant. You've just used a tool and received results. Inter
         return toolCallResult;
     }
 
-    static extractToolCallParams(llmResponse: string): toolCallParams {
+    static extractToolCallParams(toolCall: ChatCompletionMessageToolCall): toolCallParams {
         const toolCallParams: toolCallParams = {
-            toolname: "",
-            toolArgs: {},
+            toolname: toolCall.function.name,
+            toolArgs: JSON.parse(toolCall.function.arguments),
         };
-
-        if (!llmResponse.startsWith("[TOOL]")) {
-            throw new Error("Tool call with wrong format in llm response: " + llmResponse);
-        }
-        const parts = llmResponse.split("[TOOL]");
-        if (parts.length < 2) {
-            throw new Error("Tool call with wrong format in llm response: " + llmResponse);
-        }
-        const toolParts = parts[1]!.trim().split("\n", 2);
-        toolCallParams.toolname = toolParts[0]!.trim();
-        if (toolParts.length < 2) {
-            throw new Error("Tool call with wrong format in llm response: " + llmResponse);
-        }
-        toolCallParams.toolArgs = JSON.parse(toolParts[1]!.trim());
         return toolCallParams;
     }
 
-    static toChatCompletionMessages(
-        conversationReplies: ConversationsRepliesResponse,
-        tools: Tool[],
-    ): ChatCompletionMessageParam[] {
+    static toChatCompletionMessages(conversationReplies: ConversationsRepliesResponse): ChatCompletionMessageParam[] {
         if (!conversationReplies.messages) {
             return [];
         }
-
-        const systemMessage = Bot.getSystemMessage(tools);
-        const chatCompletionMessages = conversationReplies.messages
+        return conversationReplies.messages
             .filter((message) => (message as any).subtype === undefined)
             .map((message) => {
                 return {
@@ -197,29 +211,16 @@ You are a helpful assistant. You've just used a tool and received results. Inter
                     content: message.text || "",
                 } as ChatCompletionMessageParam;
             });
-        chatCompletionMessages.unshift(systemMessage);
-        return chatCompletionMessages;
     }
 
     static getSystemMessage(tools: Tool[]) {
         const currentDateTime = new Date().toLocaleString();
-        const toolsString = tools.map((tool) => tool.formatForLLM()).join("\n");
         const systemMessage: ChatCompletionSystemMessageParam = {
             role: "system",
             content: `
 #### CONTEXT
 Nous sommes le ${currentDateTime}.
-You are a friendly assistant that can help answer questions and help with tasks. 
-You can use the following tools:
-${toolsString}
-When you need to use a tool, you MUST format your response exactly like this:
-[TOOL] tool_name
-{"param1": "value1", "param2": "value2"}
-
-Make sure to include both the tool name AND the JSON arguments.
-Never leave out the JSON arguments.
-
-After receiving tool results, interpret them for the user in a helpful way.
+You are a friendly slack assistant that can help answer questions and help with tasks. 
       `,
         };
         return systemMessage;

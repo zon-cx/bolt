@@ -1,6 +1,6 @@
 import Bot from "./slack/Bot.js";
 import { McpClient } from "./mcp/McpClient.js";
-import logger from "./shared/Logger.js";
+import logger from "./shared/logger.js";
 import { loadConfig } from "./mcp/mcpServerConfig.js";
 
 const mcpConfig = loadConfig("mcp.json");

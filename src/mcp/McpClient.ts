@@ -1,4 +1,4 @@
-import logger from "../shared/Logger.js";
+import logger from "../shared/logger.js";
 import type { mcpConfig } from "./mcp.types.js";
 import { McpServer } from "./McpServer.js";
 import type { Tool } from "./Tool.js";
@@ -8,7 +8,7 @@ import type { Tool } from "./Tool.js";
  */
 export class McpClient {
     private servers: Record<string, McpServer> = {};
-    private tools: Record<string, { mcpServer: McpServer; tool: Tool }> = {}; // Indexed by server.toolName
+    private tools: Record<string, { mcpServer: McpServer; tool: Tool }> = {}; // Indexed by server-toolName
     constructor(mcpConfig: mcpConfig) {
         Object.entries(mcpConfig.mcpServers).forEach(([name, config]) => {
             this.servers[name] = new McpServer(name, config);
@@ -20,7 +20,7 @@ export class McpClient {
             await Promise.all(Object.values(this.servers).map((server) => server.initialize()));
             Object.entries(this.servers).forEach(([name, server]) => {
                 Object.entries(server.getTools()).forEach(([toolName, tool]) => {
-                    this.tools[name + "." + toolName] = { mcpServer: server, tool };
+                    this.tools[name + "-" + toolName] = { mcpServer: server, tool };
                 });
             });
             logger.info("MCP client initialized, available tools :");

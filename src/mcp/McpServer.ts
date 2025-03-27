@@ -5,7 +5,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { mcpServerConfig } from "./mcp.types.js";
 import type { mcpTools } from "./mcp.types.js";
 import { McpToolsArray } from "./mcp.types.js";
-import logger from "../shared/Logger.js";
+import logger from "../shared/logger.js";
 import { Tool } from "./Tool.js";
 
 export class McpServer {
