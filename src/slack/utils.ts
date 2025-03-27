@@ -24,10 +24,11 @@ function buildDivider() {
     };
 }
 
-export function buildApprovalButtons(value: string) {
+export function buildApprovalButtons(message: string, value: string) {
     return {
-        text: "Do you want to use the tool?",
+        text: message,
         blocks: [
+            buildTextSection([{ text: message }]),
             {
                 type: "actions",
                 elements: [

@@ -28,7 +28,7 @@ export class Bot {
     public app: bolt.App;
     public mcpClient: McpClient;
     public tools: Tool[];
-    private toolCallCache: OrderedFixedSizeMap<string, toolCallParams>;
+    private toolCallCache: OrderedFixedSizeMap<string, toolCallParams[]>;
     constructor(mcpClient: McpClient) {
         this.app = new bolt.App({
             token: getOrThrow("SLACK_BOT_TOKEN"),
@@ -39,7 +39,7 @@ export class Bot {
         });
         this.mcpClient = mcpClient;
         this.tools = [];
-        this.toolCallCache = new OrderedFixedSizeMap<string, toolCallParams>(50);
+        this.toolCallCache = new OrderedFixedSizeMap<string, toolCallParams[]>(50);
     }
 
     async start() {
@@ -85,8 +85,8 @@ export class Bot {
             return;
         }
         await respond({ text: "Ok, I'm working on it..." });
-        const toolCallResult = await this.processToolCall(toolCallParams);
-        if (!toolCallResult.success) {
+        const toolCallResults = await Promise.all(toolCallParams.map(this.processToolCall.bind(this)));
+        if (!toolCallResults.every((toolCallResult) => toolCallResult.success)) {
             await say({ text: "Sorry something went wrong. Please try again.", thread_ts: body.container.thread_ts });
             return;
         }
@@ -96,9 +96,14 @@ export class Bot {
             content: `
             You are a helpful assistant. You've just used a tool and received results. Interpret these results for the user in a clear, helpful way.`,
         });
+        let toolCallResultsMessages = "I used the tools:\n";
+        toolCallResultsMessages += toolCallResults.map((toolCallResult) => {
+            return `- ${toolCallResult.toolname} with arguments "${toolCallResult.toolArgs}" and got this result:\n${toolCallResult.toolResult.content[0].text}\n`;
+        });
+        toolCallResultsMessages += "\n\nPlease interpret these results for me.";
         chatCompletionMessages.push({
             role: "user",
-            content: `I used the tool ${toolCallResult.toolname} with arguments "${toolCallResult.toolArgs}" and got this result:\n\n${toolCallResult.toolResult.content[0].text}\n\nPlease interpret this result for me.`,
+            content: toolCallResultsMessages,
         });
         const interpretation = await llmClient.getResponse(chatCompletionMessages, this.tools);
         logger.debug("Tool call interpretation: - " + interpretation?.content);
@@ -134,20 +139,21 @@ export class Bot {
 
             // Handle tool calls
             if (llmResponse?.tool_calls && llmResponse.tool_calls.length > 0) {
-                llmResponse.tool_calls.forEach(async (toolCall) => {
-                    const toolCallParams = Bot.extractToolCallParams(toolCall);
-                    const toolCallHash = stableHash(toolCallParams);
-                    this.toolCallCache.set(toolCallHash, toolCallParams);
-                    logger.debug("Tool call params: " + JSON.stringify(toolCallParams));
-                    await say({
-                        text:
-                            "I want to use the tool " +
-                            toolCallParams.toolname +
-                            " with arguments " +
-                            JSON.stringify(toolCallParams.toolArgs),
-                    });
-                    await say(buildApprovalButtons(toolCallHash));
+                const toolRequests = llmResponse.tool_calls.map((toolCall) => {
+                    return Bot.extractToolCallParams(toolCall);
                 });
+                const toolRequestHash = stableHash(JSON.stringify(toolRequests));
+                this.toolCallCache.set(toolRequestHash, toolRequests);
+                let toolRequestMessage = "I want to use: \n";
+                toolRequestMessage += toolRequests
+                    .map(
+                        (toolRequest) =>
+                            toolRequest.toolname + " with arguments " + JSON.stringify(toolRequest.toolArgs),
+                    )
+                    .join("\nand\n");
+                toolRequestMessage += ".";
+
+                await say(buildApprovalButtons(toolRequestMessage, toolRequestHash));
             } else {
                 await say({ text: llmResponse?.content || "..." });
             }
