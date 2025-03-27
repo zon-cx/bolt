@@ -60,7 +60,14 @@ export function buildApprovalButtons(message: string, value: string) {
     };
 }
 
-function buildTextSection(
+export function buildMarkdownSection(text: string) {
+    return {
+        type: "markdown",
+        text: text,
+    };
+}
+
+export function buildTextSection(
     texts: {
         text: string;
         style?: { bold?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean };

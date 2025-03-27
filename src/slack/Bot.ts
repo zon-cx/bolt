@@ -10,7 +10,7 @@ import type {
     ChatCompletionMessageToolCall,
 } from "openai/resources/chat/completions";
 import logger from "../shared/logger.js";
-import { formatWelcomeMessage, buildApprovalButtons } from "./utils.js";
+import { formatWelcomeMessage, buildApprovalButtons, buildMarkdownSection } from "./utils.js";
 import { OrderedFixedSizeMap } from "../shared/OrderedFixedSizeMap.js";
 import { stableHash } from "stable-hash";
 
@@ -94,7 +94,7 @@ export class Bot {
         chatCompletionMessages.push({
             role: "system",
             content: `
-            You are a helpful assistant. You've just used a tool and received results. Interpret these results for the user in a clear, helpful way.`,
+            You are a helpful assistant. You've just used a tool and received results. Interpret these results for the user in a clear, helpful way. Please format your response as markdown.`,
         });
         let toolCallResultsMessages = "I used the tools:\n";
         toolCallResultsMessages += toolCallResults.map((toolCallResult) => {
@@ -107,7 +107,10 @@ export class Bot {
         });
         const interpretation = await llmClient.getResponse(chatCompletionMessages, this.tools);
         logger.debug("Tool call interpretation: - " + interpretation?.content);
-        await say({ text: interpretation?.content || "", thread_ts: body.container.thread_ts });
+        await say({
+            blocks: [buildMarkdownSection(interpretation?.content || "...")],
+            thread_ts: body.container.thread_ts,
+        });
     };
 
     threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
@@ -155,7 +158,7 @@ export class Bot {
 
                 await say(buildApprovalButtons(toolRequestMessage, toolRequestHash));
             } else {
-                await say({ text: llmResponse?.content || "..." });
+                await say({ blocks: [buildMarkdownSection(llmResponse?.content || "...")] });
             }
         } catch (e) {
             logger.error(e);
