@@ -5,19 +5,19 @@ import logger from "../shared/logger.js";
 import type { Tool } from "../mcp/Tool.js";
 
 class LlmClient {
-    private client: OpenAI;
-    private model: string;
+    private _client: OpenAI;
+    private _model: string;
 
     constructor(model: string = "gpt-4o-mini") {
-        this.client = new OpenAI({
+        this._client = new OpenAI({
             apiKey: getOrThrow("OPENAI_API_KEY"),
         });
-        this.model = model;
+        this._model = model;
     }
 
     async getResponse(messages: ChatCompletionMessageParam[], tools: Tool[]) {
-        const completion = await this.client.chat.completions.create({
-            model: this.model,
+        const completion = await this._client.chat.completions.create({
+            model: this._model,
             messages: messages,
             tools: tools.map((tool) => tool.toOpenAiTool()),
             tool_choice: "auto",

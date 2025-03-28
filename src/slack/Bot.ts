@@ -1,6 +1,6 @@
 import bolt, { type AssistantThreadStartedMiddleware, type AssistantUserMessageMiddleware } from "@slack/bolt";
 import { getOrThrow } from "../shared/utils.js";
-import { McpClient } from "../mcp/McpClient.js";
+import { McpHost } from "../mcp/McpHost.js";
 import type { Tool } from "../mcp/Tool.js";
 import type { ConversationsRepliesResponse } from "@slack/web-api";
 import { llmClient } from "../llm/LlmClient.js";
@@ -25,37 +25,37 @@ interface toolCallResult extends toolCallParams {
 }
 
 export class Bot {
-    public app: bolt.App;
-    public mcpClient: McpClient;
-    public tools: Tool[];
-    private toolCallCache: OrderedFixedSizeMap<string, toolCallParams[]>;
-    constructor(mcpClient: McpClient) {
-        this.app = new bolt.App({
+    private _app: bolt.App;
+    private _mcpHost: McpHost;
+    private _tools: Tool[];
+    private _toolCallCache: OrderedFixedSizeMap<string, toolCallParams[]>;
+    constructor(mcpHost: McpHost) {
+        this._app = new bolt.App({
             token: getOrThrow("SLACK_BOT_TOKEN"),
             appToken: getOrThrow("SLACK_APP_TOKEN"),
             signingSecret: getOrThrow("SLACK_SIGNING_SECRET"),
             logLevel: bolt.LogLevel.INFO,
             socketMode: true,
         });
-        this.mcpClient = mcpClient;
-        this.tools = [];
-        this.toolCallCache = new OrderedFixedSizeMap<string, toolCallParams[]>(50);
+        this._mcpHost = mcpHost;
+        this._tools = [];
+        this._toolCallCache = new OrderedFixedSizeMap<string, toolCallParams[]>(50);
     }
 
     async start() {
-        this.tools = this.mcpClient.getTools();
+        this._tools = this._mcpHost.getTools();
         const assistant = new bolt.Assistant({
-            threadStarted: this.threadStarted,
-            userMessage: this.userMessage,
+            threadStarted: this._threadStarted,
+            userMessage: this._userMessage,
         });
 
-        this.app.assistant(assistant);
-        this.app.action("approve_tool_call", this.proceedWithToolCallAction);
-        this.app.action("cancel_tool_call", this.cancelToolCallAction);
-        await this.app.start(process.env.PORT || 3000);
+        this._app.assistant(assistant);
+        this._app.action("approve_tool_call", this._proceedWithToolCallAction);
+        this._app.action("cancel_tool_call", this._cancelToolCallAction);
+        await this._app.start(process.env.PORT || 3000);
     }
 
-    cancelToolCallAction = async ({
+    private _cancelToolCallAction = async ({
         payload,
         body,
         ack,
@@ -63,13 +63,13 @@ export class Bot {
         say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
         ack();
-        const toolCallParams = this.toolCallCache.getAndDelete(payload.value || "");
+        const toolCallParams = this._toolCallCache.getAndDelete(payload.value || "");
         await respond({
             text: "Ok, I'm not going to use that tool. What else can I do for you?",
         });
     };
 
-    proceedWithToolCallAction = async ({
+    private _proceedWithToolCallAction = async ({
         payload,
         body,
         action,
@@ -78,14 +78,14 @@ export class Bot {
         say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
         ack();
-        const toolCallParams = this.toolCallCache.getAndDelete(payload.value || "");
+        const toolCallParams = this._toolCallCache.getAndDelete(payload.value || "");
         if (!toolCallParams) {
             logger.error("Tool call params not found in cache");
             await say({ text: "Sorry something went wrong. Please try again.", thread_ts: body.container.thread_ts });
             return;
         }
         await respond({ text: "Ok, I'm working on it..." });
-        const toolCallResults = await Promise.all(toolCallParams.map(this.processToolCall.bind(this)));
+        const toolCallResults = await Promise.all(toolCallParams.map(this._processToolCall.bind(this)));
         if (!toolCallResults.every((toolCallResult) => toolCallResult.success)) {
             await say({ text: "Sorry something went wrong. Please try again.", thread_ts: body.container.thread_ts });
             return;
@@ -105,7 +105,7 @@ export class Bot {
             role: "user",
             content: toolCallResultsMessages,
         });
-        const interpretation = await llmClient.getResponse(chatCompletionMessages, this.tools);
+        const interpretation = await llmClient.getResponse(chatCompletionMessages, this._tools);
         logger.debug("Tool call interpretation: - " + interpretation?.content);
         await say({
             blocks: [buildMarkdownSection(interpretation?.content || "...")],
@@ -113,17 +113,17 @@ export class Bot {
         });
     };
 
-    threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
+    private _threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
         try {
-            await say(formatWelcomeMessage(this.tools));
+            await say(formatWelcomeMessage(this._tools));
         } catch (e) {
             logger.error(e);
         }
     };
 
-    userMessage: AssistantUserMessageMiddleware = async ({ client, message, say }) => {
+    private _userMessage: AssistantUserMessageMiddleware = async ({ client, message, say }) => {
         try {
-            const { isInThread, message: messageInThread } = Bot.isMessageInThread(message);
+            const { isInThread, message: messageInThread } = Bot._isMessageInThread(message);
             if (!isInThread) {
                 return;
             }
@@ -135,18 +135,18 @@ export class Bot {
                 ts: thread_ts!,
                 limit: 5,
             });
-            const chatCompletionMessages = Bot.toChatCompletionMessages(conversationReplies);
-            chatCompletionMessages.unshift(Bot.getSystemMessage(this.tools));
+            const chatCompletionMessages = Bot._toChatCompletionMessages(conversationReplies);
+            chatCompletionMessages.unshift(Bot._getSystemMessage(this._tools));
 
-            const llmResponse = await llmClient.getResponse(chatCompletionMessages, this.tools);
+            const llmResponse = await llmClient.getResponse(chatCompletionMessages, this._tools);
 
             // Handle tool calls
             if (llmResponse?.tool_calls && llmResponse.tool_calls.length > 0) {
                 const toolRequests = llmResponse.tool_calls.map((toolCall) => {
-                    return Bot.extractToolCallParams(toolCall);
+                    return Bot._extractToolCallParams(toolCall);
                 });
                 const toolRequestHash = stableHash(JSON.stringify(toolRequests));
-                this.toolCallCache.set(toolRequestHash, toolRequests);
+                this._toolCallCache.set(toolRequestHash, toolRequests);
                 let toolRequestMessage = "I want to use: \n";
                 toolRequestMessage += toolRequests
                     .map(
@@ -166,7 +166,7 @@ export class Bot {
         }
     };
 
-    static isMessageInThread(message: bolt.KnownEventFromType<"message">): {
+    private static _isMessageInThread(message: bolt.KnownEventFromType<"message">): {
         isInThread: boolean;
         message: bolt.types.GenericMessageEvent;
     } {
@@ -180,7 +180,7 @@ export class Bot {
         return { isInThread: true, message: message };
     }
 
-    async processToolCall(toolCallParams: toolCallParams): Promise<toolCallResult> {
+    private async _processToolCall(toolCallParams: toolCallParams): Promise<toolCallResult> {
         const toolCallResult: toolCallResult = {
             success: false,
             toolname: toolCallParams.toolname,
@@ -188,7 +188,7 @@ export class Bot {
             toolResult: undefined,
         };
         try {
-            toolCallResult.toolResult = await this.mcpClient.executeTool(
+            toolCallResult.toolResult = await this._mcpHost.executeTool(
                 toolCallResult.toolname,
                 toolCallResult.toolArgs,
             );
@@ -200,7 +200,7 @@ export class Bot {
         return toolCallResult;
     }
 
-    static extractToolCallParams(toolCall: ChatCompletionMessageToolCall): toolCallParams {
+    private static _extractToolCallParams(toolCall: ChatCompletionMessageToolCall): toolCallParams {
         const toolCallParams: toolCallParams = {
             toolname: toolCall.function.name,
             toolArgs: JSON.parse(toolCall.function.arguments),
@@ -208,7 +208,9 @@ export class Bot {
         return toolCallParams;
     }
 
-    static toChatCompletionMessages(conversationReplies: ConversationsRepliesResponse): ChatCompletionMessageParam[] {
+    private static _toChatCompletionMessages(
+        conversationReplies: ConversationsRepliesResponse,
+    ): ChatCompletionMessageParam[] {
         if (!conversationReplies.messages) {
             return [];
         }
@@ -222,7 +224,7 @@ export class Bot {
             });
     }
 
-    static getSystemMessage(tools: Tool[]) {
+    private static _getSystemMessage(tools: Tool[]) {
         const currentDateTime = new Date().toLocaleString();
         const systemMessage: ChatCompletionSystemMessageParam = {
             role: "system",

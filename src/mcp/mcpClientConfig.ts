@@ -3,10 +3,11 @@ import { z } from "zod";
 import logger from "../shared/logger.js";
 import type { mcpConfig } from "./mcp.types.js";
 import { McpConfig } from "./mcp.types.js";
+
 /**
- * Load server configuration from JSON file.
+ * Load client configuration from JSON file.
  * @param filePath - Path to the JSON configuration file.
- * @returns mcpConfig containing server configuration.
+ * @returns mcpConfig containing client configuration.
  * @throws {Error} If configuration file doesn't exist or is invalid JSON.
  * @throws {z.ZodError} If configuration file is invalid.
  */

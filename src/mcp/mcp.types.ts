@@ -25,21 +25,21 @@ export type mcpTools = z.infer<typeof McpTools>;
 
 export const McpToolsArray = z.array(McpTool);
 
-export const SseServerConfig = z.object({
+export const SseClientConfig = z.object({
     url: z.string().url(),
     env: z.record(z.string(), z.string()).optional(),
 });
 
-export const StdioServerConfig = z.object({
+export const StdioClientConfig = z.object({
     command: z.string(),
     args: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
 });
 
-export const McpServerConfig = z.union([StdioServerConfig, SseServerConfig]);
-export type mcpServerConfig = z.infer<typeof McpServerConfig>;
+export const McpClientConfig = z.union([StdioClientConfig, SseClientConfig]);
+export type mcpClientConfig = z.infer<typeof McpClientConfig>;
 
 export const McpConfig = z.object({
-    mcpServers: z.record(z.string(), McpServerConfig),
+    mcpClients: z.record(z.string(), McpClientConfig),
 });
 export type mcpConfig = z.infer<typeof McpConfig>;

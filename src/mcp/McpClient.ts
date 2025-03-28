@@ -1,61 +1,89 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { mcpClientConfig } from "./mcp.types.js";
+import type { mcpTools } from "./mcp.types.js";
+import { McpToolsArray } from "./mcp.types.js";
 import logger from "../shared/logger.js";
-import type { mcpConfig } from "./mcp.types.js";
-import { McpServer } from "./McpServer.js";
-import type { Tool } from "./Tool.js";
+import { Tool } from "./Tool.js";
 
-/**
- * Manages MCP servers connections and tool execution.
- */
 export class McpClient {
-    private servers: Record<string, McpServer> = {};
-    private tools: Record<string, { mcpServer: McpServer; tool: Tool }> = {}; // Indexed by server-toolName
-    constructor(mcpConfig: mcpConfig) {
-        Object.entries(mcpConfig.mcpServers).forEach(([name, config]) => {
-            this.servers[name] = new McpServer(name, config);
-        });
+    private name: string;
+    private config: mcpClientConfig;
+    private transport: SSEClientTransport | StdioClientTransport | null;
+    private client: Client | null;
+    private tools: Record<string, Tool> = {};
+    constructor(name: string, config: mcpClientConfig) {
+        this.name = name;
+        this.config = config;
+        this.transport = null;
+        this.client = null;
     }
 
     async initialize() {
         try {
-            await Promise.all(Object.values(this.servers).map((server) => server.initialize()));
-            Object.entries(this.servers).forEach(([name, server]) => {
-                Object.entries(server.getTools()).forEach(([toolName, tool]) => {
-                    this.tools[name + "-" + toolName] = { mcpServer: server, tool };
+            logger.info("Connecting to MCP server " + this.name + " with config: " + JSON.stringify(this.config));
+            if ("url" in this.config) {
+                this.transport = new SSEClientTransport(new URL(this.config.url));
+            } else if ("command" in this.config) {
+                this.transport = new StdioClientTransport({
+                    command: this.config.command,
+                    args: this.config.args,
                 });
+            }
+            this.client = new Client(
+                {
+                    name: this.name,
+                    version: "1.0.0",
+                },
+                {
+                    capabilities: {
+                        prompts: {},
+                        resources: {},
+                        tools: {},
+                    },
+                },
+            );
+            await this.client.connect(this.transport as Transport);
+            const mcpTools = await this._listTools();
+            Object.entries(mcpTools).forEach(([name, tool]) => {
+                this.tools[name] = new Tool(tool, this.name);
             });
-            logger.info("MCP client initialized, available tools :");
-            Object.entries(this.tools).forEach(([key, value]) => {
-                logger.info(`---> ${key}: ${JSON.stringify(value.tool)}`);
-            });
+            logger.info("Connected to MCP Server " + this.name);
         } catch (error) {
-            logger.error("Error initializing MCP client: " + error);
-            throw error;
+            logger.error("Error connecting to server " + this.name + ": " + error);
         }
     }
 
-    getTools(): Tool[] {
-        return Object.values(this.tools).map((tool) => tool.tool);
-    }
-
-    /**
-     * Execute a tool from a specific server.
-     * @param toolName Name of the tool to execute in format server.toolName
-     * @param toolArgs Tool arguments
-     * @returns Tool execution result
-     * @throws Error if tool not found or execution fails
-     */
-    async executeTool(toolName: string, toolArgs: Record<string, any>): Promise<any> {
-        if (!this.tools[toolName]) {
-            throw new Error(`Tool ${toolName} not found`);
+    private async _listTools(): Promise<mcpTools> {
+        if (!this.client) {
+            throw new Error(`Cannot list tools for ${this.name} because server is not initialized`);
         }
-
-        const tool = this.tools[toolName];
         try {
-            const result = await tool.mcpServer.executeTool(tool.tool.name, toolArgs);
-            return result;
-        } catch (e) {
-            logger.warn(`Error executing tool: ${e}.`);
-            throw e;
+            const clientTools = (await this.client.listTools()).tools;
+            const mcpToolsArray = McpToolsArray.parse(clientTools);
+            const tools = Object.fromEntries(mcpToolsArray.map((tool) => [tool.name, tool]));
+            return tools;
+        } catch (error) {
+            logger.error("Error listing tools for " + this.name + ": " + error);
+            return {};
         }
+    }
+
+    getTools(): Record<string, Tool> {
+        return this.tools;
+    }
+
+    async executeTool(toolName: string, toolArgs: Record<string, any>) {
+        if (!this.client) {
+            throw new Error(`Server ${this.name} not initialized`);
+        }
+
+        const result = await this.client.callTool({
+            name: toolName,
+            arguments: toolArgs,
+        });
+        return result;
     }
 }
