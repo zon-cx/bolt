@@ -1,6 +1,6 @@
 import { OrderedFixedSizeMap } from "../shared/OrderedFixedSizeMap.js";
 
-export type ActionRequest = ToolCallsRequest | MCPClientConnectionRequest;
+export type ActionRequest = ToolCallsRequest | McpClientConnectionRequest;
 
 export type ToolCallsRequest = {
     type: "tool_calls";
@@ -15,10 +15,10 @@ export type ToolCallRequest = {
     success: boolean;
 };
 
-export type MCPClientConnectionRequest = {
+export type McpClientConnectionRequest = {
     type: "mcp_client_connect";
     sessionId: string;
-    clientName: string;
+    serverName: string;
 };
 
 class ActionRequestStore {

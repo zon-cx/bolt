@@ -3,7 +3,6 @@ import type { McpConfig } from "./mcp.types.js";
 import { McpClient } from "./McpClient.js";
 import type { Tool } from "./Tool.js";
 import type { ToolCallRequest } from "../slack/actionRequestStore.js";
-export type McpClients = Record<string, { serverName: string; connected: boolean }>;
 
 export type ToolCallResult = {
     success: boolean;
@@ -17,9 +16,11 @@ export class McpHost {
     private _clients: Record<string, McpClient> = {};
     // Todo : mcpHost might only need to map serverName-toolName to toolName ?
     private _tools: Record<string, { mcpClient: McpClient; tool: Tool }> = {}; // Indexed by serverName-toolName
-    constructor(mcpConfig: McpConfig) {
+    private _sessionId: string;
+    constructor(mcpConfig: McpConfig, sessionId: string) {
+        this._sessionId = sessionId;
         Object.entries(mcpConfig.mcpServers).forEach(([name, config]) => {
-            this._clients[name] = new McpClient(name, config);
+            this._clients[name] = new McpClient(name, config, this._sessionId);
         });
     }
 
@@ -48,14 +49,8 @@ export class McpHost {
         return Object.values(this._tools).map((tool) => tool.tool);
     }
 
-    // TODO clean that
-    get clients(): McpClients {
-        return Object.fromEntries(
-            Object.entries(this._clients).map(([name, client]) => [
-                name,
-                { serverName: name, connected: client.isConnected() },
-            ]),
-        );
+    get clients(): Record<string, McpClient> {
+        return this._clients;
     }
 
     async disconnect(serverName: string) {

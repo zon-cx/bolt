@@ -14,17 +14,12 @@ import { stableHash } from "stable-hash";
 import { sessionStore } from "./sessionStore.js";
 import { Session } from "./Session.js";
 import { actionRequestStore } from "./actionRequestStore.js";
-import type { ToolCallRequest, MCPClientConnectionRequest, ToolCallsRequest } from "./actionRequestStore.js";
+import type { ToolCallRequest, McpClientConnectionRequest, ToolCallsRequest } from "./actionRequestStore.js";
 import { slackClient } from "./slackClient.js";
 
 interface toolCallParams {
     toolName: string;
     toolArgs: Record<string, any>;
-}
-
-interface mcpClientConnectionRequest {
-    sessionId: string;
-    clientName: string;
 }
 
 export class Bot {
@@ -64,25 +59,25 @@ export class Bot {
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
         ack();
         const connectionRequest = actionRequestStore.getAndDelete(payload.value || "") as
-            | mcpClientConnectionRequest
+            | McpClientConnectionRequest
             | undefined;
         if (!connectionRequest) {
             logger.error("No connection request found in cache");
-            await respond({ text: "Sorry something went wrong. Please try again." });
+            await respond({ text: "Sorry something went wrong. Start a new chat and try again." });
             return;
         }
         const session = sessionStore.getSessionById(connectionRequest.sessionId);
         if (!session) {
             logger.error("Session not found for sessionId: " + connectionRequest.sessionId);
-            await respond({ text: "Sorry something went wrong. Please try again." });
+            await respond({ text: "Sorry something went wrong. Start a new chat and try again." });
             return;
         }
         try {
-            await session.mcpHost.connect(connectionRequest.clientName);
-            await respond({ text: "Client " + connectionRequest.clientName + " connected successfully" });
+            await session.mcpHost.connect(connectionRequest.serverName);
+            await respond({ text: "- *" + connectionRequest.serverName + "* - Connected ✅" });
         } catch (e) {
-            logger.error("Error connecting to client: " + connectionRequest.clientName);
-            await respond({ text: "Sorry something went wrong. Please try again." });
+            logger.error("Error connecting to client: " + connectionRequest.serverName);
+            await respond({ text: "Sorry i could not connect to " + connectionRequest.serverName });
         }
     };
 
@@ -106,7 +101,7 @@ export class Bot {
         say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
         ack();
-        const toolCallParams = actionRequestStore.getAndDelete(payload.value || "") as toolCallParams | undefined;
+        const toolCallParams = actionRequestStore.getAndDelete(payload.value || "") as ToolCallRequest | undefined;
         if (!toolCallParams) {
             logger.error("Tool call params not found in cache");
             await respond({ text: "Sorry something went wrong. Please try again." });
@@ -171,6 +166,7 @@ export class Bot {
     };
 
     private _threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
+        // Todo: close the previous session of the current user if it exists. 
         try {
             const session = new Session(
                 event.assistant_thread.user_id,

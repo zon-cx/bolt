@@ -1,7 +1,6 @@
 import { readFileSync } from "fs";
 import { z } from "zod";
 import logger from "../shared/logger.js";
-import type { mcpConfig } from "./mcp.types.js";
 import { McpConfig } from "./mcp.types.js";
 
 /**
@@ -11,7 +10,7 @@ import { McpConfig } from "./mcp.types.js";
  * @throws {Error} If configuration file doesn't exist or is invalid JSON.
  * @throws {z.ZodError} If configuration file is invalid.
  */
-export function loadConfig(filePath: string): mcpConfig {
+export function loadConfig(filePath: string): McpConfig {
     try {
         const fileContent = readFileSync(filePath, "utf-8");
         const config = JSON.parse(fileContent);

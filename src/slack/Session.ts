@@ -3,7 +3,9 @@ import { McpHost } from "../mcp/McpHost.js";
 import logger from "../shared/logger.js";
 import type { ToolCallRequest } from "./actionRequestStore.js";
 import { slackClient } from "./slackClient.js";
-import { buildWelcomeMessages, buildToolMessage } from "./utils.js";
+import { buildClientConnectionMessage, buildWelcomeMessage } from "./utils.js";
+import { actionRequestStore } from "./actionRequestStore.js";
+import type { McpClient } from "../mcp/McpClient.js";
 
 export class Session {
     private _sessionId: string;
@@ -18,7 +20,7 @@ export class Session {
         this._userId = userId;
         this._threadTs = threadTs;
         this._channelId = channelId;
-        this._mcpHost = new McpHost(mcpJsonConfig);
+        this._mcpHost = new McpHost(mcpJsonConfig, this._sessionId);
     }
 
     get mcpHost() {
@@ -47,8 +49,29 @@ export class Session {
 
     async start() {
         await this._mcpHost.initialize();
-        await slackClient.postBlocks(buildWelcomeMessages(this), this._threadTs, this._channelId);
-        await slackClient.postBlocks(buildToolMessage(this), this._threadTs, this._channelId);
-        logger.info("Session started");
+        await this.postConnectedClients();
+        logger.info("Session started: " + this._sessionId);
+    }
+
+    async postConnectedClients() {
+        await slackClient.postBlocks(buildWelcomeMessage(), this._threadTs, this._channelId);
+        for (const [name, client] of Object.entries(this._mcpHost.clients)) {
+            await this.postConnectedClient(client);
+        }
+    }
+
+    async postConnectedClient(client: McpClient) {
+        await slackClient.postBlocks(
+            buildClientConnectionMessage(client.serverName, client.clientId, client.isConnected()),
+            this._threadTs,
+            this._channelId,
+        );
+        if (!client.isConnected()) {
+            actionRequestStore.set(client.clientId, {
+                type: "mcp_client_connect",
+                sessionId: this._sessionId,
+                serverName: client.serverName,
+            });
+        }
     }
 }

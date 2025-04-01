@@ -8,19 +8,23 @@ import logger from "../shared/logger.js";
 import { Tool } from "./Tool.js";
 
 export class McpClient {
-    private _serverName: string;
     private _config: McpClientConfig;
     private _transport: SSEClientTransport | StdioClientTransport | null;
     private _client: Client;
-    private _tools: Record<string, Tool> = {};
     private _connected: boolean = false;
-    constructor(serverName: string, config: McpClientConfig) {
-        this._serverName = serverName;
+    private _sessionId: string;
+
+    public serverName: string;
+    public tools: Record<string, Tool> = {};
+
+    constructor(serverName: string, config: McpClientConfig, sessionId: string) {
+        this.serverName = serverName;
         this._config = config;
+        this._sessionId = sessionId;
         this._transport = null;
         this._client = new Client(
             {
-                name: this._serverName,
+                name: this.serverName,
                 version: "1.0.0",
             },
             {
@@ -34,18 +38,18 @@ export class McpClient {
         this._connected = false;
     }
 
-    get tools(): Record<string, Tool> {
-        return this._tools;
+    get clientId(): string {
+        return this._sessionId + "_" + this.serverName;
     }
 
     async connect() {
         if (this._connected) {
-            logger.warn("MCP client " + this._serverName + " is already connected");
+            logger.warn("MCP client " + this.serverName + " is already connected");
             return;
         }
         try {
             logger.info(
-                "Connecting to MCP server " + this._serverName + " with config: " + JSON.stringify(this._config),
+                "Connecting to MCP server " + this.serverName + " with config: " + JSON.stringify(this._config),
             );
             if ("url" in this._config && this._config.url.endsWith("/sse")) {
                 this._transport = new SSEClientTransport(new URL(this._config.url));
@@ -59,17 +63,17 @@ export class McpClient {
             const mcpTools = await this._listTools();
             this._connected = true;
             Object.entries(mcpTools).forEach(([toolName, tool]) => {
-                this._tools[toolName] = new Tool(tool, this._serverName);
+                this.tools[toolName] = new Tool(tool, this.serverName);
             });
-            logger.info("Connected to MCP Server " + this._serverName);
+            logger.info("Connected to MCP Server " + this.serverName);
         } catch (error) {
-            logger.error("Error connecting to server " + this._serverName + ": " + error);
+            logger.error("Error connecting to server " + this.serverName + ": " + error);
         }
     }
 
     async disconnect() {
         if (!this._client) {
-            throw new Error(`Cannot disconnect from ${this._serverName} because server is not initialized`);
+            throw new Error(`Cannot disconnect from ${this.serverName} because server is not initialized`);
         }
         await this._client.close();
         this._connected = false;
@@ -82,7 +86,7 @@ export class McpClient {
             const tools = Object.fromEntries(mcpToolsArray.map((tool) => [tool.name, tool]));
             return tools;
         } catch (error) {
-            logger.error("Error listing tools for " + this._serverName + ": " + error);
+            logger.error("Error listing tools for " + this.serverName + ": " + error);
             return {};
         }
     }
@@ -100,7 +104,7 @@ export class McpClient {
             return result;
         } catch (error) {
             // TODO: define error types
-            logger.error("Error executing tool " + toolName + " for " + this._serverName + ": " + error);
+            logger.error("Error executing tool " + toolName + " for " + this.serverName + ": " + error);
             throw error;
         }
     }

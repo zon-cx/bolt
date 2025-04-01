@@ -1,56 +1,55 @@
-import type { Tool } from "../mcp/Tool.js";
 import type { Session } from "./Session.js";
+import type { McpClient } from "../mcp/McpClient.js";
+import type { Tool } from "../mcp/Tool.js";
 
-export function buildToolMessage(session: Session) {
+export function buildToolMessage(tools: Tool[]) {
     const toolList = {
         blocks: [
             buildRichTextSection([{ text: "These are the mcp tools available to me:" }]),
             buildDivider(),
             buildTextList(
-                session.mcpHost.tools.map((tool) => ({
+                tools.map((tool) => ({
                     text: tool.serverName + "." + tool.name + " - " + tool.description,
                 })),
             ),
             buildDivider(),
         ],
-        text: "Hello! How can I help you today 🏴‍☠️?",
+        text: "Here are the tools available to me.",
     };
 
     return toolList;
 }
-
-export function buildWelcomeMessages(session: Session) {
-    const blocks = {
+export function buildWelcomeMessage() {
+    return {
         blocks: [
             buildRichTextSection([{ text: "Hello 🏴‍☠️! These are the servers currently configured:" }]),
             buildDivider(),
-            ...Object.entries(session.mcpHost.clients).flatMap(([name, client]) =>
-                buildClientConnectionMessage(name, client, session.sessionId),
-            ),
         ],
+        text: "Here are the servers currently configured.",
     };
-    return blocks;
 }
 
-function buildClientConnectionMessage(
-    name: string,
-    client: { serverName: string; connected: boolean },
-    sessionId: string,
-) {
-    if (!client.connected) {
-        return [
-            buildTextSection(` - *${client.serverName}* - Disconnected  ❌`),
-            buildActionsSection([
-                {
-                    text: "Connect to" + " " + client.serverName,
-                    value: sessionId + "_" + client.serverName,
-                    action_id: "connect_client",
-                    style: "primary",
-                },
-            ]),
-        ];
+export function buildClientConnectionMessage(name: string, clientId: string, connected: boolean) {
+    if (!connected) {
+        return {
+            text: " - *" + name + "* - Disconnected  ❌",
+            blocks: [
+                buildTextSection(` - *${name}* - Disconnected  ❌`),
+                buildActionsSection([
+                    {
+                        text: "Connect to" + " " + name,
+                        value: clientId,
+                        action_id: "connect_client",
+                        style: "primary",
+                    },
+                ]),
+            ],
+        };
     } else {
-        return [buildTextSection(` - *${client.serverName}* - Connected  ✅`)];
+        return {
+            text: " - *" + name + "* - Connected  ✅",
+            blocks: [buildTextSection(` - *${name}* - Connected  ✅`)],
+        };
     }
 }
 
