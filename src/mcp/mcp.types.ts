@@ -4,24 +4,24 @@ export const McpToolProperty = z.object({
     type: z.string(),
     description: z.string().default(""),
 });
-export type mcpToolProperty = z.infer<typeof McpToolProperty>;
+export type McpToolProperty = z.infer<typeof McpToolProperty>;
 
 export const McpToolSchema = z.object({
     type: z.string(),
     properties: z.record(z.string(), McpToolProperty),
     required: z.array(z.string()).default([]),
 });
-export type mcpToolSchema = z.infer<typeof McpToolSchema>;
+export type McpToolSchema = z.infer<typeof McpToolSchema>;
 
 export const McpTool = z.object({
     name: z.string(),
     description: z.string(),
     inputSchema: McpToolSchema,
 });
-export type mcpTool = z.infer<typeof McpTool>;
+export type McpTool = z.infer<typeof McpTool>;
 
 export const McpTools = z.record(z.string(), McpTool);
-export type mcpTools = z.infer<typeof McpTools>;
+export type McpTools = z.infer<typeof McpTools>;
 
 export const McpToolsArray = z.array(McpTool);
 
@@ -37,9 +37,9 @@ export const StdioClientConfig = z.object({
 });
 
 export const McpClientConfig = z.union([StdioClientConfig, SseClientConfig]);
-export type mcpClientConfig = z.infer<typeof McpClientConfig>;
+export type McpClientConfig = z.infer<typeof McpClientConfig>;
 
 export const McpConfig = z.object({
-    mcpClients: z.record(z.string(), McpClientConfig),
+    mcpServers: z.record(z.string(), McpClientConfig),
 });
-export type mcpConfig = z.infer<typeof McpConfig>;
+export type McpConfig = z.infer<typeof McpConfig>;

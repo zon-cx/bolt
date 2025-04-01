@@ -32,3 +32,5 @@ export function loadConfig(filePath: string): mcpConfig {
         throw error;
     }
 }
+
+export const mcpJsonConfig = loadConfig("mcp.json");
