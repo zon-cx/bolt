@@ -68,6 +68,7 @@ export class McpClient {
             logger.info("Connected to MCP Server " + this.serverName);
         } catch (error) {
             logger.error("Error connecting to server " + this.serverName + ": " + error);
+            throw error;
         }
     }
 

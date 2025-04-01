@@ -76,8 +76,8 @@ export class Bot {
             await session.mcpHost.connect(connectionRequest.serverName);
             await respond({ text: "- *" + connectionRequest.serverName + "* - Connected ✅" });
         } catch (e) {
-            logger.error("Error connecting to client: " + connectionRequest.serverName);
-            await respond({ text: "Sorry i could not connect to " + connectionRequest.serverName });
+            logger.error("Error connecting to server: " + connectionRequest.serverName);
+            await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
         }
     };
 
@@ -166,7 +166,7 @@ export class Bot {
     };
 
     private _threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
-        // Todo: close the previous session of the current user if it exists. 
+        // Todo: close the previous session of the current user if it exists.
         try {
             const session = new Session(
                 event.assistant_thread.user_id,
@@ -180,7 +180,7 @@ export class Bot {
             // );
         } catch (e) {
             logger.error(e);
-            say("I'm sorry, something went wrong. Please try again in a little while.");
+            say("I'm sorry, something went wrong. Please try starting a new conversation.");
         }
     };
 

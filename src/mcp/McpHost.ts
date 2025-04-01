@@ -25,23 +25,29 @@ export class McpHost {
     }
 
     async initialize() {
-        try {
-            await Promise.all(Object.values(this._clients).map((client) => client.connect()));
-            Object.entries(this._clients).forEach(([name, client]) => {
-                if (client.isConnected()) {
-                    Object.entries(client.tools).forEach(([toolName, tool]) => {
-                        this._tools[name + "-" + toolName] = { mcpClient: client, tool };
-                    });
+        // Connect to all clients independently, allowing failures
+        await Promise.allSettled(
+            Object.values(this._clients).map(async (client) => {
+                try {
+                    await client.connect();
+                } catch (error) {
+                    logger.warn("Error connecting to server " + client.serverName + ": " + error);
                 }
-            });
-            logger.info("MCP Host initialized, available tools :");
-            Object.entries(this._tools).forEach(([key, value]) => {
-                logger.info(`---> ${key}: ${JSON.stringify(value.tool)}`);
-            });
-        } catch (error) {
-            logger.error("Error initializing MCP client: " + error);
-            throw error;
-        }
+            }),
+        );
+
+        // Process tools from all connected clients
+        Object.entries(this._clients).forEach(([name, client]) => {
+            if (client.isConnected()) {
+                Object.entries(client.tools).forEach(([toolName, tool]) => {
+                    this._tools[name + "-" + toolName] = { mcpClient: client, tool };
+                });
+            }
+        });
+        logger.info("MCP Host initialized, available tools :");
+        Object.entries(this._tools).forEach(([key, value]) => {
+            logger.info(`---> ${key}: ${JSON.stringify(value.tool)}`);
+        });
     }
 
     // TODO clean that
@@ -64,13 +70,9 @@ export class McpHost {
     async connect(serverName: string) {
         if (!this._clients[serverName]) {
             logger.warn(`Server ${serverName} not found`);
-            return;
+            throw new Error(`Server ${serverName} not found`);
         }
-        try {
-            await this._clients[serverName].connect();
-        } catch (error) {
-            logger.error(`Error connecting to server ${serverName}: ${error}`);
-        }
+        await this._clients[serverName].connect();
     }
 
     /**
