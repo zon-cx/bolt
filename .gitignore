@@ -1,4 +1,5 @@
 node_modules
 build/*
 .env
-mcp.json
+!mcp-example.json
+mcp*.json

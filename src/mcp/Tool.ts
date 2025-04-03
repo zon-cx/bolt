@@ -1,12 +1,13 @@
-import type { mcpTool, mcpToolSchema } from "./mcp.types.js";
+import type { McpTool, McpToolSchema } from "./mcp.types.js";
 import type { OpenAiTool } from "../llm/llm.types.js";
+
 export class Tool {
     public serverName: string;
     public name: string;
     public description: string;
-    public inputSchema: mcpToolSchema;
+    public inputSchema: McpToolSchema;
 
-    constructor(mcpTool: mcpTool, serverName: string) {
+    constructor(mcpTool: McpTool, serverName: string) {
         this.name = mcpTool.name;
         this.description = mcpTool.description;
         this.inputSchema = mcpTool.inputSchema;

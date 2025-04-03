@@ -1,61 +1,177 @@
 import logger from "../shared/logger.js";
-import type { mcpConfig } from "./mcp.types.js";
-import { McpServer } from "./McpServer.js";
-import type { Tool } from "./Tool.js";
 
-/**
- * Manages MCP servers connections and tool execution.
- */
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport, SseError } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
+
+import type { McpClientConfig, McpTools } from "./mcp.types.js";
+import { McpToolsArray } from "./mcp.types.js";
+import { Tool } from "./Tool.js";
+import { SlackOAuthClientProvider } from "./SlackOauthClientProvider.js";
+import { McpSession } from "../slack/McpSession.js";
+import { mcpSessionStore } from "../slack/mcpSessionStore.js";
+
+import type { UserSession, McpServerAuth } from "../shared/userSessionStore.js";
+import { userSessionStore } from "../shared/userSessionStore.js";
+
 export class McpClient {
-    private servers: Record<string, McpServer> = {};
-    private tools: Record<string, { mcpServer: McpServer; tool: Tool }> = {}; // Indexed by server-toolName
-    constructor(mcpConfig: mcpConfig) {
-        Object.entries(mcpConfig.mcpServers).forEach(([name, config]) => {
-            this.servers[name] = new McpServer(name, config);
-        });
+    private _config: McpClientConfig;
+    private _transport: SSEClientTransport | StdioClientTransport | null;
+    private _client: Client;
+    private _connected: boolean = false;
+    private _sessionId: string;
+    private _userId: string;
+    private _serverUrl: string;
+    public connectMessageId: { messageTs: string; channelId: string } | null = null;
+    public serverName: string;
+    public tools: Record<string, Tool> = {};
+
+    constructor(serverName: string, config: McpClientConfig, sessionId: string, userId: string) {
+        this.serverName = serverName;
+        this._config = config;
+        this._sessionId = sessionId;
+        this._userId = userId;
+        this._serverUrl = (config as { url: string }).url;
+        this._transport = null;
+        this._client = new Client(
+            {
+                name: this.serverName,
+                version: "1.0.0",
+            },
+            {
+                capabilities: {
+                    prompts: {},
+                    resources: {},
+                    tools: {},
+                },
+            },
+        );
+        this._connected = false;
     }
 
-    async initialize() {
+    get clientId(): string {
+        return this._sessionId + "_" + this.serverName;
+    }
+
+    get mcpSession(): McpSession | undefined {
+        return mcpSessionStore.getById(this._sessionId);
+    }
+
+    get userSession(): UserSession | undefined {
+        return userSessionStore.get(this._userId);
+    }
+
+    get mcpServerAuth(): McpServerAuth | undefined {
+        const userSession = this.userSession;
+        if (!userSession) {
+            return undefined;
+        }
+        return userSession.mcpServerAuths[this.serverName];
+    }
+
+    async connect() {
+        if (this._connected) {
+            logger.warn("MCP client " + this.serverName + " is already connected");
+            return;
+        }
         try {
-            await Promise.all(Object.values(this.servers).map((server) => server.initialize()));
-            Object.entries(this.servers).forEach(([name, server]) => {
-                Object.entries(server.getTools()).forEach(([toolName, tool]) => {
-                    this.tools[name + "-" + toolName] = { mcpServer: server, tool };
+            logger.info(
+                "Connecting to MCP server " + this.serverName + " with config: " + JSON.stringify(this._config),
+            );
+            if ("url" in this._config && this._config.url.endsWith("/sse")) {
+                this._transport = new SSEClientTransport(new URL(this._config.url));
+            } else if ("command" in this._config) {
+                this._transport = new StdioClientTransport({
+                    command: this._config.command,
+                    args: this._config.args,
                 });
+            }
+            await this._client.connect(this._transport as Transport);
+            const mcpTools = await this._listTools(); // Todo move this to a separate flow
+            this._connected = true;
+            Object.entries(mcpTools).forEach(([toolName, tool]) => {
+                this.tools[toolName] = new Tool(tool, this.serverName);
             });
-            logger.info("MCP client initialized, available tools :");
-            Object.entries(this.tools).forEach(([key, value]) => {
-                logger.info(`---> ${key}: ${JSON.stringify(value.tool)}`);
-            });
+            logger.info("Connected to MCP Server " + this.serverName);
         } catch (error) {
-            logger.error("Error initializing MCP client: " + error);
+            const retry = await this.handleAuthError(error);
+            if (retry) {
+                //TODO this needs to be handled better
+                await this.connect();
+            }
+            if (error instanceof SseError && error.code === 401) {
+                return;
+            }
             throw error;
         }
     }
 
-    getTools(): Tool[] {
-        return Object.values(this.tools).map((tool) => tool.tool);
+    async handleAuthError(error: unknown) {
+        //if (error instanceof SseError && error.code === 401) {
+        if (error instanceof SseError && error.code === 403) {
+            const userSession = this.userSession;
+            if (!userSession) {
+                logger.error("No user session found for user " + this._userId);
+                return false;
+            }
+            if (this.mcpServerAuth) {
+                logger.debug(
+                    "Mcp server auth found in user session " + this._userId + " for server " + this.serverName,
+                );
+                // TODO: handle that
+                return false;
+            }
+            logger.debug("Creating new auth for server " + this._serverUrl);
+            // TODO delete that at the end of the auth process ?
+            userSession.mcpServerAuths[this._serverUrl] = {
+                serverUrl: this._serverUrl,
+                serverName: this.serverName,
+            };
+            userSessionStore.update(this._userId, userSession);
+            const authProvider = new SlackOAuthClientProvider(this._userId, this._serverUrl);
+            const result = await auth(authProvider, { serverUrl: this._serverUrl });
+            return result === "AUTHORIZED";
+        }
+        return false;
     }
 
-    /**
-     * Execute a tool from a specific server.
-     * @param toolName Name of the tool to execute in format server.toolName
-     * @param toolArgs Tool arguments
-     * @returns Tool execution result
-     * @throws Error if tool not found or execution fails
-     */
-    async executeTool(toolName: string, toolArgs: Record<string, any>): Promise<any> {
-        if (!this.tools[toolName]) {
-            throw new Error(`Tool ${toolName} not found`);
+    async disconnect() {
+        if (!this._client) {
+            throw new Error(`Cannot disconnect from ${this.serverName} because server is not initialized`);
         }
+        await this._client.close();
+        this._connected = false;
+    }
 
-        const tool = this.tools[toolName];
+    private async _listTools(): Promise<McpTools> {
         try {
-            const result = await tool.mcpServer.executeTool(tool.tool.name, toolArgs);
+            const clientTools = (await this._client.listTools()).tools;
+            const mcpToolsArray = McpToolsArray.parse(clientTools);
+            const tools = Object.fromEntries(mcpToolsArray.map((tool) => [tool.name, tool]));
+            return tools;
+        } catch (error) {
+            logger.error("Error listing tools for " + this.serverName + ": " + error);
+            return {};
+        }
+    }
+
+    isConnected(): boolean {
+        return this._connected;
+    }
+
+    async executeTool(toolName: string, toolArgs: Record<string, any>): Promise<any> {
+        try {
+            const result = await this._client.callTool({
+                name: toolName,
+                arguments: toolArgs,
+            });
             return result;
-        } catch (e) {
-            logger.warn(`Error executing tool: ${e}.`);
-            throw e;
+        } catch (error) {
+            // TODO: define error types
+            logger.error("Error executing tool " + toolName + " for " + this.serverName + ": " + error);
+            throw error;
         }
     }
 }

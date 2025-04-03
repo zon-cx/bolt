@@ -1,12 +1,7 @@
 import Bot from "./slack/Bot.js";
-import { McpClient } from "./mcp/McpClient.js";
 import logger from "./shared/logger.js";
-import { loadConfig } from "./mcp/mcpServerConfig.js";
 
-const mcpConfig = loadConfig("mcp.json");
-const mcpClient = new McpClient(mcpConfig);
-await mcpClient.initialize();
-const bot = new Bot(mcpClient);
+const bot = new Bot();
 
 (async () => {
     try {

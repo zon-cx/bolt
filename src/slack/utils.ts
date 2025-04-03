@@ -1,21 +1,54 @@
-import { type } from "os";
 import type { Tool } from "../mcp/Tool.js";
 
-export function formatWelcomeMessage(tools: Tool[]) {
+export function buildToolMessage(tools: Tool[]) {
     const toolList = {
         blocks: [
-            buildTextSection([{ text: "Hello! How can I help you today 🏴‍☠️?" }]),
-            buildTextSection([{ text: "These are the mcp tools available to me:" }]),
+            buildRichTextSection([{ text: "These are the mcp tools available to me:" }]),
             buildDivider(),
             buildTextList(
-                tools.map((tool) => ({ text: tool.serverName + "." + tool.name + " - " + tool.description })),
+                tools.map((tool) => ({
+                    text: tool.serverName + "." + tool.name + " - " + tool.description,
+                })),
             ),
             buildDivider(),
         ],
-        text: "Hello! How can I help you today 🏴‍☠️?",
+        text: "Here are the tools available to me.",
     };
 
     return toolList;
+}
+export function buildWelcomeMessage() {
+    return {
+        blocks: [
+            buildRichTextSection([{ text: "Hello 🏴‍☠️! These are the servers currently configured:" }]),
+            buildDivider(),
+        ],
+        text: "Here are the servers currently configured.",
+    };
+}
+
+export function buildClientConnectionMessage(name: string, clientId: string, connected: boolean) {
+    if (!connected) {
+        return {
+            text: " - *" + name + "* - Disconnected  ❌",
+            blocks: [
+                buildTextSection(` - *${name}* - Disconnected  ❌`),
+                buildActionsSection([
+                    {
+                        text: "Connect to" + " " + name,
+                        value: clientId,
+                        action_id: "connect_client",
+                        style: "primary",
+                    },
+                ]),
+            ],
+        };
+    } else {
+        return {
+            text: " - *" + name + "* - Connected  ✅",
+            blocks: [buildTextSection(` - *${name}* - Connected  ✅`)],
+        };
+    }
 }
 
 function buildDivider() {
@@ -24,11 +57,34 @@ function buildDivider() {
     };
 }
 
+export function buildAuthorizeMessage(name: string, url: string, text: string = "Connect") {
+    return {
+        blocks: [
+            buildTextSection(` - *${name}* - Requires authorization ⚠️`),
+            {
+                type: "actions",
+                elements: [
+                    {
+                        type: "button",
+                        text: {
+                            type: "plain_text",
+                            text: text,
+                        },
+                        url: url,
+                        action_id: "redirect",
+                        value: url,
+                    },
+                ],
+            },
+        ],
+    };
+}
+
 export function buildApprovalButtons(message: string, value: string) {
     return {
         text: message,
         blocks: [
-            buildTextSection([{ text: message }]),
+            buildRichTextSection([{ text: message }]),
             {
                 type: "actions",
                 elements: [
@@ -67,7 +123,34 @@ export function buildMarkdownSection(text: string) {
     };
 }
 
-export function buildTextSection(
+function buildTextSection(markdownText: string) {
+    return {
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: markdownText,
+        },
+    };
+}
+
+function buildActionsSection(actions: { text: string; value: string; action_id: string; style: string }[]) {
+    return {
+        type: "actions",
+        elements: actions.map((action) => ({
+            type: "button",
+            text: {
+                type: "plain_text",
+                text: action.text,
+                emoji: true,
+            },
+            value: action.value,
+            action_id: action.action_id,
+            style: action.style,
+        })),
+    };
+}
+
+export function buildRichTextSection(
     texts: {
         text: string;
         style?: { bold?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean };
