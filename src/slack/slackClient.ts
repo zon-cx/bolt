@@ -14,6 +14,7 @@ class SlackClient {
             thread_ts: threadTs,
             channel: channelId,
         });
+        return result;
     }
 
     async postBlocks(blocks: any, threadTs: string, channelId: string) {
@@ -22,6 +23,7 @@ class SlackClient {
             thread_ts: threadTs,
             channel: channelId,
         });
+        return result;
     }
 
     async postButton(button: any, threadTs: string, channelId: string) {
@@ -31,6 +33,16 @@ class SlackClient {
             channel: channelId,
             blocks: button.blocks,
         });
+        return result;
+    }
+
+    async updateMessage(blocks: any, threadTs: string, channelId: string) {
+        const result = await this._webClient.chat.update({
+            blocks: blocks,
+            ts: threadTs,
+            channel: channelId,
+        });
+        return result;
     }
 }
 

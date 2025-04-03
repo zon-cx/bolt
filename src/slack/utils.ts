@@ -1,5 +1,3 @@
-import type { Session } from "./Session.js";
-import type { McpClient } from "../mcp/McpClient.js";
 import type { Tool } from "../mcp/Tool.js";
 
 export function buildToolMessage(tools: Tool[]) {
@@ -59,9 +57,10 @@ function buildDivider() {
     };
 }
 
-export function buildRedirectButton(url: string) {
+export function buildAuthorizeMessage(name: string, url: string, text: string = "Connect") {
     return {
         blocks: [
+            buildTextSection(` - *${name}* - Requires authorization ⚠️`),
             {
                 type: "actions",
                 elements: [
@@ -69,7 +68,7 @@ export function buildRedirectButton(url: string) {
                         type: "button",
                         text: {
                             type: "plain_text",
-                            text: "Connect",
+                            text: text,
                         },
                         url: url,
                         action_id: "redirect",

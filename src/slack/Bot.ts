@@ -11,16 +11,12 @@ import type {
 import logger from "../shared/logger.js";
 import { buildApprovalButtons, buildMarkdownSection } from "./utils.js";
 import { stableHash } from "stable-hash";
-import { sessionStore } from "./sessionStore.js";
-import { Session } from "./Session.js";
+import { mcpSessionStore } from "./mcpSessionStore.js";
+import { McpSession } from "./McpSession.js";
 import { actionRequestStore } from "./actionRequestStore.js";
 import type { ToolCallRequest, McpClientConnectionRequest, ToolCallsRequest } from "./actionRequestStore.js";
 import { slackClient } from "./slackClient.js";
-
-interface toolCallParams {
-    toolName: string;
-    toolArgs: Record<string, any>;
-}
+import { userSessionStore } from "../shared/userSessionStore.js";
 
 export class Bot {
     private _app: bolt.App;
@@ -57,27 +53,37 @@ export class Bot {
         respond,
         say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
-        ack();
         const connectionRequest = actionRequestStore.getAndDelete(payload.value || "") as
             | McpClientConnectionRequest
             | undefined;
         if (!connectionRequest) {
             logger.error("No connection request found in cache");
+            ack();
             await respond({ text: "Sorry something went wrong. Start a new chat and try again." });
             return;
         }
-        const session = sessionStore.getSessionById(connectionRequest.sessionId);
-        if (!session) {
-            logger.error("Session not found for sessionId: " + connectionRequest.sessionId);
+        const mcpSession = mcpSessionStore.getById(connectionRequest.mcpSessionId);
+        if (!mcpSession) {
+            logger.error("mcpSession not found for mcpSessionId: " + connectionRequest.mcpSessionId);
+            ack();
             await respond({ text: "Sorry something went wrong. Start a new chat and try again." });
             return;
         }
         try {
-            await session.mcpHost.connect(connectionRequest.serverName);
+            const client = mcpSession.mcpHost.clients[connectionRequest.serverName];
+            if (!client) {
+                logger.error("client not found for serverName: " + connectionRequest.serverName);
+                ack();
+                await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
+                return;
+            }
+            await client.connect();
+            ack();
             await respond({ text: "- *" + connectionRequest.serverName + "* - Connected ✅" });
         } catch (e) {
             logger.error("Error connecting to server: " + connectionRequest.serverName);
-            await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
+            ack();
+            // await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
         }
     };
 
@@ -122,9 +128,9 @@ export class Bot {
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
         ack();
         const toolCallsRequest = actionRequestStore.getAndDelete(payload.value || "") as ToolCallsRequest | undefined;
-        const session = sessionStore.getSessionById(toolCallsRequest?.sessionId || "");
-        if (!toolCallsRequest || !session) {
-            logger.error("Tool call request or session not found in cache");
+        const mcpSession = mcpSessionStore.getById(toolCallsRequest?.mcpSessionId || "");
+        if (!toolCallsRequest || !mcpSession) {
+            logger.error("Tool call request or mcpSession not found in cache");
             await respond({ text: "Sorry something went wrong. Please try again." });
             return;
         }
@@ -133,14 +139,13 @@ export class Bot {
 
         await Promise.all(
             toolCallsRequest.toolRequests.map((toolCallRequest) =>
-                this._processToolCallRequest(toolCallRequest, session),
+                this._processToolCallRequest(toolCallRequest, mcpSession),
             ),
         );
         if (!toolCallsRequest.toolRequests.every((toolCallRequest) => toolCallRequest.success)) {
             await respond({ text: "Sorry something went wrong. Please try again." });
             return;
         }
-        console.dir(toolCallsRequest, { depth: null });
         const chatCompletionMessages: ChatCompletionMessageParam[] = [];
         chatCompletionMessages.push({
             role: "system",
@@ -157,27 +162,43 @@ export class Bot {
             content: toolCallResultsMessages,
         });
         const interpretation = await llmClient.getResponse(chatCompletionMessages, this._tools);
-        logger.debug("Tool call interpretation: - " + interpretation?.content);
+        logger.debug(
+            "Tool call interpretated for tools : " +
+                toolCallsRequest.toolRequests.map((toolCallRequest) => toolCallRequest.toolName).join(", ") +
+                " - " +
+                interpretation?.content,
+        );
         await slackClient.postBlocks(
             { blocks: [buildMarkdownSection(interpretation?.content || "...")] },
-            session.threadTs,
-            session.channelId,
+            mcpSession.threadTs,
+            mcpSession.channelId,
         );
     };
 
     private _threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
         // Todo: close the previous session of the current user if it exists.
         try {
-            const session = new Session(
+            const userSession = userSessionStore.get(event.assistant_thread.user_id);
+            if (userSession) {
+                if (userSession.mcpSessionId) {
+                    // Todo: check that this behaves as expected
+                    mcpSessionStore.delete(userSession.mcpSessionId);
+                }
+            } else {
+                userSessionStore.new(event.assistant_thread.user_id, {
+                    userId: event.assistant_thread.user_id,
+                    mcpSessionId: event.assistant_thread.user_id + "-" + event.assistant_thread.thread_ts, // todo handle this better
+                    mcpServerAuths: {},
+                });
+            }
+
+            const session = new McpSession(
                 event.assistant_thread.user_id,
                 event.assistant_thread.thread_ts,
                 event.assistant_thread.channel_id,
             );
-            sessionStore.setSession(session);
+            mcpSessionStore.new(session);
             session.start();
-            // slackClient.postButton(
-            //     buildRedirectButton("https://slack.com/app_redirect?app=A08K6THK59N&team=T07B32X7TGV"),
-            // );
         } catch (e) {
             logger.error(e);
             say("I'm sorry, something went wrong. Please try starting a new conversation.");
@@ -191,9 +212,9 @@ export class Bot {
                 say("I'm sorry, I can only help in a thread!");
                 return;
             }
-            const session = sessionStore.getSession(messageInThread.user, messageInThread.thread_ts!);
-            if (!session) {
-                logger.error("Session not found for thread: " + messageInThread.thread_ts);
+            const mcpSession = mcpSessionStore.get(messageInThread.user, messageInThread.thread_ts!);
+            if (!mcpSession) {
+                logger.error("mcpSession not found for thread: " + messageInThread.thread_ts);
                 say("I'm sorry, something went wrong. Please try again in a little while.");
                 return;
             }
@@ -209,7 +230,7 @@ export class Bot {
             const chatCompletionMessages = Bot._toChatCompletionMessages(conversationReplies);
             chatCompletionMessages.unshift(Bot._getSystemMessage(this._tools));
 
-            const llmResponse = await llmClient.getResponse(chatCompletionMessages, session.mcpHost.tools);
+            const llmResponse = await llmClient.getResponse(chatCompletionMessages, mcpSession.mcpHost.tools);
 
             // Handle tool calls
             if (llmResponse?.tool_calls && llmResponse.tool_calls.length > 0) {
@@ -222,7 +243,7 @@ export class Bot {
                 });
                 const toolCallRequests: ToolCallsRequest = {
                     type: "tool_calls",
-                    sessionId: session.sessionId,
+                    mcpSessionId: mcpSession.mcpSessionId,
                     toolRequests: toolRequests,
                 };
                 const toolRequestHash = stableHash(JSON.stringify(toolRequests));
@@ -237,14 +258,14 @@ export class Bot {
                 toolRequestMessage += ".";
                 await slackClient.postBlocks(
                     buildApprovalButtons(toolRequestMessage, toolRequestHash),
-                    session.threadTs,
-                    session.channelId,
+                    mcpSession.threadTs,
+                    mcpSession.channelId,
                 );
             } else {
                 await slackClient.postBlocks(
                     { blocks: [buildMarkdownSection(llmResponse?.content || "...")] },
-                    session.threadTs,
-                    session.channelId,
+                    mcpSession.threadTs,
+                    mcpSession.channelId,
                 );
             }
         } catch (e) {
@@ -267,9 +288,9 @@ export class Bot {
         return { isInThread: true, message: message };
     }
 
-    private async _processToolCallRequest(toolCallRequest: ToolCallRequest, session: Session): Promise<void> {
+    private async _processToolCallRequest(toolCallRequest: ToolCallRequest, mcpSession: McpSession): Promise<void> {
         try {
-            await session.mcpHost.processToolCallRequest(toolCallRequest);
+            await mcpSession.processToolCallRequest(toolCallRequest);
             toolCallRequest.success = true;
         } catch (e) {
             logger.error("Error executing tool call: " + toolCallRequest.toolName + " - " + e);

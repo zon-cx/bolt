@@ -4,7 +4,7 @@ export type ActionRequest = ToolCallsRequest | McpClientConnectionRequest;
 
 export type ToolCallsRequest = {
     type: "tool_calls";
-    sessionId: string;
+    mcpSessionId: string;
     toolRequests: ToolCallRequest[];
 };
 
@@ -17,7 +17,7 @@ export type ToolCallRequest = {
 
 export type McpClientConnectionRequest = {
     type: "mcp_client_connect";
-    sessionId: string;
+    mcpSessionId: string;
     serverName: string;
 };
 

@@ -17,36 +17,12 @@ export class McpHost {
     // Todo : mcpHost might only need to map serverName-toolName to toolName ?
     private _tools: Record<string, { mcpClient: McpClient; tool: Tool }> = {}; // Indexed by serverName-toolName
     private _sessionId: string;
-    constructor(mcpConfig: McpConfig, sessionId: string) {
+    private _userId: string;
+    constructor(mcpConfig: McpConfig, sessionId: string, userId: string) {
         this._sessionId = sessionId;
+        this._userId = userId;
         Object.entries(mcpConfig.mcpServers).forEach(([name, config]) => {
-            this._clients[name] = new McpClient(name, config, this._sessionId);
-        });
-    }
-
-    async initialize() {
-        // Connect to all clients independently, allowing failures
-        await Promise.allSettled(
-            Object.values(this._clients).map(async (client) => {
-                try {
-                    await client.connect();
-                } catch (error) {
-                    logger.warn("Error connecting to server " + client.serverName + ": " + error);
-                }
-            }),
-        );
-
-        // Process tools from all connected clients
-        Object.entries(this._clients).forEach(([name, client]) => {
-            if (client.isConnected()) {
-                Object.entries(client.tools).forEach(([toolName, tool]) => {
-                    this._tools[name + "-" + toolName] = { mcpClient: client, tool };
-                });
-            }
-        });
-        logger.info("MCP Host initialized, available tools :");
-        Object.entries(this._tools).forEach(([key, value]) => {
-            logger.info(`---> ${key}: ${JSON.stringify(value.tool)}`);
+            this._clients[name] = new McpClient(name, config, this._sessionId, this._userId);
         });
     }
 
