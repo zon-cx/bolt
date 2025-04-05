@@ -58,7 +58,6 @@ export class HttpClientTransport implements Transport {
     };
 
     public close = async (): Promise<void> => {
-        console.log("-- HttpClientTransport close -- ");
         this._abortController?.abort();
         this.onclose?.();
     };
@@ -99,17 +98,13 @@ export class HttpClientTransport implements Transport {
             const response = await fetch(this._url, init);
             logger.debug("HttpClientTransport senT response: " + response.status);
             if (!response.ok) {
-                console.log("response status: " + response.status, this._authProvider);
                 if (response.status === 401 && this._authProvider) {
-                    console.log("HttpClientTransport send response: 401");
                     const result = await auth(this._authProvider, {
                         serverUrl: this._url,
                     });
-                    console.log("HttpClientTransport send response: 401 result: " + result);
                     if (result !== "AUTHORIZED") {
                         throw new UnauthorizedError();
                     }
-                    console.log("sending message", message);
                     return this.send(message);
                 }
 

@@ -45,14 +45,6 @@ export class McpHost {
         await this._clients[serverName].disconnect();
     }
 
-    async connect(serverName: string) {
-        if (!this._clients[serverName]) {
-            logger.warn(`Server ${serverName} not found`);
-            throw new Error(`Server ${serverName} not found`);
-        }
-        await this._clients[serverName].connect();
-    }
-
     /**
      * Execute a tool from a specific client.
      * @param toolName Name of the tool to execute in format client.toolName

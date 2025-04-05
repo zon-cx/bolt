@@ -2,7 +2,7 @@ import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.
 import type { OAuthClientInformation, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { OAuthClientInformationSchema, OAuthTokensSchema } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { slackClient } from "../slack/slackClient.js";
-import { buildAuthorizeMessage } from "../slack/utils.js";
+import messageBuilder from "../slack/messageBuilder.js";
 import { userStore } from "../shared/userStore.js";
 import logger from "../shared/logger.js";
 
@@ -77,7 +77,6 @@ export class SlackOAuthClientProvider implements OAuthClientProvider {
     }
 
     redirectToAuthorization(authorizationUrl: URL) {
-        logger.debug("Posting redirect to authorization for user " + this._userId, authorizationUrl);
         const user = userStore.get(this._userId);
         if (!user) {
             logger.error("No user found for user " + this._userId);
@@ -90,14 +89,14 @@ export class SlackOAuthClientProvider implements OAuthClientProvider {
         }
         try {
             slackClient.updateMessage(
-                buildAuthorizeMessage(
+                messageBuilder.buildAuthorizeMessage(
                     user.mcpServerAuths[this._serverUrl]!.serverName,
                     authorizationUrl.href,
+                    this._serverUrl,
                     "Authorize",
                 ).blocks,
-                mcpSession.mcpHost.clients[user.mcpServerAuths[this._serverUrl]!.serverName]!.connectMessageId!
-                    .messageTs,
-                mcpSession.channelId,
+                mcpSession.connectMessageIds[this._serverUrl]!.messageTs,
+                mcpSession.connectMessageIds[this._serverUrl]!.channelId,
             );
         } catch (error) {
             logger.error("Error updating message: " + error);

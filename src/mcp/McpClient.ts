@@ -99,8 +99,8 @@ export class McpClient {
 
     async connect() {
         if (this._connected) {
-            logger.warn("MCP client " + this.serverName + " is already connected");
-            return "CONNECTED";
+            logger.warn("MCP client " + this.serverName + " is already connected.");
+            return;
         }
         try {
             logger.debug(
@@ -128,18 +128,10 @@ export class McpClient {
                 this.tools[toolName] = new Tool(tool, this.serverName);
             });
             logger.info("Connected to MCP Server " + this.serverName);
-            return "CONNECTED";
+            return true;
         } catch (error) {
             if (error instanceof UnauthorizedError) {
-                const authResult = await auth(this._authProvider!, { serverUrl: this._serverUrl });
-                logger.debug("Auth Result auth: " + authResult);
-                if (authResult === "AUTHORIZED") {
-                    logger.debug("Retrying connection since we are authorized");
-                    //TODO this needs to be handled better
-                    await this.connect();
-                    return "CONNECTED";
-                }
-                return authResult;
+                return false;
             }
             throw error;
         }
