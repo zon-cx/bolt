@@ -11,13 +11,12 @@ import type {
 import logger from "../shared/logger.js";
 import { buildApprovalButtons, buildMarkdownSection } from "./utils.js";
 import { stableHash } from "stable-hash";
-import { mcpSessionStore } from "./mcpSessionStore.js";
 import { McpSession } from "./McpSession.js";
 import { actionRequestStore } from "./actionRequestStore.js";
 import type { ToolCallRequest, McpClientConnectionRequest, ToolCallsRequest } from "./actionRequestStore.js";
 import { slackClient } from "./slackClient.js";
-import { userSessionStore } from "../shared/userSessionStore.js";
-
+import { userStore } from "../shared/userStore.js";
+import { User } from "../shared/User.js";
 export class Bot {
     private _app: bolt.App;
     private _tools: Tool[];
@@ -53,7 +52,12 @@ export class Bot {
         respond,
         say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
-        const connectionRequest = actionRequestStore.getAndDelete(payload.value || "") as
+        if (!payload.value) {
+            logger.error("No payload value found for connect_client action");
+            await respond({ text: "Sorry something went wrong. Please try again." });
+            return;
+        }
+        const connectionRequest = actionRequestStore.getAndDelete(payload.value) as
             | McpClientConnectionRequest
             | undefined;
         if (!connectionRequest) {
@@ -62,28 +66,36 @@ export class Bot {
             await respond({ text: "Sorry something went wrong. Start a new chat and try again." });
             return;
         }
-        const mcpSession = mcpSessionStore.getById(connectionRequest.mcpSessionId);
-        if (!mcpSession) {
-            logger.error("mcpSession not found for mcpSessionId: " + connectionRequest.mcpSessionId);
+        const user = userStore.get(connectionRequest.userId);
+        if (!user || !user.mcpSession) {
+            logger.error("user or mcpSession not found for userId: " + connectionRequest.userId);
             ack();
             await respond({ text: "Sorry something went wrong. Start a new chat and try again." });
             return;
         }
         try {
-            const client = mcpSession.mcpHost.clients[connectionRequest.serverName];
+            const client = user.mcpSession.mcpHost.clients[connectionRequest.serverName];
             if (!client) {
                 logger.error("client not found for serverName: " + connectionRequest.serverName);
                 ack();
                 await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
                 return;
             }
-            await client.connect();
-            ack();
-            await respond({ text: "- *" + connectionRequest.serverName + "* - Connected ✅" });
+            const connectionResult = await client.connect();
+            if (connectionResult === "CONNECTED") {
+                ack();
+                await respond({ text: "- *" + connectionRequest.serverName + "* - Connected ✅" });
+            } else if (connectionResult === "REDIRECT") {
+                ack();
+            } else {
+                logger.error("Error connecting to server: " + connectionRequest.serverName + " - " + connectionResult);
+                ack();
+                await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
+            }
         } catch (e) {
-            logger.error("Error connecting to server: " + connectionRequest.serverName);
+            logger.error("Error connecting to server: " + connectionRequest.serverName + " - " + e);
             ack();
-            // await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
+            await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
         }
     };
 
@@ -95,8 +107,10 @@ export class Bot {
         respond,
         say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
+        console.dir(payload, { depth: null });
+        console.dir(body, { depth: null });
         ack();
-        await respond({ text: "Check your browser" });
+        await respond({ text: "Check your browser!" });
     };
 
     private _cancelToolCallAction = async ({
@@ -107,7 +121,12 @@ export class Bot {
         say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
         ack();
-        const toolCallParams = actionRequestStore.getAndDelete(payload.value || "") as ToolCallRequest | undefined;
+        if (!payload.value) {
+            logger.error("No payload value found");
+            await respond({ text: "Sorry something went wrong. Please try again." });
+            return;
+        }
+        const toolCallParams = actionRequestStore.getAndDelete(payload.value) as ToolCallRequest | undefined;
         if (!toolCallParams) {
             logger.error("Tool call params not found in cache");
             await respond({ text: "Sorry something went wrong. Please try again." });
@@ -128,9 +147,15 @@ export class Bot {
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
         ack();
         const toolCallsRequest = actionRequestStore.getAndDelete(payload.value || "") as ToolCallsRequest | undefined;
-        const mcpSession = mcpSessionStore.getById(toolCallsRequest?.mcpSessionId || "");
-        if (!toolCallsRequest || !mcpSession) {
-            logger.error("Tool call request or mcpSession not found in cache");
+        if (!toolCallsRequest || !toolCallsRequest.userId) {
+            logger.error("Tool call request not found in cache");
+            await respond({ text: "Sorry something went wrong. Please try again." });
+            return;
+        }
+        const user = userStore.get(toolCallsRequest.userId);
+        const mcpSession = user?.mcpSession;
+        if (!mcpSession) {
+            logger.error("No mcpSession found for userId: " + toolCallsRequest.userId);
             await respond({ text: "Sorry something went wrong. Please try again." });
             return;
         }
@@ -175,30 +200,28 @@ export class Bot {
         );
     };
 
+    // This event correspond to the start of an mcpSession. Opening a new thread closes the previous mcpSession
     private _threadStarted: AssistantThreadStartedMiddleware = async ({ event, say }) => {
-        // Todo: close the previous session of the current user if it exists.
+        logger.debug(
+            "Thread started for user " +
+                event.assistant_thread.user_id +
+                " with thread ts " +
+                event.assistant_thread.thread_ts,
+        );
         try {
-            const userSession = userSessionStore.get(event.assistant_thread.user_id);
-            if (userSession) {
-                if (userSession.mcpSessionId) {
-                    // Todo: check that this behaves as expected
-                    mcpSessionStore.delete(userSession.mcpSessionId);
+            let user = userStore.get(event.assistant_thread.user_id);
+            if (user) {
+                // Close the previous mcp session of the current user if it exists.
+                if (user.mcpSession) {
+                    logger.debug("Deleting previous mcp session for user " + user);
+                    user.closeMcpSession();
                 }
             } else {
-                userSessionStore.new(event.assistant_thread.user_id, {
-                    userId: event.assistant_thread.user_id,
-                    mcpSessionId: event.assistant_thread.user_id + "-" + event.assistant_thread.thread_ts, // todo handle this better
-                    mcpServerAuths: {},
-                });
+                user = new User(event.assistant_thread.user_id);
+                userStore.new(event.assistant_thread.user_id, user);
             }
 
-            const session = new McpSession(
-                event.assistant_thread.user_id,
-                event.assistant_thread.thread_ts,
-                event.assistant_thread.channel_id,
-            );
-            mcpSessionStore.new(session);
-            session.start();
+            await user.startMcpSession(event.assistant_thread.thread_ts, event.assistant_thread.channel_id);
         } catch (e) {
             logger.error(e);
             say("I'm sorry, something went wrong. Please try starting a new conversation.");
@@ -212,7 +235,13 @@ export class Bot {
                 say("I'm sorry, I can only help in a thread!");
                 return;
             }
-            const mcpSession = mcpSessionStore.get(messageInThread.user, messageInThread.thread_ts!);
+            const user = userStore.get(messageInThread.user);
+            if (!user) {
+                logger.error("user not found for thread: " + messageInThread.thread_ts);
+                say("I'm sorry, something went wrong. Please try again in a little while.");
+                return;
+            }
+            const mcpSession = user.mcpSession;
             if (!mcpSession) {
                 logger.error("mcpSession not found for thread: " + messageInThread.thread_ts);
                 say("I'm sorry, something went wrong. Please try again in a little while.");
@@ -220,19 +249,18 @@ export class Bot {
             }
 
             // Get the last 5 messages in the thread and prepare it for the LLM with the system message
-            const { user, channel, thread_ts } = messageInThread;
             //Todo use the slackClient to get the conversation replies
             const conversationReplies = await client.conversations.replies({
-                channel: channel,
-                ts: thread_ts!,
+                channel: messageInThread.channel,
+                ts: messageInThread.thread_ts!,
                 limit: 5,
             });
             const chatCompletionMessages = Bot._toChatCompletionMessages(conversationReplies);
-            chatCompletionMessages.unshift(Bot._getSystemMessage(this._tools));
+            chatCompletionMessages.unshift(Bot._getSystemMessage(this._tools)); // add the system message at the beginning of the conversation
 
             const llmResponse = await llmClient.getResponse(chatCompletionMessages, mcpSession.mcpHost.tools);
 
-            // Handle tool calls
+            // Handle tool calls in llm response
             if (llmResponse?.tool_calls && llmResponse.tool_calls.length > 0) {
                 const toolRequests = llmResponse.tool_calls.map((toolCall) => {
                     return {
@@ -243,7 +271,7 @@ export class Bot {
                 });
                 const toolCallRequests: ToolCallsRequest = {
                     type: "tool_calls",
-                    mcpSessionId: mcpSession.mcpSessionId,
+                    userId: user.id,
                     toolRequests: toolRequests,
                 };
                 const toolRequestHash = stableHash(JSON.stringify(toolRequests));

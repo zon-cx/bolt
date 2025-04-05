@@ -6,6 +6,7 @@ import { slackClient } from "./slackClient.js";
 import { buildClientConnectionMessage, buildWelcomeMessage } from "./utils.js";
 import { actionRequestStore } from "./actionRequestStore.js";
 import type { McpClient } from "../mcp/McpClient.js";
+import type { McpClientConnectionRequest } from "./actionRequestStore.js";
 
 // Correspond to a thread started with the slack Bot. It has its own sets of mcp clients.
 export class McpSession {
@@ -21,7 +22,7 @@ export class McpSession {
         this._userId = userId;
         this._threadTs = threadTs;
         this._channelId = channelId;
-        this._mcpHost = new McpHost(mcpJsonConfig, this._mcpSessionId, this._userId);
+        this._mcpHost = new McpHost(mcpJsonConfig, this._userId);
     }
 
     get mcpHost() {
@@ -50,7 +51,7 @@ export class McpSession {
 
     async start() {
         await this.postConnectToClients();
-        logger.info("Session started: " + this._mcpSessionId);
+        logger.info("MCP Session started: " + this._mcpSessionId);
     }
 
     async postConnectToClients() {
@@ -72,11 +73,12 @@ export class McpSession {
             this._channelId,
         );
         if (!client.isConnected()) {
-            actionRequestStore.set(client.clientId, {
+            const connectionRequest: McpClientConnectionRequest = {
                 type: "mcp_client_connect",
-                mcpSessionId: this._mcpSessionId,
+                userId: this._userId,
                 serverName: client.serverName,
-            });
+            };
+            actionRequestStore.set(client.clientId, connectionRequest);
         }
         return postResult;
     }

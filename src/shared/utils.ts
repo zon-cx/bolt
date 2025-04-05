@@ -9,7 +9,7 @@ export function getOrThrow(key: string) {
     return value;
 }
 
-export function get(key: string, defaultValue: string) {
+export function getConfig(key: string, defaultValue: any) {
     const value = process.env[key];
     if (!value) {
         return defaultValue;

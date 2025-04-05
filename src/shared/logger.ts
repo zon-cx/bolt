@@ -1,8 +1,8 @@
 import { pino } from "pino";
-import { get } from "./utils.js";
+import { getConfig } from "./utils.js";
 
 const logger = pino({
-    level: get("LOG_LEVEL", "info"),
+    level: getConfig("LOG_LEVEL", "info"),
     transport: {
         target: "pino-pretty",
     },

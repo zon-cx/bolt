@@ -8,7 +8,7 @@ export type McpToolProperty = z.infer<typeof McpToolProperty>;
 
 export const McpToolSchema = z.object({
     type: z.string(),
-    properties: z.record(z.string(), McpToolProperty),
+    properties: z.record(z.string(), McpToolProperty).optional(),
     required: z.array(z.string()).default([]),
 });
 export type McpToolSchema = z.infer<typeof McpToolSchema>;
@@ -25,6 +25,13 @@ export type McpTools = z.infer<typeof McpTools>;
 
 export const McpToolsArray = z.array(McpTool);
 
+export const HttpClientConfig = z.object({
+    url: z.string().url(),
+    env: z.record(z.string(), z.string()).optional(),
+});
+
+export type HttpClientConfig = z.infer<typeof HttpClientConfig>;
+
 export const SseClientConfig = z.object({
     url: z.string().url(),
     env: z.record(z.string(), z.string()).optional(),
@@ -36,7 +43,7 @@ export const StdioClientConfig = z.object({
     env: z.record(z.string(), z.string()).optional(),
 });
 
-export const McpClientConfig = z.union([StdioClientConfig, SseClientConfig]);
+export const McpClientConfig = z.union([StdioClientConfig, SseClientConfig, HttpClientConfig]);
 export type McpClientConfig = z.infer<typeof McpClientConfig>;
 
 export const McpConfig = z.object({

@@ -16,13 +16,11 @@ export class McpHost {
     private _clients: Record<string, McpClient> = {};
     // Todo : mcpHost might only need to map serverName-toolName to toolName ?
     private _tools: Record<string, { mcpClient: McpClient; tool: Tool }> = {}; // Indexed by serverName-toolName
-    private _sessionId: string;
     private _userId: string;
-    constructor(mcpConfig: McpConfig, sessionId: string, userId: string) {
-        this._sessionId = sessionId;
+    constructor(mcpConfig: McpConfig, userId: string) {
         this._userId = userId;
         Object.entries(mcpConfig.mcpServers).forEach(([name, config]) => {
-            this._clients[name] = new McpClient(name, config, this._sessionId, this._userId);
+            this._clients[name] = new McpClient(name, config, this._userId);
         });
     }
 
@@ -33,6 +31,10 @@ export class McpHost {
 
     get clients(): Record<string, McpClient> {
         return this._clients;
+    }
+
+    getClientByServerUrl(serverUrl: string): McpClient | undefined {
+        return Object.values(this._clients).find((client) => client.serverUrl === serverUrl);
     }
 
     async disconnect(serverName: string) {

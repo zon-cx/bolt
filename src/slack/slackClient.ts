@@ -44,6 +44,14 @@ class SlackClient {
         });
         return result;
     }
+
+    async getPermalink(channelId: string, messageTs: string) {
+        const result = await this._webClient.chat.getPermalink({
+            channel: channelId,
+            message_ts: messageTs,
+        });
+        return result;
+    }
 }
 
 export const slackClient = new SlackClient();
