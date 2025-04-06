@@ -1,71 +1,83 @@
 import type { Tool } from "../mcp/Tool.js";
+import type { ColorScheme, KnownBlock, Block } from "@slack/web-api";
 
 const messageBuilder = {
-    // buildToolsMessage: (tools: Tool[]) => {
-    //     const toolList = {
-    //         blocks: [
-    //             messageBuilder.buildDivider(),
-    //             messageBuilder.buildRichTextSection([{ text: "These are the mcp tools available to me:" }]),
-    //             messageBuilder.buildTextList(
-    //                 tools.map((tool) => ({
-    //                     text: tool.serverName + "." + tool.name + " - " + tool.description,
-    //                 })),
-    //             ),
-    //             messageBuilder.buildDivider(),
-    //         ],
-    //         text: "Here are the tools available to me.",
-    //     };
-
-    //     return toolList;
-    // },
-
-    buildInitializingHeader: () => {
+    initializingHeader: (): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
             blocks: [
-                messageBuilder.buildRichTextSection([{ text: "Hello 🏴‍☠️!" }]),
-                messageBuilder.buildDivider(),
-                messageBuilder.buildRichTextSection([{ text: "Connecting to your MCP servers... Give me a sec! 🔄" }]),
+                messageBuilder.textSection("Hello 🏴‍☠️!"),
+                messageBuilder.divider(),
+                messageBuilder.textSection("Connecting to your MCP servers... Give me a sec! 🔄"),
             ],
             text: "Here are the servers currently configured.",
         };
     },
 
-    buildWelcomeHeader: () => {
+    welcomeHeader: (): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
-            text: "Here are the servers currently configured.",
             blocks: [
-                messageBuilder.buildRichTextSection([{ text: "Hello 🏴‍☠️!" }]),
-                messageBuilder.buildDivider(),
-                messageBuilder.buildRichTextSection([{ text: "These are the MCP servers currently configured:" }]),
+                messageBuilder.textSection("Hello 🏴‍☠️!"),
+                messageBuilder.divider(),
+                messageBuilder.textSection("These are the MCP servers currently configured:"),
             ],
+            text: "Here are the servers currently configured.",
         };
     },
 
-    buildConnectingMessage: (name: string) => {
+    connectingMessage: (
+        name: string,
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
+            blocks: [messageBuilder.textSection(` - *${name}* - Connecting...  🔄`)],
             text: " - *" + name + "* - Connecting...  🔄",
-            blocks: [messageBuilder.buildTextSection(` - *${name}* - Connecting...  🔄`)],
         };
     },
 
-    buildConnectedMessage: (name: string) => {
+    connectedMessage: (
+        name: string,
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
+            blocks: [messageBuilder.textSection(` - *${name}* - Connected  ✅`)],
             text: " - *" + name + "* - Connected  ✅",
-            blocks: [messageBuilder.buildTextSection(` - *${name}* - Connected  ✅`)],
         };
     },
 
-    buildDisconnectedMessage: (name: string, clientId: string) => {
+    disconnectedMessage: (
+        name: string,
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
+            blocks: [messageBuilder.textSection(` - *${name}* - Disconnected  ❌`)],
             text: " - *" + name + "* - Disconnected  ❌",
-            blocks: [messageBuilder.buildTextSection(` - *${name}* - Disconnected  ❌`)],
         };
     },
 
-    buildAuthorizeMessage: (serverName: string, url: string, value: string, text: string = "Authorize") => {
+    authorizeMessage: (
+        serverName: string,
+        url: string,
+        value: string,
+        text: string = "Authorize",
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
             blocks: [
-                messageBuilder.buildTextSection(` - *${serverName}* - Requires authorization ⚠️`),
+                messageBuilder.textSection(` - *${serverName}* - Requires authorization ⚠️`),
                 {
                     type: "actions",
                     elements: [
@@ -82,63 +94,84 @@ const messageBuilder = {
                     ],
                 },
             ],
+            text: " - *" + serverName + "* - Requires authorization ⚠️",
         };
     },
 
-    buildCheckingToolsHeader: () => {
+    checkingToolsHeader: (): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
-            blocks: [
-                messageBuilder.buildDivider(),
-                messageBuilder.buildTextSection("Checking what tools are available... 🔄"),
-            ],
+            blocks: [messageBuilder.divider(), messageBuilder.textSection("Checking what tools are available... 🔄")],
+            text: "Checking what tools are available...",
         };
     },
 
-    buildListToolsHeader: () => {
+    listToolsHeader: (): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
-            blocks: [
-                messageBuilder.buildDivider(),
-                messageBuilder.buildTextSection("These are the tools available to me:"),
-            ],
+            blocks: [messageBuilder.divider(), messageBuilder.textSection("These are the tools available to me:")],
+            text: "These are the tools available to me:",
         };
     },
 
-    buildCheckingServerToolMessage: (serverName: string) => {
+    checkingServerToolMessage: (
+        serverName: string,
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
-            blocks: [messageBuilder.buildTextSection(`- *${serverName}* - Checking what tools are available... 🔍`)],
+            blocks: [messageBuilder.textSection(`- *${serverName}* - Checking what tools are available... 🔍`)],
             text: " - " + serverName + ": Checking what tools are available...",
         };
     },
 
-    buildListToolsMessage: (name: string, tools: Tool[]) => {
+    listToolsMessage: (
+        name: string,
+        tools: Tool[],
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         if (tools.length === 0) {
             return {
-                blocks: [messageBuilder.buildTextSection(`- *${name}* - No tools available... ❌`)],
+                blocks: [messageBuilder.textSection(`- *${name}* - No tools available... ❌`)],
+                text: " - " + name + ": No tools available...",
             };
         }
         return {
             blocks: [
-                messageBuilder.buildTextSection(`- *${name}*:`),
-                messageBuilder.buildTextList(
+                messageBuilder.textSection(`- *${name}*:`),
+                messageBuilder.textList(
                     tools.map((tool) => ({
                         text: tool.name + " - " + tool.description,
                     })),
                 ),
             ],
+            text: " - " + name + ": " + tools.length + " tools available",
         };
     },
 
-    buildDivider: () => {
+    divider: (): KnownBlock => {
         return {
             type: "divider",
         };
     },
 
-    buildApprovalButtons: (message: string, value: string) => {
+    approvalButtons: (
+        message: string,
+        value: string,
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
-            text: message,
             blocks: [
-                messageBuilder.buildRichTextSection([{ text: message }]),
+                messageBuilder.textSection(message),
                 {
                     type: "actions",
                     elements: [
@@ -167,17 +200,23 @@ const messageBuilder = {
                     ],
                 },
             ],
+            text: message,
         };
     },
 
-    buildMarkdownSection: (text: string) => {
+    markdownSection: (
+        text: string,
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
         return {
-            type: "markdown",
+            blocks: [{ type: "section", text: { type: "mrkdwn", text: text } }],
             text: text,
         };
     },
 
-    buildTextSection: (markdownText: string) => {
+    textSection: (markdownText: string): KnownBlock => {
         return {
             type: "section",
             text: {
@@ -187,7 +226,7 @@ const messageBuilder = {
         };
     },
 
-    buildActionsSection: (actions: { text: string; value: string; action_id: string; style: string }[]) => {
+    actionsSection: (actions: { text: string; value: string; action_id: string; style: ColorScheme }[]): KnownBlock => {
         return {
             type: "actions",
             elements: actions.map((action) => ({
@@ -204,34 +243,34 @@ const messageBuilder = {
         };
     },
 
-    buildRichTextSection: (
-        texts: {
-            text: string;
-            style?: { bold?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean };
-        }[],
-    ) => {
-        return {
-            type: "rich_text",
-            elements: [
-                {
-                    type: "rich_text_section",
-                    elements: texts.map((text) => ({
-                        type: "text",
-                        text: text.text,
-                        style: text.style,
-                    })),
-                },
-            ],
-        };
-    },
+    // richTextSection: (
+    //     texts: {
+    //         text: string;
+    //         style?: { bold?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean };
+    //     }[],
+    // ) => {
+    //     return {
+    //         type: "rich_text",
+    //         elements: [
+    //             {
+    //                 type: "rich_text_section",
+    //                 elements: texts.map((text) => ({
+    //                     type: "text",
+    //                     text: text.text,
+    //                     style: text.style,
+    //                 })),
+    //             },
+    //         ],
+    //     };
+    // },
 
-    buildTextList: (
+    textList: (
         texts: {
             text: string;
             style?: { bold?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean };
         }[],
         indent: number = 0,
-    ) => {
+    ): KnownBlock => {
         return {
             type: "rich_text",
             elements: [

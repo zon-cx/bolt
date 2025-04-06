@@ -89,12 +89,12 @@ export class SlackOAuthClientProvider implements OAuthClientProvider {
         }
         try {
             slackClient.updateMessage(
-                messageBuilder.buildAuthorizeMessage(
+                messageBuilder.authorizeMessage(
                     user.mcpServerAuths[this._serverUrl]!.serverName,
                     authorizationUrl.href,
                     this._serverUrl,
                     "Authorize",
-                ).blocks,
+                ),
                 mcpSession.connectMessageIds[this._serverUrl]!.messageTs,
                 mcpSession.connectMessageIds[this._serverUrl]!.channelId,
             );
@@ -110,11 +110,9 @@ export class SlackOAuthClientProvider implements OAuthClientProvider {
         }
         user.mcpServerAuths[this._serverUrl]!.mcpCodeVerifier = codeVerifier;
         userStore.update(this._userId, user);
-        logger.debug("Saved code verifier: " + codeVerifier);
     }
 
     async codeVerifier() {
-        logger.debug(" 1 Get code verifier");
         const user = userStore.get(this._userId);
         if (!user) {
             throw new Error("No user found for user " + this._userId);
@@ -123,7 +121,6 @@ export class SlackOAuthClientProvider implements OAuthClientProvider {
         if (!verifier) {
             throw new Error("No code verifier saved for session");
         }
-        logger.debug("Get code verifier: " + verifier);
         return verifier;
     }
 }

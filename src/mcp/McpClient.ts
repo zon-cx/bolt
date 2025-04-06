@@ -1,19 +1,19 @@
 import logger from "../shared/logger.js";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport, SseError } from "@modelcontextprotocol/sdk/client/sse.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { auth, UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import { UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 
 import { HttpClientTransport } from "./HttpTransport.js";
-import type { McpClientConfig, McpTools } from "./mcp.types.js";
+
+import type { McpClientConfig } from "./mcp.types.js";
 import { McpToolsArray } from "./mcp.types.js";
 import { Tool } from "./Tool.js";
 import { SlackOAuthClientProvider } from "./SlackOauthClientProvider.js";
 import { McpSession } from "./McpSession.js";
-import { mcpSessionStore } from "../slack/mcpSessionStore.js";
-import { slackClient } from "../slack/slackClient.js";
+
 import type { User, McpServerAuth } from "../shared/User.js";
 import { userStore } from "../shared/userStore.js";
 import { getOrThrow } from "../shared/utils.js";
@@ -26,12 +26,11 @@ export class McpClient {
     private _userId: string;
     private _serverUrl: string;
     private _authProvider: OAuthClientProvider | null = null;
-    public connectMessageId: { messageTs: string; channelId: string } | null = null;
-    public serverName: string;
+    private _serverName: string;
     public tools: Record<string, Tool> = {};
 
     constructor(serverName: string, config: McpClientConfig, userId: string) {
-        this.serverName = serverName;
+        this._serverName = serverName;
         this._config = config;
         this._userId = userId;
         this._serverUrl = (config as { url: string }).url;
@@ -53,6 +52,10 @@ export class McpClient {
         this._authProvider = null;
     }
 
+    get serverName(): string {
+        return this._serverName;
+    }
+
     get authProvider(): OAuthClientProvider | null {
         return this._authProvider;
     }
@@ -61,41 +64,29 @@ export class McpClient {
         return this._serverUrl;
     }
 
-    get clientId(): string {
-        return this._userId + "_" + this.serverName;
-    }
-
-    get mcpSession(): McpSession {
-        const user = this.user;
-        if (!user || !user.mcpSession) {
-            throw new Error("No Mcp Session for client " + this.clientId);
-        }
-        return user.mcpSession;
-    }
-
     get user(): User {
         const user = userStore.get(this._userId);
         if (!user) {
-            throw new Error("No User for client " + this.clientId);
+            throw new Error("No User for client " + this.serverName);
         }
         return user;
     }
 
-    get mcpServerAuth(): McpServerAuth | undefined {
+    get mcpSession(): McpSession {
         const user = this.user;
-        if (!user) {
-            throw new Error("No User for client " + this.clientId);
+        if (!user.mcpSession) {
+            throw new Error("No MCP session for client " + this.serverName);
         }
-        return user.mcpServerAuths[this._serverUrl];
+        return user.mcpSession;
+    }
+
+    get mcpServerAuth(): McpServerAuth | undefined {
+        return this.user.mcpServerAuths[this._serverUrl];
     }
 
     set mcpServerAuth(auth: McpServerAuth) {
-        const user = this.user;
-        if (!user) {
-            throw new Error("No User for client " + this.clientId);
-        }
-        user.mcpServerAuths[this._serverUrl] = auth;
-        userStore.update(this._userId, user);
+        this.user.mcpServerAuths[this._serverUrl] = auth;
+        userStore.update(this._userId, this.user);
     }
 
     async connect() {
@@ -160,16 +151,7 @@ export class McpClient {
         }
     }
 
-    isConnected(): boolean {
-        return this._connected;
-    }
-
     private async setupAuthProvider() {
-        const user = this.user;
-        if (!user) {
-            logger.error("No user found for user " + this._userId);
-            return "UNAUTHORIZED";
-        }
         if (!this.mcpServerAuth) {
             logger.debug("Creating new auth for server " + this._serverUrl);
             this.mcpServerAuth = {
@@ -177,7 +159,6 @@ export class McpClient {
                 serverName: this.serverName,
             };
         }
-
         const stateData = {
             userId: this._userId,
             serverUrl: this._serverUrl,

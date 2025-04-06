@@ -1,11 +1,8 @@
 import type { Request, Response, NextFunction } from "express";
 import logger from "../shared/logger.js";
 import { userStore } from "../shared/userStore.js";
-import { mcpSessionStore } from "../slack/mcpSessionStore.js";
-import { auth, UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 
 export const callback = async (req: Request, res: Response, next: NextFunction) => {
-    logger.debug("Callback received");
     try {
         const authCode = req.query.code;
         const encodedState = req.query.state;
@@ -14,7 +11,6 @@ export const callback = async (req: Request, res: Response, next: NextFunction) 
             return res.status(400).json({ error: "Wrong request" });
         }
 
-        // Ensure authCode is a string
         if (typeof authCode !== "string") {
             return res.status(400).json({ error: "Invalid authorization code" });
         }
@@ -40,7 +36,7 @@ export const callback = async (req: Request, res: Response, next: NextFunction) 
         if (!user || !mcpSession) {
             return res.status(404).json({ error: "MCP session not found" });
         }
-
+        logger.debug("Handling auth callback for user " + userId + " and serverUrl " + serverUrl);
         await mcpSession.handleAuthCallback(serverUrl, authCode);
 
         res.status(201).json({ message: "Callback successful!" });

@@ -9,27 +9,20 @@ import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 
 // Correspond to a thread started with the slack Bot. It has its own sets of mcp clients.
 export class McpSession {
-    private _mcpSessionId: string;
     private _userId: string;
     private _threadTs: string;
     private _channelId: string;
-    private _clients: Record<string, McpClient> = {}; // indexed by server name
+    private _clients: Record<string, McpClient> = {}; // indexed by server name (from mcpConfig)
     private _tools: Record<string, { mcpClient: McpClient; tool: Tool }> = {};
     public connectMessageIds: Record<string, { messageTs: string; channelId: string }> = {};
     public listingToolsMessageIds: Record<string, { messageTs: string; channelId: string }> = {};
     constructor(userId: string, threadTs: string, channelId: string, mcpConfig: McpConfig) {
-        // TODO: better sessionId
-        this._mcpSessionId = userId + "-" + threadTs;
         this._userId = userId;
         this._threadTs = threadTs;
         this._channelId = channelId;
         Object.entries(mcpConfig.mcpServers).forEach(([name, config]) => {
             this._clients[name] = new McpClient(name, config, this._userId);
         });
-    }
-
-    get mcpSessionId() {
-        return this._mcpSessionId;
     }
 
     get userId() {
@@ -63,14 +56,14 @@ export class McpSession {
 
     async start() {
         const initializingHeader = await slackClient.postBlocks(
-            messageBuilder.buildInitializingHeader(),
+            messageBuilder.initializingHeader(),
             this._threadTs,
             this._channelId,
         );
         const initializingHeaderId = { messageTs: initializingHeader.ts!, channelId: initializingHeader.channel! };
         for (const [name, client] of Object.entries(this._clients)) {
             const connectMessage = await slackClient.postBlocks(
-                messageBuilder.buildConnectingMessage(name),
+                messageBuilder.connectingMessage(name),
                 this._threadTs,
                 this._channelId,
             );
@@ -83,19 +76,19 @@ export class McpSession {
             await this.handleConnect(client);
         }
         await slackClient.updateMessage(
-            messageBuilder.buildWelcomeHeader().blocks,
+            messageBuilder.welcomeHeader(),
             initializingHeaderId.messageTs,
             initializingHeaderId.channelId,
         );
         const listToolsHeader = await slackClient.postBlocks(
-            messageBuilder.buildCheckingToolsHeader(),
+            messageBuilder.checkingToolsHeader(),
             this._threadTs,
             this._channelId,
         );
         const listToolsHeaderId = { messageTs: listToolsHeader.ts!, channelId: listToolsHeader.channel! };
         for (const [name, client] of Object.entries(this._clients)) {
             const listToolMessage = await slackClient.postBlocks(
-                messageBuilder.buildCheckingServerToolMessage(client.serverName),
+                messageBuilder.checkingServerToolMessage(client.serverName),
                 this._threadTs,
                 this._channelId,
             );
@@ -110,12 +103,12 @@ export class McpSession {
         }
 
         await slackClient.updateMessage(
-            messageBuilder.buildListToolsHeader().blocks,
+            messageBuilder.listToolsHeader(),
             listToolsHeaderId.messageTs,
             listToolsHeaderId.channelId,
         );
 
-        logger.info("MCP Session started: " + this._mcpSessionId);
+        logger.info("New MCP Session started for user " + this._userId);
     }
 
     async handleListTools(client: McpClient) {
@@ -126,7 +119,7 @@ export class McpSession {
                 this._tools[toolIndex] = { mcpClient: client, tool };
             }
             await slackClient.updateMessage(
-                messageBuilder.buildListToolsMessage(client.serverName, Object.values(client.tools)).blocks,
+                messageBuilder.listToolsMessage(client.serverName, Object.values(client.tools)),
                 this.listingToolsMessageIds[client.serverUrl]!.messageTs,
                 this.listingToolsMessageIds[client.serverUrl]!.channelId,
             );
@@ -140,16 +133,15 @@ export class McpSession {
             const success = await client.connect();
             if (success) {
                 await slackClient.updateMessage(
-                    messageBuilder.buildConnectedMessage(client.serverName).blocks,
+                    messageBuilder.connectedMessage(client.serverName),
                     this.connectMessageIds[client.serverUrl]!.messageTs,
                     this.connectMessageIds[client.serverUrl]!.channelId,
                 );
             }
         } catch (error) {
-            console.dir(error, { depth: null });
-            logger.error("Error connecting to mcp client: " + client.serverName, error);
+            logger.warn("Error connecting to mcp server: " + client.serverName, error);
             await slackClient.updateMessage(
-                messageBuilder.buildDisconnectedMessage(client.serverName, client.clientId).blocks,
+                messageBuilder.disconnectedMessage(client.serverName),
                 this.connectMessageIds[client.serverUrl]!.messageTs,
                 this.connectMessageIds[client.serverUrl]!.channelId,
             );
@@ -172,11 +164,11 @@ export class McpSession {
     }
 
     async processToolCallRequest(toolCallRequest: ToolCallRequest): Promise<void> {
-        const tool = this._tools[toolCallRequest.toolName];
-        if (!tool) {
-            throw new Error(`Tool ${toolCallRequest.toolName} not found`);
-        }
         try {
+            const tool = this._tools[toolCallRequest.toolName];
+            if (!tool) {
+                throw new Error(`Tool ${toolCallRequest.toolName} not found`);
+            }
             toolCallRequest.toolCallResult = await tool.mcpClient.executeTool(tool.tool.name, toolCallRequest.toolArgs);
             toolCallRequest.success = true;
         } catch (error) {

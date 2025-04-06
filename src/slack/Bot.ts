@@ -41,63 +41,8 @@ export class Bot {
         this._app.action("approve_tool_call", this._proceedWithToolCallAction);
         this._app.action("cancel_tool_call", this._cancelToolCallAction);
         this._app.action("redirect", this._redirectAction);
-        // this._app.action("connect_client", this._connectClientAction);
         await this._app.start(process.env.PORT || 3000);
     }
-
-    // private _connectClientAction = async ({
-    //     payload,
-    //     body,
-    //     ack,
-    //     respond,
-    //     say,
-    // }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
-    //     if (!payload.value) {
-    //         logger.error("No payload value found for connect_client action");
-    //         await respond({ text: "Sorry something went wrong. Please try again." });
-    //         return;
-    //     }
-    //     const connectionRequest = actionRequestStore.getAndDelete(payload.value) as
-    //         | McpClientConnectionRequest
-    //         | undefined;
-    //     if (!connectionRequest) {
-    //         logger.error("No connection request found in cache");
-    //         ack();
-    //         await respond({ text: "Sorry something went wrong. Start a new chat and try again." });
-    //         return;
-    //     }
-    //     const user = userStore.get(connectionRequest.userId);
-    //     if (!user || !user.mcpSession) {
-    //         logger.error("user or mcpSession not found for userId: " + connectionRequest.userId);
-    //         ack();
-    //         await respond({ text: "Sorry something went wrong. Start a new chat and try again." });
-    //         return;
-    //     }
-    //     try {
-    //         const client = user.mcpSession.mcpHost.clients[connectionRequest.serverName];
-    //         if (!client) {
-    //             logger.error("client not found for serverName: " + connectionRequest.serverName);
-    //             ack();
-    //             await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
-    //             return;
-    //         }
-    //         const connectionResult = await client.connect();
-    //         if (connectionResult === "CONNECTED") {
-    //             ack();
-    //             await respond({ text: "- *" + connectionRequest.serverName + "* - Connected ✅" });
-    //         } else if (connectionResult === "REDIRECT") {
-    //             ack();
-    //         } else {
-    //             logger.error("Error connecting to server: " + connectionRequest.serverName + " - " + connectionResult);
-    //             ack();
-    //             await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
-    //         }
-    //     } catch (e) {
-    //         logger.error("Error connecting to server: " + connectionRequest.serverName + " - " + e);
-    //         ack();
-    //         await respond({ text: "- Cannot connect to " + connectionRequest.serverName + " ❌" });
-    //     }
-    // };
 
     // Only usefull to ack() and remove the warning from the slack interface
     private _redirectAction = async ({
@@ -107,8 +52,6 @@ export class Bot {
         respond,
         say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
-        // console.dir(payload, { depth: null });
-        // console.dir(body, { depth: null });
         // Todo use proper action value
         ack();
         await respond({ text: "Check your browser!" });
@@ -195,11 +138,7 @@ export class Bot {
                 " - " +
                 interpretation?.content,
         );
-        await slackClient.postBlocks(
-            { blocks: [messageBuilder.buildMarkdownSection(interpretation?.content || "...")] },
-            mcpSession.threadTs,
-            mcpSession.channelId,
-        );
+        await slackClient.postMarkdown(interpretation?.content || "...", mcpSession.threadTs, mcpSession.channelId);
     };
 
     // This event correspond to the start of an mcpSession. Opening a new thread closes the previous mcpSession
@@ -287,13 +226,13 @@ export class Bot {
                     .join("\nand\n");
                 toolRequestMessage += ".";
                 await slackClient.postBlocks(
-                    messageBuilder.buildApprovalButtons(toolRequestMessage, toolRequestHash),
+                    messageBuilder.approvalButtons(toolRequestMessage, toolRequestHash),
                     mcpSession.threadTs,
                     mcpSession.channelId,
                 );
             } else {
-                await slackClient.postBlocks(
-                    { blocks: [messageBuilder.buildMarkdownSection(llmResponse?.content || "...")] },
+                await slackClient.postMarkdown(
+                    llmResponse?.content || "...",
                     mcpSession.threadTs,
                     mcpSession.channelId,
                 );

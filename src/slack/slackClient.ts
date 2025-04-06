@@ -1,5 +1,6 @@
 import { WebClient } from "@slack/web-api";
 import { getOrThrow } from "../shared/utils.js";
+import type { KnownBlock, Block } from "@slack/web-api";
 
 class SlackClient {
     private _webClient: WebClient;
@@ -8,18 +9,20 @@ class SlackClient {
         this._webClient = new WebClient(getOrThrow("SLACK_BOT_TOKEN"));
     }
 
-    async postMessage(message: string, threadTs: string, channelId: string) {
+    async postBlocks(blocks: { blocks: (KnownBlock | Block)[]; text?: string }, threadTs: string, channelId: string) {
+        console.dir(blocks, { depth: null });
         const result = await this._webClient.chat.postMessage({
-            text: message,
+            ...blocks,
             thread_ts: threadTs,
             channel: channelId,
         });
         return result;
     }
 
-    async postBlocks(blocks: any, threadTs: string, channelId: string) {
+    async postMarkdown(text: string, threadTs: string, channelId: string) {
+        const blocks = [{ type: "markdown", text }] as any;
         const result = await this._webClient.chat.postMessage({
-            ...blocks,
+            blocks,
             thread_ts: threadTs,
             channel: channelId,
         });
@@ -36,19 +39,15 @@ class SlackClient {
         return result;
     }
 
-    async updateMessage(blocks: any, threadTs: string, channelId: string) {
+    async updateMessage(
+        blocks: { blocks: (KnownBlock | Block)[]; text?: string },
+        threadTs: string,
+        channelId: string,
+    ) {
         const result = await this._webClient.chat.update({
-            blocks: blocks,
+            ...blocks,
             ts: threadTs,
             channel: channelId,
-        });
-        return result;
-    }
-
-    async getPermalink(channelId: string, messageTs: string) {
-        const result = await this._webClient.chat.getPermalink({
-            channel: channelId,
-            message_ts: messageTs,
         });
         return result;
     }

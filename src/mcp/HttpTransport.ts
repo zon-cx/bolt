@@ -1,7 +1,6 @@
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { JSONRPCMessageSchema } from "@modelcontextprotocol/sdk/types.js";
-import logger from "../shared/logger.js";
 import { auth, type OAuthClientProvider, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 
 /**
@@ -80,7 +79,6 @@ export class HttpClientTransport implements Transport {
     };
 
     public send = async (message: JSONRPCMessage): Promise<void> => {
-        logger.debug("HttpClientTransport send message: " + JSON.stringify(message));
         try {
             const commonHeaders = await this._commonHeaders();
             const headers = new Headers({
@@ -96,7 +94,6 @@ export class HttpClientTransport implements Transport {
             };
 
             const response = await fetch(this._url, init);
-            logger.debug("HttpClientTransport senT response: " + response.status);
             if (!response.ok) {
                 if (response.status === 401 && this._authProvider) {
                     const result = await auth(this._authProvider, {
@@ -113,7 +110,6 @@ export class HttpClientTransport implements Transport {
             }
 
             const allMessages = await response.json().catch(() => []);
-            logger.debug("HttpClientTransport all messages: " + JSON.stringify(allMessages));
             (Array.isArray(allMessages) ? allMessages : [allMessages]).map((message) => {
                 this.onmessage?.(JSONRPCMessageSchema.parse(message));
             });

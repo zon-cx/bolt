@@ -15,7 +15,7 @@ class LlmClient {
         this._model = model;
     }
 
-    async getResponse(messages: ChatCompletionMessageParam[], tools: Tool[]) {
+    async getResponse(messages: ChatCompletionMessageParam[], tools: Tool[] = []) {
         const completion = await this._client.chat.completions.create({
             model: this._model,
             messages: messages,
