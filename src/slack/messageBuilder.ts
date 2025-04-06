@@ -4,8 +4,8 @@ const messageBuilder = {
     buildToolMessage: (tools: Tool[]) => {
         const toolList = {
             blocks: [
-                messageBuilder.buildRichTextSection([{ text: "These are the mcp tools available to me:" }]),
                 messageBuilder.buildDivider(),
+                messageBuilder.buildRichTextSection([{ text: "These are the mcp tools available to me:" }]),
                 messageBuilder.buildTextList(
                     tools.map((tool) => ({
                         text: tool.serverName + "." + tool.name + " - " + tool.description,
@@ -22,8 +22,9 @@ const messageBuilder = {
     buildInitializingMessage: () => {
         return {
             blocks: [
-                messageBuilder.buildRichTextSection([{ text: "Connecting to your mcp servers... Give me a sec!" }]),
+                messageBuilder.buildRichTextSection([{ text: "Hello 🏴‍☠️!" }]),
                 messageBuilder.buildDivider(),
+                messageBuilder.buildRichTextSection([{ text: "Connecting to your mcp servers... Give me a sec! 🔄" }]),
             ],
             text: "Here are the servers currently configured.",
         };
@@ -32,10 +33,9 @@ const messageBuilder = {
     buildWelcomeMessage: () => {
         return {
             blocks: [
-                messageBuilder.buildRichTextSection([
-                    { text: "Hello 🏴‍☠️! \nThese are the servers currently configured:" },
-                ]),
+                messageBuilder.buildRichTextSection([{ text: "Hello 🏴‍☠️!" }]),
                 messageBuilder.buildDivider(),
+                messageBuilder.buildRichTextSection([{ text: "These are the servers currently configured:" }]),
             ],
         };
     },

@@ -11,7 +11,7 @@ import type {
 import logger from "../shared/logger.js";
 import messageBuilder from "./messageBuilder.js";
 import { stableHash } from "stable-hash";
-import { McpSession } from "./McpSession.js";
+import { McpSession } from "../mcp/McpSession.js";
 import { actionRequestStore } from "./actionRequestStore.js";
 import type { ToolCallRequest, McpClientConnectionRequest, ToolCallsRequest } from "./actionRequestStore.js";
 import { slackClient } from "./slackClient.js";
@@ -238,7 +238,7 @@ export class Bot {
             }
             const user = userStore.get(messageInThread.user);
             if (!user) {
-                logger.error("user not found for thread: " + messageInThread.thread_ts);
+                logger.error("user not found : " + messageInThread.user);
                 say("I'm sorry, something went wrong. Please try again in a little while.");
                 return;
             }
@@ -257,9 +257,9 @@ export class Bot {
                 limit: 5,
             });
             const chatCompletionMessages = Bot._toChatCompletionMessages(conversationReplies);
-            chatCompletionMessages.unshift(Bot._getSystemMessage(this._tools)); // add the system message at the beginning of the conversation
+            chatCompletionMessages.unshift(Bot._getSystemMessage()); // add the system message at the beginning of the conversation
 
-            const llmResponse = await llmClient.getResponse(chatCompletionMessages, mcpSession.mcpHost.tools);
+            const llmResponse = await llmClient.getResponse(chatCompletionMessages, mcpSession.tools);
 
             // Handle tool calls in llm response
             if (llmResponse?.tool_calls && llmResponse.tool_calls.length > 0) {
@@ -353,7 +353,7 @@ export class Bot {
             });
     }
 
-    private static _getSystemMessage(tools: Tool[]) {
+    private static _getSystemMessage() {
         const currentDateTime = new Date().toLocaleString();
         const systemMessage: ChatCompletionSystemMessageParam = {
             role: "system",

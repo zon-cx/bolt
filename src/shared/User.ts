@@ -1,5 +1,6 @@
-import { McpSession } from "../slack/McpSession.js";
+import { McpSession } from "../mcp/McpSession.js";
 import logger from "./logger.js";
+import { mcpJsonConfig } from "../mcp/mcpConfig.js";
 
 export type McpServerAuth = {
     serverUrl: string;
@@ -45,7 +46,7 @@ export class User {
         if (this._mcpSession) {
             throw new Error("Attempting to start mcp session for user but it already exists");
         }
-        this._mcpSession = new McpSession(this._slackUserId, threadTs, channelId);
+        this._mcpSession = new McpSession(this._slackUserId, threadTs, channelId, mcpJsonConfig);
         await this._mcpSession.start();
     }
 

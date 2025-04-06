@@ -1,6 +1,6 @@
 import logger from "../shared/logger.js";
 import { OrderedFixedSizeMap } from "../shared/OrderedFixedSizeMap.js";
-import { McpSession } from "./McpSession.js";
+import { McpSession } from "../mcp/McpSession.js";
 
 class McpSessionStore {
     private storage: OrderedFixedSizeMap<string, McpSession>;

@@ -5,12 +5,13 @@ import { SSEClientTransport, SseError } from "@modelcontextprotocol/sdk/client/s
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { auth, UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+
 import { HttpClientTransport } from "./HttpTransport.js";
 import type { McpClientConfig, McpTools } from "./mcp.types.js";
 import { McpToolsArray } from "./mcp.types.js";
 import { Tool } from "./Tool.js";
 import { SlackOAuthClientProvider } from "./SlackOauthClientProvider.js";
-import { McpSession } from "../slack/McpSession.js";
+import { McpSession } from "./McpSession.js";
 import { mcpSessionStore } from "../slack/mcpSessionStore.js";
 import { slackClient } from "../slack/slackClient.js";
 import type { User, McpServerAuth } from "../shared/User.js";
@@ -122,11 +123,8 @@ export class McpClient {
                 });
             }
             await this._client.connect(this._transport as Transport);
-            const mcpTools = await this._listTools(); // Todo move this to a separate flow
             this._connected = true;
-            Object.entries(mcpTools).forEach(([toolName, tool]) => {
-                this.tools[toolName] = new Tool(tool, this.serverName);
-            });
+
             logger.info("Connected to MCP Server " + this.serverName);
             return true;
         } catch (error) {
@@ -145,12 +143,16 @@ export class McpClient {
         this._connected = false;
     }
 
-    private async _listTools(): Promise<McpTools> {
+    async listTools() {
         try {
+            if (!this._connected) {
+                throw new Error("MCP client " + this.serverName + " is not connected");
+            }
             const clientTools = (await this._client.listTools()).tools;
-            const mcpToolsArray = McpToolsArray.parse(clientTools);
-            const tools = Object.fromEntries(mcpToolsArray.map((tool) => [tool.name, tool]));
-            return tools;
+            const mcpToolsArray = McpToolsArray.parse(clientTools); // TODO use exported tool type & schema from the sdk
+            mcpToolsArray.forEach((tool) => {
+                this.tools[tool.name] = new Tool(tool, this.serverName);
+            });
         } catch (error) {
             logger.error("Error listing tools for " + this.serverName + ": " + error);
             return {};

@@ -1,12 +1,10 @@
-import { mcpJsonConfig } from "../mcp/mcpConfig.js";
-import { McpHost } from "../mcp/McpHost.js";
 import logger from "../shared/logger.js";
-import type { ToolCallRequest } from "./actionRequestStore.js";
-import { slackClient } from "./slackClient.js";
-import messageBuilder from "./messageBuilder.js";
-import { actionRequestStore } from "./actionRequestStore.js";
-import type { McpClient } from "../mcp/McpClient.js";
-import type { McpClientConnectionRequest } from "./actionRequestStore.js";
+import type { ToolCallRequest } from "../slack/actionRequestStore.js";
+import type { McpConfig } from "./mcp.types.js";
+import type { Tool } from "./Tool.js";
+import { slackClient } from "../slack/slackClient.js";
+import messageBuilder from "../slack/messageBuilder.js";
+import { McpClient } from "./McpClient.js";
 
 // Correspond to a thread started with the slack Bot. It has its own sets of mcp clients.
 export class McpSession {
@@ -14,20 +12,19 @@ export class McpSession {
     private _userId: string;
     private _threadTs: string;
     private _channelId: string;
-    private _mcpHost: McpHost;
+    private _clients: Record<string, McpClient> = {};
+    private _tools: Record<string, { mcpClient: McpClient; tool: Tool }> = {};
     public connectMessageIds: Record<string, { messageTs: string; channelId: string }> = {};
 
-    constructor(userId: string, threadTs: string, channelId: string) {
+    constructor(userId: string, threadTs: string, channelId: string, mcpConfig: McpConfig) {
         // TODO: better sessionId
         this._mcpSessionId = userId + "-" + threadTs;
         this._userId = userId;
         this._threadTs = threadTs;
         this._channelId = channelId;
-        this._mcpHost = new McpHost(mcpJsonConfig, this._userId);
-    }
-
-    get mcpHost() {
-        return this._mcpHost;
+        Object.entries(mcpConfig.mcpServers).forEach(([name, config]) => {
+            this._clients[name] = new McpClient(name, config, this._userId);
+        });
     }
 
     get mcpSessionId() {
@@ -46,8 +43,21 @@ export class McpSession {
         return this._channelId;
     }
 
-    async processToolCallRequest(toolCallRequest: ToolCallRequest) {
-        return await this._mcpHost.processToolCallRequest(toolCallRequest);
+    getClientByServerUrl(serverUrl: string): McpClient | undefined {
+        return Object.values(this._clients).find((client) => client.serverUrl === serverUrl);
+    }
+
+    async disconnect(serverName: string) {
+        if (!this._clients[serverName]) {
+            logger.warn(`Server ${serverName} not found`);
+            return;
+        }
+        await this._clients[serverName].disconnect();
+    }
+
+    // TODO clean that
+    get tools(): Tool[] {
+        return Object.values(this._tools).map((tool) => tool.tool);
     }
 
     async start() {
@@ -57,7 +67,7 @@ export class McpSession {
             this._channelId,
         );
         const initializingMessageId = { messageTs: postResult.ts!, channelId: postResult.channel! };
-        for (const [name, client] of Object.entries(this._mcpHost.clients)) {
+        for (const [name, client] of Object.entries(this._clients)) {
             const connectMessage = await slackClient.postBlocks(
                 messageBuilder.buildConnectingMessage(name),
                 this._threadTs,
@@ -68,7 +78,7 @@ export class McpSession {
                 channelId: connectMessage.channel!,
             };
         }
-        for (const [name, client] of Object.entries(this._mcpHost.clients)) {
+        for (const [name, client] of Object.entries(this._clients)) {
             await this.handleConnect(client);
         }
         await slackClient.updateMessage(
@@ -76,8 +86,21 @@ export class McpSession {
             initializingMessageId.messageTs,
             initializingMessageId.channelId,
         );
+        for (const [name, client] of Object.entries(this._clients)) {
+            await this.handleListTools(client);
+        }
+
+        await slackClient.postBlocks(messageBuilder.buildToolMessage(this.tools), this._threadTs, this._channelId);
 
         logger.info("MCP Session started: " + this._mcpSessionId);
+    }
+
+    async handleListTools(client: McpClient) {
+        await client.listTools();
+        for (const tool of Object.values(client.tools)) {
+            const toolIndex = client.serverName + "-" + tool.name; // Avoid name collision with other servers. Cannot put "." in tools for openAi
+            this._tools[toolIndex] = { mcpClient: client, tool };
+        }
     }
 
     async handleConnect(client: McpClient) {
@@ -91,6 +114,7 @@ export class McpSession {
                 );
             }
         } catch (error) {
+            console.dir(error, { depth: null });
             logger.error("Error connecting to mcp client: " + client.serverName, error);
             await slackClient.updateMessage(
                 messageBuilder.buildDisconnectedMessage(client.serverName, client.clientId).blocks,
@@ -100,32 +124,17 @@ export class McpSession {
         }
     }
 
-    // async postConnectToClients() {
-    //     await slackClient.postBlocks(messageBuilder.buildWelcomeMessage(), this._threadTs, this._channelId);
-    //     for (const [name, client] of Object.entries(this._mcpHost.clients)) {
-    //         const postResult = await this.postConnectToClient(client);
-    //         if (postResult) {
-    //             client.connectMessageId = { messageTs: postResult.ts!, channelId: postResult.channel! };
-    //         } else {
-    //             throw new Error("Error posting connect message for mcp client: " + name);
-    //         }
-    //     }
-    // }
-
-    // async postConnectToClient(client: McpClient) {
-    //     const postResult = await slackClient.postBlocks(
-    //         messageBuilder.buildClientConnectionMessage(client.serverName, client.clientId, client.isConnected()),
-    //         this._threadTs,
-    //         this._channelId,
-    //     );
-    //     if (!client.isConnected()) {
-    //         const connectionRequest: McpClientConnectionRequest = {
-    //             type: "mcp_client_connect",
-    //             userId: this._userId,
-    //             serverName: client.serverName,
-    //         };
-    //         actionRequestStore.set(client.clientId, connectionRequest);
-    //     }
-    //     return postResult;
-    // }
+    async processToolCallRequest(toolCallRequest: ToolCallRequest): Promise<void> {
+        const tool = this._tools[toolCallRequest.toolName];
+        if (!tool) {
+            throw new Error(`Tool ${toolCallRequest.toolName} not found`);
+        }
+        try {
+            toolCallRequest.toolCallResult = await tool.mcpClient.executeTool(tool.tool.name, toolCallRequest.toolArgs);
+            toolCallRequest.success = true;
+        } catch (error) {
+            logger.error(`Error executing tool ${toolCallRequest.toolName}: ${error}`);
+            toolCallRequest.success = false;
+        }
+    }
 }
