@@ -5,6 +5,7 @@ import { mcpSessionStore } from "../slack/mcpSessionStore.js";
 import { auth, UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 
 export const callback = async (req: Request, res: Response, next: NextFunction) => {
+    logger.debug("Callback received");
     try {
         const authCode = req.query.code;
         const encodedState = req.query.state;
@@ -35,24 +36,13 @@ export const callback = async (req: Request, res: Response, next: NextFunction) 
         }
 
         const user = userStore.get(userId);
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
+        const mcpSession = user?.mcpSession;
+        if (!user || !mcpSession) {
+            return res.status(404).json({ error: "MCP session not found" });
         }
 
-        if (!user.mcpSession) {
-            return res.status(404).json({ error: "No MCP session found for user" });
-        }
+        await mcpSession.handleAuthCallback(serverUrl, authCode);
 
-        const client = user.mcpSession.mcpHost.getClientByServerUrl(serverUrl);
-        if (!client) {
-            return res.status(404).json({ error: "Client not found" });
-        }
-        const authProvider = client.authProvider;
-        if (!authProvider) {
-            return res.status(404).json({ error: "Auth provider not found" });
-        }
-
-        await auth(authProvider, { serverUrl: serverUrl, authorizationCode: authCode });
         res.status(201).json({ message: "Callback successful!" });
     } catch (error) {
         logger.error("Error in callback handler:", error);

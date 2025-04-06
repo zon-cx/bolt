@@ -176,7 +176,8 @@ export class Bot {
         chatCompletionMessages.push({
             role: "system",
             content: `
-            You are a helpful assistant. You've just used a tool and received results. Interpret these results for the user in a clear, helpful way. Please format your response as markdown.`,
+            You are a helpful assistant. You've just used a tool and received results. Interpret these results for the user in a clear, helpful way. Please format your response as markdown.
+            Just give me your interpretation of the results, no preamble.`,
         });
         let toolCallResultsMessages = "I used the tools:\n";
         toolCallResultsMessages += toolCallsRequest.toolRequests.map((toolCallRequest) => {
@@ -187,7 +188,7 @@ export class Bot {
             role: "user",
             content: toolCallResultsMessages,
         });
-        const interpretation = await llmClient.getResponse(chatCompletionMessages, this._tools);
+        const interpretation = await llmClient.getResponse(chatCompletionMessages, []);
         logger.debug(
             "Tool call interpretated for tools : " +
                 toolCallsRequest.toolRequests.map((toolCallRequest) => toolCallRequest.toolName).join(", ") +

@@ -146,13 +146,14 @@ export class McpClient {
     async listTools() {
         try {
             if (!this._connected) {
-                throw new Error("MCP client " + this.serverName + " is not connected");
+                return {};
             }
             const clientTools = (await this._client.listTools()).tools;
             const mcpToolsArray = McpToolsArray.parse(clientTools); // TODO use exported tool type & schema from the sdk
             mcpToolsArray.forEach((tool) => {
                 this.tools[tool.name] = new Tool(tool, this.serverName);
             });
+            logger.debug("Tools for " + this.serverName + ": " + JSON.stringify(this.tools));
         } catch (error) {
             logger.error("Error listing tools for " + this.serverName + ": " + error);
             return {};

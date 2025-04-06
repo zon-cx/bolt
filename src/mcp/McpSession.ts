@@ -5,6 +5,7 @@ import type { Tool } from "./Tool.js";
 import { slackClient } from "../slack/slackClient.js";
 import messageBuilder from "../slack/messageBuilder.js";
 import { McpClient } from "./McpClient.js";
+import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 
 // Correspond to a thread started with the slack Bot. It has its own sets of mcp clients.
 export class McpSession {
@@ -12,10 +13,10 @@ export class McpSession {
     private _userId: string;
     private _threadTs: string;
     private _channelId: string;
-    private _clients: Record<string, McpClient> = {};
+    private _clients: Record<string, McpClient> = {}; // indexed by server name
     private _tools: Record<string, { mcpClient: McpClient; tool: Tool }> = {};
     public connectMessageIds: Record<string, { messageTs: string; channelId: string }> = {};
-
+    public listingToolsMessageIds: Record<string, { messageTs: string; channelId: string }> = {};
     constructor(userId: string, threadTs: string, channelId: string, mcpConfig: McpConfig) {
         // TODO: better sessionId
         this._mcpSessionId = userId + "-" + threadTs;
@@ -61,12 +62,12 @@ export class McpSession {
     }
 
     async start() {
-        const postResult = await slackClient.postBlocks(
-            messageBuilder.buildInitializingMessage(),
+        const initializingHeader = await slackClient.postBlocks(
+            messageBuilder.buildInitializingHeader(),
             this._threadTs,
             this._channelId,
         );
-        const initializingMessageId = { messageTs: postResult.ts!, channelId: postResult.channel! };
+        const initializingHeaderId = { messageTs: initializingHeader.ts!, channelId: initializingHeader.channel! };
         for (const [name, client] of Object.entries(this._clients)) {
             const connectMessage = await slackClient.postBlocks(
                 messageBuilder.buildConnectingMessage(name),
@@ -82,24 +83,55 @@ export class McpSession {
             await this.handleConnect(client);
         }
         await slackClient.updateMessage(
-            messageBuilder.buildWelcomeMessage().blocks,
-            initializingMessageId.messageTs,
-            initializingMessageId.channelId,
+            messageBuilder.buildWelcomeHeader().blocks,
+            initializingHeaderId.messageTs,
+            initializingHeaderId.channelId,
         );
+        const listToolsHeader = await slackClient.postBlocks(
+            messageBuilder.buildCheckingToolsHeader(),
+            this._threadTs,
+            this._channelId,
+        );
+        const listToolsHeaderId = { messageTs: listToolsHeader.ts!, channelId: listToolsHeader.channel! };
+        for (const [name, client] of Object.entries(this._clients)) {
+            const listToolMessage = await slackClient.postBlocks(
+                messageBuilder.buildCheckingServerToolMessage(client.serverName),
+                this._threadTs,
+                this._channelId,
+            );
+            this.listingToolsMessageIds[client.serverUrl] = {
+                messageTs: listToolMessage.ts!,
+                channelId: listToolMessage.channel!,
+            };
+        }
+
         for (const [name, client] of Object.entries(this._clients)) {
             await this.handleListTools(client);
         }
 
-        await slackClient.postBlocks(messageBuilder.buildToolMessage(this.tools), this._threadTs, this._channelId);
+        await slackClient.updateMessage(
+            messageBuilder.buildListToolsHeader().blocks,
+            listToolsHeaderId.messageTs,
+            listToolsHeaderId.channelId,
+        );
 
         logger.info("MCP Session started: " + this._mcpSessionId);
     }
 
     async handleListTools(client: McpClient) {
-        await client.listTools();
-        for (const tool of Object.values(client.tools)) {
-            const toolIndex = client.serverName + "-" + tool.name; // Avoid name collision with other servers. Cannot put "." in tools for openAi
-            this._tools[toolIndex] = { mcpClient: client, tool };
+        try {
+            await client.listTools();
+            for (const tool of Object.values(client.tools)) {
+                const toolIndex = client.serverName + "-" + tool.name; // Avoid name collision with other servers. Cannot put "." in tools for openAi
+                this._tools[toolIndex] = { mcpClient: client, tool };
+            }
+            await slackClient.updateMessage(
+                messageBuilder.buildListToolsMessage(client.serverName, Object.values(client.tools)).blocks,
+                this.listingToolsMessageIds[client.serverUrl]!.messageTs,
+                this.listingToolsMessageIds[client.serverUrl]!.channelId,
+            );
+        } catch (error) {
+            logger.error("Error listing tools for " + client.serverName, error);
         }
     }
 
@@ -122,6 +154,21 @@ export class McpSession {
                 this.connectMessageIds[client.serverUrl]!.channelId,
             );
         }
+    }
+
+    async handleAuthCallback(serverUrl: string, authCode: string) {
+        const client = this.getClientByServerUrl(serverUrl);
+        if (!client) {
+            return;
+        }
+        const authProvider = client.authProvider;
+        if (!authProvider) {
+            return;
+        }
+
+        await auth(authProvider, { serverUrl: serverUrl, authorizationCode: authCode });
+        await this.handleConnect(client);
+        await this.handleListTools(client);
     }
 
     async processToolCallRequest(toolCallRequest: ToolCallRequest): Promise<void> {

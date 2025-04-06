@@ -1,58 +1,42 @@
 import type { Tool } from "../mcp/Tool.js";
 
 const messageBuilder = {
-    buildToolMessage: (tools: Tool[]) => {
-        const toolList = {
-            blocks: [
-                messageBuilder.buildDivider(),
-                messageBuilder.buildRichTextSection([{ text: "These are the mcp tools available to me:" }]),
-                messageBuilder.buildTextList(
-                    tools.map((tool) => ({
-                        text: tool.serverName + "." + tool.name + " - " + tool.description,
-                    })),
-                ),
-                messageBuilder.buildDivider(),
-            ],
-            text: "Here are the tools available to me.",
-        };
+    // buildToolsMessage: (tools: Tool[]) => {
+    //     const toolList = {
+    //         blocks: [
+    //             messageBuilder.buildDivider(),
+    //             messageBuilder.buildRichTextSection([{ text: "These are the mcp tools available to me:" }]),
+    //             messageBuilder.buildTextList(
+    //                 tools.map((tool) => ({
+    //                     text: tool.serverName + "." + tool.name + " - " + tool.description,
+    //                 })),
+    //             ),
+    //             messageBuilder.buildDivider(),
+    //         ],
+    //         text: "Here are the tools available to me.",
+    //     };
 
-        return toolList;
-    },
+    //     return toolList;
+    // },
 
-    buildInitializingMessage: () => {
+    buildInitializingHeader: () => {
         return {
             blocks: [
                 messageBuilder.buildRichTextSection([{ text: "Hello 🏴‍☠️!" }]),
                 messageBuilder.buildDivider(),
-                messageBuilder.buildRichTextSection([{ text: "Connecting to your mcp servers... Give me a sec! 🔄" }]),
+                messageBuilder.buildRichTextSection([{ text: "Connecting to your MCP servers... Give me a sec! 🔄" }]),
             ],
             text: "Here are the servers currently configured.",
         };
     },
 
-    buildWelcomeMessage: () => {
+    buildWelcomeHeader: () => {
         return {
+            text: "Here are the servers currently configured.",
             blocks: [
                 messageBuilder.buildRichTextSection([{ text: "Hello 🏴‍☠️!" }]),
                 messageBuilder.buildDivider(),
-                messageBuilder.buildRichTextSection([{ text: "These are the servers currently configured:" }]),
-            ],
-        };
-    },
-
-    buildDisconnectedMessage: (name: string, clientId: string) => {
-        return {
-            text: " - *" + name + "* - Disconnected  ❌",
-            blocks: [
-                messageBuilder.buildTextSection(` - *${name}* - Disconnected  ❌`),
-                // messageBuilder.buildActionsSection([
-                //     {
-                //         text: "Connect to" + " " + name,
-                //         value: clientId,
-                //         action_id: "connect_client",
-                //         style: "primary",
-                //     },
-                // ]),
+                messageBuilder.buildRichTextSection([{ text: "These are the MCP servers currently configured:" }]),
             ],
         };
     },
@@ -71,9 +55,10 @@ const messageBuilder = {
         };
     },
 
-    buildDivider: () => {
+    buildDisconnectedMessage: (name: string, clientId: string) => {
         return {
-            type: "divider",
+            text: " - *" + name + "* - Disconnected  ❌",
+            blocks: [messageBuilder.buildTextSection(` - *${name}* - Disconnected  ❌`)],
         };
     },
 
@@ -97,6 +82,55 @@ const messageBuilder = {
                     ],
                 },
             ],
+        };
+    },
+
+    buildCheckingToolsHeader: () => {
+        return {
+            blocks: [
+                messageBuilder.buildDivider(),
+                messageBuilder.buildTextSection("Checking what tools are available... 🔄"),
+            ],
+        };
+    },
+
+    buildListToolsHeader: () => {
+        return {
+            blocks: [
+                messageBuilder.buildDivider(),
+                messageBuilder.buildTextSection("These are the tools available to me:"),
+            ],
+        };
+    },
+
+    buildCheckingServerToolMessage: (serverName: string) => {
+        return {
+            blocks: [messageBuilder.buildTextSection(`- *${serverName}* - Checking what tools are available... 🔍`)],
+            text: " - " + serverName + ": Checking what tools are available...",
+        };
+    },
+
+    buildListToolsMessage: (name: string, tools: Tool[]) => {
+        if (tools.length === 0) {
+            return {
+                blocks: [messageBuilder.buildTextSection(`- *${name}* - No tools available... ❌`)],
+            };
+        }
+        return {
+            blocks: [
+                messageBuilder.buildTextSection(`- *${name}*:`),
+                messageBuilder.buildTextList(
+                    tools.map((tool) => ({
+                        text: tool.name + " - " + tool.description,
+                    })),
+                ),
+            ],
+        };
+    },
+
+    buildDivider: () => {
+        return {
+            type: "divider",
         };
     },
 

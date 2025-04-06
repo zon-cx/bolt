@@ -8,7 +8,7 @@ export type McpToolProperty = z.infer<typeof McpToolProperty>;
 
 export const McpToolSchema = z.object({
     type: z.string(),
-    properties: z.record(z.string(), McpToolProperty).optional(),
+    properties: z.record(z.string(), McpToolProperty).default({}),
     required: z.array(z.string()).default([]),
 });
 export type McpToolSchema = z.infer<typeof McpToolSchema>;
