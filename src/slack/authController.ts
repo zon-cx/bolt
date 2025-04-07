@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import logger from "../shared/logger.js";
 import { userStore } from "../shared/userStore.js";
 
-export const callback = async (req: Request, res: Response, next: NextFunction) => {
+export const authCallback = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authCode = req.query.code;
         const encodedState = req.query.state;

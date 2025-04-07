@@ -1,6 +1,8 @@
 {
     "display_information": {
-        "name": "<your-app-name>"
+        "name": "MCP Agent",
+        "description": "Sky is the limit!",
+        "background_color": "#001126"
     },
     "features": {
         "app_home": {
@@ -9,11 +11,11 @@
             "messages_tab_read_only_enabled": false
         },
         "bot_user": {
-            "display_name": "<your-app-name>",
+            "display_name": "MCP Agent",
             "always_online": true
         },
         "assistant_view": {
-            "assistant_description": "<your-app-description>",
+            "assistant_description": "Sky is the limit",
             "suggested_prompts": []
         }
     },
@@ -34,22 +36,18 @@
     },
     "settings": {
         "event_subscriptions": {
+            "request_url": "<YOUR NGROK URL>/slack/events",
             "bot_events": [
-                "app_home_opened",
-                "app_mention",
-                "assistant_thread_context_changed",
                 "assistant_thread_started",
-                "message.channels",
-                "message.groups",
-                "message.im",
-                "message.mpim"
+                "message.im"
             ]
         },
         "interactivity": {
-            "is_enabled": true
+            "is_enabled": true,
+            "request_url": "<YOUR NGROK URL>/slack/events"
         },
         "org_deploy_enabled": false,
-        "socket_mode_enabled": true,
+        "socket_mode_enabled": false,
         "token_rotation_enabled": false
     }
 }

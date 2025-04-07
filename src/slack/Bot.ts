@@ -16,16 +16,21 @@ import type { ToolCallRequest, McpClientConnectionRequest, ToolCallsRequest } fr
 import { slackClient } from "./slackClient.js";
 import { userStore } from "../shared/userStore.js";
 import { User } from "../shared/User.js";
+import { authCallback } from "./authController.js";
+import type { RequestHandler } from "express";
 
 export class Bot {
     private _app: bolt.App;
+    private _receiver: bolt.ExpressReceiver;
     constructor() {
+        this._receiver = new bolt.ExpressReceiver({ signingSecret: getOrThrow("SLACK_SIGNING_SECRET") });
+
         this._app = new bolt.App({
             token: getOrThrow("SLACK_BOT_TOKEN"),
             appToken: getOrThrow("SLACK_APP_TOKEN"),
             signingSecret: getOrThrow("SLACK_SIGNING_SECRET"),
             logLevel: bolt.LogLevel.INFO,
-            socketMode: true,
+            receiver: this._receiver,
         });
     }
 
@@ -39,6 +44,8 @@ export class Bot {
         this._app.action("approve_tool_call", this._proceedWithToolCallAction);
         this._app.action("cancel_tool_call", this._cancelToolCallAction);
         this._app.action("redirect", this._redirectAction);
+
+        this._receiver.router.get("/auth-callback", authCallback as RequestHandler);
         await this._app.start(process.env.PORT || 3000);
     }
 
