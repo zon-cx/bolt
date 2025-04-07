@@ -10,7 +10,6 @@ class SlackClient {
     }
 
     async postBlocks(blocks: { blocks: (KnownBlock | Block)[]; text?: string }, threadTs: string, channelId: string) {
-        console.dir(blocks, { depth: null });
         const result = await this._webClient.chat.postMessage({
             ...blocks,
             thread_ts: threadTs,
@@ -20,7 +19,7 @@ class SlackClient {
     }
 
     async postMarkdown(text: string, threadTs: string, channelId: string) {
-        const blocks = [{ type: "markdown", text }] as any;
+        const blocks = [{ type: "markdown", text }] as unknown as KnownBlock[];
         const result = await this._webClient.chat.postMessage({
             blocks,
             thread_ts: threadTs,

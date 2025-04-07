@@ -2,8 +2,8 @@
 A slack bot with an MCP client for slack in Typescript
 
 Current support for:
-- SSE & Stdio MCP servers.
-- MCP Tools only
+- HTTP Streamable, SSE & Stdio MCP servers.
+- MCP Tools only (more coming soon)
 
 ## Installation
 

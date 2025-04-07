@@ -1,6 +1,5 @@
 import bolt, { type AssistantThreadStartedMiddleware, type AssistantUserMessageMiddleware } from "@slack/bolt";
 import { getOrThrow } from "../shared/utils.js";
-import type { Tool } from "../mcp/Tool.js";
 import type { ConversationsRepliesResponse } from "@slack/web-api";
 import { llmClient } from "../llm/LlmClient.js";
 import type {
@@ -17,9 +16,9 @@ import type { ToolCallRequest, McpClientConnectionRequest, ToolCallsRequest } fr
 import { slackClient } from "./slackClient.js";
 import { userStore } from "../shared/userStore.js";
 import { User } from "../shared/User.js";
+
 export class Bot {
     private _app: bolt.App;
-    private _tools: Tool[];
     constructor() {
         this._app = new bolt.App({
             token: getOrThrow("SLACK_BOT_TOKEN"),
@@ -28,7 +27,6 @@ export class Bot {
             logLevel: bolt.LogLevel.INFO,
             socketMode: true,
         });
-        this._tools = [];
     }
 
     async start() {
