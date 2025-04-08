@@ -22,10 +22,6 @@ export class User {
         this._mcpServerAuths = {};
     }
 
-    get id() {
-        return this._slackUserId;
-    }
-
     get mcpSession() {
         return this._mcpSession;
     }
@@ -48,16 +44,5 @@ export class User {
         }
         this._mcpSession = new McpSession(this._slackUserId, threadTs, channelId, mcpJsonConfig);
         await this._mcpSession.start();
-    }
-
-    getMcpServerAuth(serverUrl: string) {
-        if (!this._mcpServerAuths[serverUrl]) {
-            throw new Error("No mcp server auth found for user " + this._slackUserId + " and server url " + serverUrl);
-        }
-        return this._mcpServerAuths[serverUrl];
-    }
-
-    setMcpServerAuth(serverUrl: string, mcpServerAuth: McpServerAuth) {
-        this._mcpServerAuths[serverUrl] = mcpServerAuth;
     }
 }

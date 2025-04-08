@@ -7,6 +7,7 @@ Current support for:
 - MCP Tools only (more coming soon)
 
 It is currently using OpenAI as the LLM for chat completion. 
+All users information (namely current session with the bot as well as mcp server auth tokens) are only stored in memory for now.
 
 ## Installation
 

@@ -2,6 +2,7 @@ import logger from "./logger.js";
 import { OrderedFixedSizeMap } from "./OrderedFixedSizeMap.js";
 import type { User } from "./User.js";
 
+// Todo: move to a database
 class UserStore {
     private _userStorage: OrderedFixedSizeMap<string, User>; // indexed by slackUserId
 

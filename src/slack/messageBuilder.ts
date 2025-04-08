@@ -1,5 +1,6 @@
 import type { Tool } from "../mcp/Tool.js";
 import type { ColorScheme, KnownBlock, Block } from "@slack/web-api";
+import type { ToolCallRequest } from "../mcp/McpSession.js";
 
 const messageBuilder = {
     initializingHeader: (): {
@@ -159,6 +160,53 @@ const messageBuilder = {
     divider: (): KnownBlock => {
         return {
             type: "divider",
+        };
+    },
+
+    toolRequest: (
+        toolRequests: ToolCallRequest[],
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
+        const plural = toolRequests.length > 1 ? "s" : "";
+        return {
+            blocks: [
+                messageBuilder.textSection(`I want to use the following tool${plural}:`),
+                messageBuilder.textList(
+                    toolRequests.map((toolRequest) => ({
+                        text: toolRequest.toolName + " with arguments:\n" + JSON.stringify(toolRequest.toolArgs),
+                    })),
+                ),
+                {
+                    type: "actions",
+                    elements: [
+                        {
+                            type: "button",
+                            text: {
+                                type: "plain_text",
+                                text: "Go for it",
+                                emoji: true,
+                            },
+                            value: "approve_tool_call",
+                            action_id: "approve_tool_call",
+                            style: "primary",
+                        },
+                        {
+                            type: "button",
+                            text: {
+                                type: "plain_text",
+                                text: "Plz no",
+                                emoji: true,
+                            },
+                            value: "cancel_tool_call",
+                            action_id: "cancel_tool_call",
+                            style: "danger",
+                        },
+                    ],
+                },
+            ],
+            text: `I want to use the following tool${plural}:`,
         };
     },
 

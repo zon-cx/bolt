@@ -1,5 +1,5 @@
-import type { McpTool, McpToolSchema } from "./mcp.types.js";
-import type { OpenAiTool } from "../llm/llm.types.js";
+import type { McpTool, McpToolSchema } from "./McpClient.js";
+import type { OpenAiTool } from "../llm/llmClient.js";
 
 export class Tool {
     public serverName: string;

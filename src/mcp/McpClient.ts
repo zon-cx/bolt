@@ -1,4 +1,5 @@
 import logger from "../shared/logger.js";
+import { z } from "zod";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -8,8 +9,6 @@ import { UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotoc
 
 import { HttpClientTransport } from "./HttpTransport.js";
 
-import type { McpClientConfig } from "./mcp.types.js";
-import { McpToolsArray } from "./mcp.types.js";
 import { Tool } from "./Tool.js";
 import { SlackOAuthClientProvider } from "./SlackOauthClientProvider.js";
 import { McpSession } from "./McpSession.js";
@@ -17,6 +16,47 @@ import { McpSession } from "./McpSession.js";
 import type { User, McpServerAuth } from "../shared/User.js";
 import { userStore } from "../shared/userStore.js";
 import { getOrThrow } from "../shared/utils.js";
+
+const HttpClientConfig = z.object({
+    url: z.string().url(),
+    env: z.record(z.string(), z.string()).optional(),
+});
+
+const SseClientConfig = z.object({
+    url: z.string().url(),
+    env: z.record(z.string(), z.string()).optional(),
+});
+
+const StdioClientConfig = z.object({
+    command: z.string(),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+});
+
+export const McpClientConfig = z.union([StdioClientConfig, SseClientConfig, HttpClientConfig]);
+export type McpClientConfig = z.infer<typeof McpClientConfig>;
+
+const McpToolProperty = z.object({
+    type: z.string(),
+    description: z.string().default(""),
+});
+type McpToolProperty = z.infer<typeof McpToolProperty>;
+
+const McpToolSchema = z.object({
+    type: z.string(),
+    properties: z.record(z.string(), McpToolProperty).default({}),
+    required: z.array(z.string()).default([]),
+});
+export type McpToolSchema = z.infer<typeof McpToolSchema>;
+
+export const McpTool = z.object({
+    name: z.string(),
+    description: z.string(),
+    inputSchema: McpToolSchema,
+});
+export type McpTool = z.infer<typeof McpTool>;
+
+export const McpToolsArray = z.array(McpTool);
 
 export class McpClient {
     private _config: McpClientConfig;

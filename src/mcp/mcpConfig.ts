@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { z } from "zod";
 import logger from "../shared/logger.js";
-import { McpConfig } from "./mcp.types.js";
+import { McpConfig } from "./McpSession.js";
 
 /**
  * Load client configuration from JSON file.

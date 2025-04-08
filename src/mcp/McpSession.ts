@@ -1,11 +1,23 @@
 import logger from "../shared/logger.js";
-import type { ToolCallRequest } from "../slack/actionRequestStore.js";
-import type { McpConfig } from "./mcp.types.js";
+import { z } from "zod";
 import type { Tool } from "./Tool.js";
 import { slackClient } from "../slack/slackClient.js";
 import messageBuilder from "../slack/messageBuilder.js";
 import { McpClient } from "./McpClient.js";
+import { McpClientConfig } from "./McpClient.js";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
+
+export const McpConfig = z.object({
+    mcpServers: z.record(z.string(), McpClientConfig),
+});
+export type McpConfig = z.infer<typeof McpConfig>;
+
+export type ToolCallRequest = {
+    toolName: string;
+    toolArgs: Record<string, unknown>;
+    toolCallResult: any;
+    success: boolean;
+};
 
 // Correspond to a thread started with the slack Bot. It has its own sets of mcp clients.
 export class McpSession {
@@ -49,7 +61,6 @@ export class McpSession {
         await this._clients[serverName].disconnect();
     }
 
-    // TODO clean that
     get tools(): Tool[] {
         return Object.values(this._tools).map((tool) => tool.tool);
     }

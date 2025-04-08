@@ -1,7 +1,7 @@
 import bolt, { type AssistantThreadStartedMiddleware, type AssistantUserMessageMiddleware } from "@slack/bolt";
 import { getOrThrow } from "../shared/utils.js";
-import type { ConversationsRepliesResponse } from "@slack/web-api";
-import { llmClient } from "../llm/LlmClient.js";
+import type { ConversationsRepliesResponse, RichTextSection, RichTextBlock, RichTextText } from "@slack/web-api";
+import { llmClient } from "../llm/llmClient.js";
 import type {
     ChatCompletionMessageParam,
     ChatCompletionSystemMessageParam,
@@ -9,15 +9,13 @@ import type {
 } from "openai/resources/chat/completions";
 import logger from "../shared/logger.js";
 import messageBuilder from "./messageBuilder.js";
-import { stableHash } from "stable-hash";
 import { McpSession } from "../mcp/McpSession.js";
-import { actionRequestStore } from "./actionRequestStore.js";
-import type { ToolCallRequest, McpClientConnectionRequest, ToolCallsRequest } from "./actionRequestStore.js";
 import { slackClient } from "./slackClient.js";
 import { userStore } from "../shared/userStore.js";
 import { User } from "../shared/User.js";
 import { authCallback } from "./authController.js";
 import type { RequestHandler } from "express";
+import type { ToolCallRequest } from "../mcp/McpSession.js";
 
 export class Bot {
     private _app: bolt.App;
@@ -51,36 +49,18 @@ export class Bot {
 
     // Only usefull to ack() and remove the warning from the slack interface
     private _redirectAction = async ({
-        payload,
-        body,
         ack,
         respond,
-        say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
-        // Todo use proper action value
         ack();
         await respond({ text: "Check your browser!" });
     };
 
     private _cancelToolCallAction = async ({
-        payload,
-        body,
         ack,
         respond,
-        say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
         ack();
-        if (!payload.value) {
-            logger.error("No payload value found");
-            await respond({ text: "Sorry something went wrong. Please try again." });
-            return;
-        }
-        const toolCallParams = actionRequestStore.getAndDelete(payload.value) as ToolCallRequest | undefined;
-        if (!toolCallParams) {
-            logger.error("Tool call params not found in cache");
-            await respond({ text: "Sorry something went wrong. Please try again." });
-            return;
-        }
         await respond({
             text: "Ok, I'm not going to use that tool. What else can I do for you?",
         });
@@ -95,16 +75,18 @@ export class Bot {
         say,
     }: bolt.SlackActionMiddlewareArgs<bolt.BlockAction<bolt.ButtonAction>>) => {
         ack();
-        const toolCallsRequest = actionRequestStore.getAndDelete(payload.value || "") as ToolCallsRequest | undefined;
-        if (!toolCallsRequest || !toolCallsRequest.userId) {
-            logger.error("Tool call request not found in cache");
+        let toolRequests: ToolCallRequest[] = [];
+        try {
+            toolRequests = Bot._extractToolCallRequest(body);
+        } catch (e) {
+            logger.error(e);
             await respond({ text: "Sorry something went wrong. Please try again." });
             return;
         }
-        const user = userStore.get(toolCallsRequest.userId);
+        const user = userStore.get(body.user.id);
         const mcpSession = user?.mcpSession;
         if (!mcpSession) {
-            logger.error("No mcpSession found for userId: " + toolCallsRequest.userId);
+            logger.error("No mcpSession found for userId: " + body.user.id);
             await respond({ text: "Sorry something went wrong. Please try again." });
             return;
         }
@@ -112,11 +94,9 @@ export class Bot {
         await respond({ text: "Ok, I'm working on it..." });
 
         await Promise.all(
-            toolCallsRequest.toolRequests.map((toolCallRequest) =>
-                this._processToolCallRequest(toolCallRequest, mcpSession),
-            ),
+            toolRequests.map((toolCallRequest) => this._processToolCallRequest(toolCallRequest, mcpSession)),
         );
-        if (!toolCallsRequest.toolRequests.every((toolCallRequest) => toolCallRequest.success)) {
+        if (!toolRequests.every((toolCallRequest) => toolCallRequest.success)) {
             await respond({ text: "Sorry something went wrong. Please try again." });
             return;
         }
@@ -125,10 +105,10 @@ export class Bot {
             role: "system",
             content: `
             You are a helpful assistant. You've just used a tool and received results. Interpret these results for the user in a clear, helpful way. Please format your response as markdown.
-            Just give me your interpretation of the results, no preamble.`,
+            Just give me your interpretation of the results, no extra text before.`,
         });
         let toolCallResultsMessages = "I used the tools:\n";
-        toolCallResultsMessages += toolCallsRequest.toolRequests.map((toolCallRequest) => {
+        toolCallResultsMessages += toolRequests.map((toolCallRequest) => {
             return `- ${toolCallRequest.toolName} with arguments "${toolCallRequest.toolArgs}" and got this result:\n${toolCallRequest.toolCallResult.content[0].text}\n`; //TODO type the toolCallResult
         });
         toolCallResultsMessages += "\n\nPlease interpret these results for me.";
@@ -139,7 +119,7 @@ export class Bot {
         const interpretation = await llmClient.getResponse(chatCompletionMessages, []);
         logger.debug(
             "Tool call interpretated for tools : " +
-                toolCallsRequest.toolRequests.map((toolCallRequest) => toolCallRequest.toolName).join(", ") +
+                toolRequests.map((toolCallRequest) => toolCallRequest.toolName).join(", ") +
                 " - " +
                 interpretation?.content,
         );
@@ -194,12 +174,11 @@ export class Bot {
                 return;
             }
 
-            // Get the last 5 messages in the thread and prepare it for the LLM with the system message
-            //Todo use the slackClient to get the conversation replies
+            // Get the last 10 messages in the thread and prepare it for the LLM with the system message
             const conversationReplies = await client.conversations.replies({
                 channel: messageInThread.channel,
                 ts: messageInThread.thread_ts!,
-                limit: 5,
+                limit: 10,
             });
             const chatCompletionMessages = Bot._toChatCompletionMessages(conversationReplies);
             chatCompletionMessages.unshift(Bot._getSystemMessage()); // add the system message at the beginning of the conversation
@@ -215,13 +194,6 @@ export class Bot {
                         success: false,
                     };
                 });
-                const toolCallRequests: ToolCallsRequest = {
-                    type: "tool_calls",
-                    userId: user.id,
-                    toolRequests: toolRequests,
-                };
-                const toolRequestHash = stableHash(JSON.stringify(toolRequests));
-                actionRequestStore.set(toolRequestHash, toolCallRequests);
                 let toolRequestMessage = "I want to use: \n";
                 toolRequestMessage += toolRequests
                     .map(
@@ -231,7 +203,7 @@ export class Bot {
                     .join("\nand\n");
                 toolRequestMessage += ".";
                 await slackClient.postBlocks(
-                    messageBuilder.approvalButtons(toolRequestMessage, toolRequestHash),
+                    messageBuilder.toolRequest(toolRequests),
                     mcpSession.threadTs,
                     mcpSession.channelId,
                 );
@@ -310,6 +282,32 @@ You are a friendly slack assistant that can help answer questions and help with 
         };
         return systemMessage;
     }
-}
 
+    private static _extractToolCallRequest(actionBody: bolt.BlockAction<bolt.ButtonAction>): ToolCallRequest[] {
+        const messageBlocks = actionBody.message?.blocks;
+        if (!messageBlocks || !messageBlocks.length || messageBlocks.length !== 3) {
+            throw new Error("Tool params not found");
+        }
+        const toolRequestList = (messageBlocks[1] as RichTextBlock).elements[0]!
+            .elements as unknown as RichTextSection[];
+        const toolRequests = toolRequestList.map((element) => {
+            const toolMessage = element.elements[0]! as RichTextText;
+            const toolName = toolMessage.text.split(" with arguments:\n")[0];
+            const toolArgs = JSON.parse(toolMessage.text.split(" with arguments:\n")[1] || "{}") as Record<
+                string,
+                unknown
+            >;
+            if (!toolName || !toolArgs) {
+                throw new Error("Tool name or args not found");
+            }
+            return {
+                toolName: toolName,
+                toolArgs: toolArgs,
+                toolCallResult: null,
+                success: false,
+            };
+        });
+        return toolRequests;
+    }
+}
 export default Bot;
