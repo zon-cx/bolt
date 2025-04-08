@@ -43,7 +43,7 @@ export class Bot {
         this._app.action("cancel_tool_call", this._cancelToolCallAction);
         this._app.action("redirect", this._redirectAction);
 
-        this._receiver.router.get("/auth-callback", authCallback as RequestHandler);
+        this._receiver.router.get("/auth/callback", authCallback as RequestHandler);
         await this._app.start(process.env.PORT || 3000);
     }
 
