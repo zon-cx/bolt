@@ -1,9 +1,12 @@
-# slack-mcp-client
+# Slack MCP Client
 A slack bot with an MCP client for slack in Typescript
 
 Current support for:
-- HTTP Streamable, SSE & Stdio MCP servers.
+- HTTP Streamable, Stdio MCP servers as defined in version 2025-03-26
+- SSE MCP servers as defined in the previous version. 
 - MCP Tools only (more coming soon)
+
+It is currently using OpenAI as the LLM for chat completion. 
 
 ## Installation
 
@@ -35,7 +38,8 @@ cp .env.example .env
 
 - Node 22 (`lts/jod`)
 - pnpm 10
-- Some MCP servers running accessible over stdio, sse or streamable http
+- an OpenAI API key
+- Some MCP servers running accessible over stdio, sse or streamable http. You can checkout [this list](https://github.com/modelcontextprotocol/servers) if you need!
 
 ### Instructions
 
@@ -60,6 +64,15 @@ pnpm run dev
 - Open a new thread of discussion with your bot and have fun.
 
 
-# Useful Doc:
+## Useful Doc
 
 - Bolt AI Assistant Apps: https://tools.slack.dev/bolt-js/concepts/ai-apps/
+
+
+## License
+
+This project is licensed under MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to open an issue or to submit a pull request 🚀!

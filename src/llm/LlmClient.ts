@@ -8,11 +8,11 @@ class LlmClient {
     private _client: OpenAI;
     private _model: string;
 
-    constructor(model: string = "gpt-4o-mini") {
+    constructor() {
         this._client = new OpenAI({
             apiKey: getOrThrow("OPENAI_API_KEY"),
         });
-        this._model = model;
+        this._model = getOrThrow("OPENAI_MODEL");
     }
 
     async getResponse(messages: ChatCompletionMessageParam[], tools: Tool[] = []) {
