@@ -8,6 +8,7 @@ Current support for:
 - MCP Tools only (more coming soon)
 
 Check out the video for a brief overview of what it can do! The video is using [this linkedin-mcp-server](https://github.com/fredericbarthelet/linkedin-mcp-server) which supports the latest authentication specification of the protocol. 
+
 https://github.com/user-attachments/assets/1232d292-4a30-44c4-a05d-bf07d7c5c882
 
 ## Installation
