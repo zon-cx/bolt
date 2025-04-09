@@ -1,13 +1,14 @@
 # Slack MCP Client
-A slack bot with an MCP client for slack in Typescript
+A slack bot with an MCP client for slack in Typescript.
 
 Current support for:
 - HTTP Streamable, Stdio MCP servers as defined in version 2025-03-26
-- SSE MCP servers as defined in the previous version. 
+- The Oauth based authorization flow defined in version 2025-03-26
+- SSE MCP servers as defined in the previous version of the protocol. 
 - MCP Tools only (more coming soon)
 
-It is currently using OpenAI as the LLM for chat completion. 
-All users information (namely current session with the bot as well as mcp server auth tokens) are only stored in memory for now.
+Check out the video for a brief overview of what it can do! The video is using [this linkedin-mcp-server](https://github.com/fredericbarthelet/linkedin-mcp-server) which supports the latest authentication specification of the protocol. 
+https://github.com/user-attachments/assets/1232d292-4a30-44c4-a05d-bf07d7c5c882
 
 ## Installation
 
