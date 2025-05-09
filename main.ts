@@ -48,6 +48,7 @@ app.event("app_mention", async ({ event, say }) => {
     text: `Hello ${"user" in event ? `<@${event.user}>` : ''}, How can I help you today?`,
   });
 });
+// When a user sends a message or mentions the bot:
 
 
 /** Sample Function Listener */
