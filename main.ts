@@ -39,8 +39,6 @@ app.message(":wave:", async ({ message, say,context , ack}) => {
     text: `Hello, ${"user" in message ? `<@${message.user}>` : ''}`,
   });
 });
-
-
 app.event("app_mention", async ({ event, say }) => {
   console.log('app_mention',event);
   await say({
