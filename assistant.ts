@@ -1,6 +1,6 @@
 import pkg, { AllMiddlewareArgs } from "@slack/bolt";
-import { ActionFunctionMap, createActor, fromPromise, waitFor } from "xstate";
-import { slack, threadBootstrap, messageMachine } from "./thread.ts";
+import { ActionFunctionMap, createActor, fromPromise, toPromise, waitFor } from "xstate";
+import { slack, threadBootstrap, messageMachine, actors,actions } from "./thread.ts";
 
 const { Assistant } = pkg;
 
@@ -10,52 +10,6 @@ type AssistantThreadStartedMiddlewareArgs =
 type AssistantUserMessageMiddlewareArgs =
   Parameters<pkg.AssistantUserMessageMiddleware>[0];
 
-const actions = ({
-  say,
-  setStatus,
-  setTitle,
-  setSuggestedPrompts,
-  saveThreadContext
-}: AssistantThreadStartedMiddlewareArgs | AssistantUserMessageMiddlewareArgs) =>
-  ({
-    say: (_, params) => say(params),
-    setStatus: (_, params) => setStatus(params),
-    setSuggestedPrompts: (_, params) => {
-      console.log("setting prompts", params);
-      setSuggestedPrompts(params)
-        .then((res) => {
-          console.log("setting prompts res", res);
-        })
-        .catch((err) => {
-          console.log("setting prompts err", err);
-        });
-    },
-    setTitle: (_, params: string) => setTitle(params),
-    saveContext: saveThreadContext,
-  } satisfies Partial<(typeof slack)["actions"]>);
-
-const actors = ({
-  say,
-  saveThreadContext,
-  setStatus,
-  setTitle,
-  setSuggestedPrompts,
-  getThreadContext,
-}: AssistantThreadStartedMiddlewareArgs | AssistantUserMessageMiddlewareArgs) =>
-  ({
-    say: fromPromise(async ({ input }) => await say(input)),
-    saveContext: fromPromise(saveThreadContext),
-    getContext: fromPromise(getThreadContext),
-    setStatus: fromPromise(
-      async ({ input }: { input: string }) => await setStatus(input)
-    ),
-    setSuggestedPrompts: fromPromise(
-      async ({ input }) => await setSuggestedPrompts(input)
-    ),
-    setTitle: fromPromise(
-      async ({ input }: { input: string }) => await setTitle(input)
-    ),
-  } satisfies Partial<(typeof slack)["actors"]>);
 
 const assistant = new Assistant({
   /**
@@ -89,7 +43,7 @@ const assistant = new Assistant({
       }
     );
     boostrap.start();
-    await waitFor(boostrap, (state) => state.matches("done"));
+    await toPromise(boostrap);
     
     /*threads.set(event.assistant_thread.thread_ts,createActor(
       messageMachine.provide({
@@ -154,7 +108,13 @@ const assistant = new Assistant({
    */
   userMessage: async (args) => {
     const {  logger ,message} = args;
-    const messageActor = createActor(
+
+    if(message.subtype  =="bot_message" &&  message.bot_id == args.context.botId ) {
+      console.log("bot message",message);
+      return;
+    }
+
+     const messageActor = createActor(
       messageMachine.provide({
         actors: actors(args),
         actions: actions(args),
@@ -162,6 +122,11 @@ const assistant = new Assistant({
       {
         id: message.ts,
         input:  {
+          history: await args.client.conversations.replies({
+            channel: message.channel,
+            ts: message.ts,
+            oldest: message.ts,
+          }).then((res)=>res.messages),
           message:  message as pkg.KnownEventFromType<"message"> & { subtype: "me_message" }
         },
        logger: (...args) => {
@@ -169,7 +134,8 @@ const assistant = new Assistant({
         },
       }
     );
-    await waitFor(messageActor, (state) => state.matches("done"));
+    messageActor.start();
+    await toPromise(messageActor);
   },
 });
 

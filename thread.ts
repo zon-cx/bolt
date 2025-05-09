@@ -313,10 +313,11 @@ export const messageMachine = messageSetup.createMachine({
           history: context.history || [],
         }),
         onDone: {
-          target: "sendingResponse",
-          actions: assign({
-            response: ({ event }) => event.output,
-          }),
+          target: "done",
+          actions:  {
+            type: "say",
+            params: ({ event }) => event.output,
+          }
         },
         onError: {
           target: "error",
@@ -396,7 +397,7 @@ export const messageMachine = messageSetup.createMachine({
       type: "final",
       entry: {
         type: "say",
-        params: "Sorry, something went wrong!",
+        params:({context})=> "Sorry, something went wrong! " + (context.error?.message || "" ) + "\nStack:\n" + (context.error?.stack || ""),
       },
     },
   },
@@ -408,7 +409,7 @@ type AssistantThreadStartedMiddlewareArgs =
 type AssistantUserMessageMiddlewareArgs =
   Parameters<pkg.AssistantUserMessageMiddleware>[0];
 
-const actions = ({
+export const actions = ({
   say,
   setStatus,
   setTitle,
@@ -432,13 +433,13 @@ const actions = ({
     saveContext: saveThreadContext,
   } satisfies Partial<(typeof slack)["actions"]>);
 
-const actors = ({
+export const actors = ({
   say,
   saveThreadContext,
   setStatus,
   setTitle,
   setSuggestedPrompts,
-  getThreadContext,
+  getThreadContext
 }: AssistantThreadStartedMiddlewareArgs | AssistantUserMessageMiddlewareArgs) =>
   ({
     say: fromPromise(async ({ input }) => await say(input)),
@@ -453,6 +454,11 @@ const actors = ({
     setTitle: fromPromise(
       async ({ input }: { input: string }) => await setTitle(input)
     ),
+    // fetchThreadHistory: fromPromise(async ({ input }) => await client.conversations.replies({
+    //   channel: context.botId,
+    //   ts: input.message.ts,
+    //   oldest: input.message.ts,
+    // }).then((res)=>res.messages))
   } satisfies Partial<(typeof slack)["actors"]>);
 
 
@@ -465,11 +471,15 @@ const actors = ({
   const threadSetup = setup({
     types: {} as {
       context: {
+        bot:string;
         history?: MessageHistory[];
         summary?: string;
         error?: unknown;
       };
-      events: MessageEvent | {type:"end"}
+      events: MessageEvent | {type:"end"},
+      input: {
+        bot:string;
+      },
     },
     actors: {
       ...slack.actors,
