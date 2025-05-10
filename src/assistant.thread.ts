@@ -1,15 +1,18 @@
-import { enqueueActions,setup,assign } from "xstate";
-import { messageMachine, actions, actors, MessageHistory, MessageEvent, slack, threadBootstrap } from "./message.ts";
+import { enqueueActions,setup,assign , fromPromise} from "xstate";
+import { messageMachine } from "./assistant.message.ts";
 import pkg from "@slack/bolt";
+import { MessageHistory, slack ,actions,actors,MessageEvent} from "./slack.assistant.ts";
+
+type ThreadContext = {
+  history?: MessageHistory[];
+  summary?: string;
+  error?: any;
+  thread:pkg.types.AssistantThreadStartedEvent["assistant_thread"],
+  bot: pkg.Context
+}
 export const threadSetup = setup({
   types: {} as {
-    context: {
-      history?: MessageHistory[];
-      summary?: string;
-      error?: unknown;
-      thread:pkg.types.AssistantThreadStartedEvent["assistant_thread"],
-      bot: pkg.Context
-    }  
+    context: ThreadContext;
     events: MessageEvent | { type: "end"; };
     input: {
       thread:pkg.types.AssistantThreadStartedEvent["assistant_thread"],
@@ -19,7 +22,9 @@ export const threadSetup = setup({
   actors: {
     ...slack.actors,
     message: messageMachine,
-    bootstrap: threadBootstrap
+    bootstrap: fromPromise(async function({input}:{input:ThreadContext}){
+        console.log("bootstraping default implementation" , input);
+    })
   },
   actions: slack.actions,
 });
@@ -29,21 +34,6 @@ const threadMachine = threadSetup.createMachine({
   initial: "boostrap",
   context: ({input})=>input,
   states: {
-    fetchingHistory: {
-      entry: {
-        type: "setStatus",
-        params: "fetching history...",
-      },
-      invoke: {
-        src: "fetchThreadHistory",
-        onDone: {
-          target: "listening",
-          actions: assign({
-            history: ({ event }) => event.output
-          }),
-        },
-      },
-    },
     boostrap: {
       entry: {
         type: "setStatus",
@@ -51,11 +41,17 @@ const threadMachine = threadSetup.createMachine({
       },
       invoke: {
         src: "bootstrap",
-        input: ({context})=>context.thread,
+        input: ({context})=>context,
         onDone: {
           target: "listening",
+          actions: {
+            type:"saveContext"
+          }
         },
-      },
+        onError: {
+          target: "error",
+        },
+      }
     },
     listening: {
       entry: {
@@ -94,10 +90,7 @@ const threadMachine = threadSetup.createMachine({
 
           }),
           guard: ({ event,context }) => event.message.subtype !== "bot_message" || event.message.bot_id !== context.bot.botId
-        },
-        
-        },
-
+        }, 
         end: {
           target: "done",
         },
@@ -106,10 +99,19 @@ const threadMachine = threadSetup.createMachine({
 
     done: {
       type: "final",
+      entry: {
+        type: "say",
+        params: "Goodbye! It was nice talking to you!"
+      },
     },
     error: {
       type: "final",
-    },
-  });
+      entry: {
+        type: "say",
+        params:({context:{error}})=> "Sorry, something went wrong! " +  "message" in error ? error.message : ""
+      }
+    }
+  }
+});
 
 export default threadMachine;

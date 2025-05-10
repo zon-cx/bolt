@@ -5,7 +5,7 @@
   "main": "main.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx --env-file=.env main.ts"
+    "dev": "tsx --env-file=.env src/slack.app.ts"
   },
   "keywords": [],
   "author": "",
@@ -13,12 +13,13 @@
   "type": "module",
   "dependencies": {
     "@ai-sdk/azure": "^1.3.23",
-    "@cxai/stream": "^1.0.18",
+    "@cxai/stream": "^1.0.20",
     "@slack/bolt": "^4.3.0",
     "ai": "^4.3.15",
     "openai": "^4.97.0",
     "slack-edge": "^1.3.8",
-    "xstate": "^5.19.2"
+    "xstate": "^5.19.2",
+    "yjs": "^13.6.26"
   },
   "devDependencies": {
     "@types/node": "^20.11.18",
