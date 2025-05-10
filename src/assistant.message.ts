@@ -1,129 +1,53 @@
-import { 
-  assign, 
-  setup, 
-} from "xstate";
-import pkg from "@slack/bolt";
- import { MessageHistory, slack } from "./slack.assistant.ts";
-import { llmResponder } from "./ai.ts";
-// --- Type Definitions ---
+import { fromEventAsyncGenerator } from "@cxai/stream";
+import {  z } from "zod";
+import { generateText,Schema} from "ai";
+import { azure } from "@ai-sdk/azure";
+import { generateObject } from "ai";
+import {Communication,  Messages} from "./assistant";
 
-
+type MessageInput={
+  schema?:z.ZodTypeAny | Schema<Record<string, any>>,
+  prompt?: string
+} & Messages.Input
  
- 
-const messageSetup = setup({
-  types: {} as {
-    context: {
-      history?: MessageHistory[];
-      message: pkg.KnownEventFromType<"message"> & { subtype: "me_message" };
-      response?: string;
-      error?: any;
-    };
-    input: {
-      message: pkg.KnownEventFromType<"message"> & { subtype: "me_message" };
-      history?: MessageHistory[];
-    };
-  },
-  actors: {
-    ...slack.actors,
-    llm:llmResponder
-  },
-  actions: slack.actions,
-});
+ const message = fromEventAsyncGenerator(async function* ({input: {prompt, messages, context}}:{input: MessageInput}): AsyncGenerator<Communication.Event> {
 
-export const messageMachine = messageSetup.createMachine({
-  id: "message",
-  initial: "responding",
+   yield {
+    type: "status",
+    status: "generating..."
+  }
+  await new Promise(resolve => setTimeout(resolve, 5));
 
-  context: ({ input }) => input,
-  states: {
-    loading: {
-      entry: {
-        type: "setStatus",
-        params: "loading...",
-      },
-      invoke: {
-        src: "fetchThreadHistory",
-        onDone: {
-          target: "responding",
-          actions: assign({
-            history: ({ context, event }) => [
-              ...(event.output || []),
-              context.message,
-            ],
-          }),
-        },
-        onError: {
-          target: "error",
-          actions: assign({
-            error: ({ event }) => event.error,
-          }),
-        },
-      },
-    },
-    responding: {
-      entry: {
-        type: "setStatus",
-        params: "is thinking...",
-      },
-      invoke: {
-        src: "llm",
-        input: ({ context }) => ({
-          history: [...(context.history || []), context.message],
+   const schema=z.object({
+       text: z.string()
+    })
+  const {object:say} = await generateObject<z.infer<typeof schema>>({
+    model: azure("gpt-4o"),
+    system: "You are a helpful assistant, respond to the user's message in the requested schema format.",
+    messages: messages,
+    schema:schema,
+    prompt
+  }) 
 
-        }),
-        onDone: {
-          target: "done",
-          actions:  {
-            type: "say",
-            params: ({ event }) => event.output,
-          }
-        },
-        onError: {
-          target: "error",
-          actions: assign({
-            error: ({ event }) => event.error,
-          }),
-        },
-      },
-    },
-    setTitle: {
-      entry: {
-        type: "setStatus",
-        params: "finalizing...",
-      },
-      invoke: {
-        src: "llm",
-        input: ({ context }) => ({
-          history: context.history,
-          system: "suggest a title for the conversation.",
-        }),
-        onDone: {
-          target: "done",
-          actions: {
-            type: "setTitle",
-            params: ({ event }) => event.output,
-          },
-        },
-        onError: {
-          target: "error",
-          actions: assign({
-            error: ({ event }) => event.error,
-          }),
-        },
-      },
-    },
+  yield {
+    type: "say",
+    message: say.text
+  } 
 
-    done: {
-      type: "final",
-      output: ({ context }) => context,
-    },
-    error: {
-      type: "final",
-      entry: {
-        type: "say",
-        params:({context})=> "Sorry, something went wrong! " + (context.error?.message || "" ) + "\nStack:\n" + (context.error?.stack || ""),
-      },
-    }
-  },
-});
+  const {text} = await generateText({
+    model: azure("gpt-4o"),
+    system: "suggest a title for the conversation.",
+    prompt: `the conversation """${JSON.stringify({messages, context,prompt, latestResponse: await say})}"""  `,
+  })
 
+  yield {
+    type: "title",
+    title:text
+  } 
+
+
+  return "done"
+}) ;
+
+
+export default message as unknown as Messages.Handler

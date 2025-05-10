@@ -1,162 +1,304 @@
-import pkg from "@slack/bolt";
 import {
-  ActorRefFromLogic,
-  createActor,
-  waitFor,
+  enqueueActions,
+  setup,
+  assign,
+  ActorLogic, Values,
 } from "xstate";
-import threadMachine from "./assistant.thread.ts";
-import { jsonSchema, generateObject } from "ai";
-import { actors,actions } from "./slack.assistant.ts";
-import { fromPromise } from "xstate";
-import { azure } from "@ai-sdk/azure";
-const { Assistant } = pkg;
+import { fromEventAsyncGenerator } from "@cxai/stream";
+import message from "./assistant.message";
 
-const threads = new Map<string, ActorRefFromLogic<typeof threadMachine>>();
-const db=new Map<string,pkg.KnownEventFromType<"message">[]>();
 
-const cmap=new Map<string,pkg.types.AssistantThreadContextChangedEvent["assistant_thread"] >()
+const bootstrap = fromEventAsyncGenerator(async function* ({
+  input,
+}: {
+  input: Thread.Input;
+}) {
+  yield {
+    type: "prompts",
+    title: `This is a message from unimplemented bootstrap, bot id: ${input.bot?.botId}`,
+    prompts: [
+      { title: "Template 1", message: "Hello " },
+      { title: "Template 2", message: "Hello 2" },
+    ],
+  };
+}) as unknown as Thread.Bootstrap;
 
+
+ 
+export namespace Communication {
+
+  export type Prompt = {
+    title: string;
+    message: string;
+  };
+  
+  export type Prompts = {
+    type: "prompts";
+    title?: string;
+    prompts: [Prompt, ...Prompt[]];
+  };
+
+  type Block = {
+    type: string;
+    blocks?: Block[];
+  };
+  
+  export type Say = {
+    type: "say";
+    message: string | { text: string; blocks?: Block[] };
+    
+  };
+
+  export type Title = { type: "title"; title: string };
+
+  export type Status = { type: "status"; status: string };
+
+  export type Event = Prompts | Say | Title | Status;
+  export type Actions = { 
+    say: (_, params: Say["message"]) => void;
+    setStatus: (_, params: Status["status"]) => void;
+    setSuggestedPrompts: (
+        _,
+        params: Omit<Prompts, "type">
+    ) => void;
+    setTitle: (_, params: Title["title"]) => void;
+    saveContext: (_, params: Thread.Context) => void;
+  }; 
+}
+
+export namespace Messages { 
+  export type Event = {
+    type: `@message.${string}`;
+   } & Details;
+  export type Details = {
+    type: `@message.${string}`;
+    content: string;
+    role: "user" | "assistant";
+    timestamp: string;
+  };
+
+  export type Input = {
+    messages: [Messages.Event, ...Messages.Event[]];
+    context: Omit<Thread.Context, "messages">;
+  };
+  
+  export type Handler =ActorLogic<
+      any,
+      Communication.Event,
+      Input,
+      any,
+      Communication.Event
+  >;
+}
+
+export namespace Thread {
+  export type Event = {
+    type: `@thread.${string}`;
+  }
+  
+  export type Input = {
+    bot?: Record<string, unknown>;
+    thread?: Record<string, unknown>;
+  } & Record<string, unknown>;
+
+ 
+  export type Bootstrap = ActorLogic<
+      any,
+      Communication.Event,
+      Input,
+      any,
+      Communication.Event
+  >;
+
+  export type Context = {
+    messages: Messages.Details[];
+    summary?: string;
+    error?: any;
+    thread?: Record<string, unknown>;
+    bot?: Record<string, unknown>;
+    current?: Messages.Details;
+  };
+
+
+}
+
+
+ 
+type Optional<T> = {
+  [K in keyof T]?: T[K];
+};
  
 
 
 
-const assistant = new Assistant({
-  /**
-   * (Recommended) A custom ThreadContextStore can be provided, inclusive of methods to
-   * get and save thread context. When provided, these methods will override the `getThreadContext`
-   * and `saveThreadContext` utilities that are made available in other Assistant event listeners.
-   */
-  threadContextStore: {
-    get: async ({ context, client, payload }) => {
-      return cmap.get(`${context.botId}_${context.botUserId}_${"channel" in payload ? payload.channel : payload.assistant_thread.channel_id}`)
-    },
-    save: async ({ context, client, payload }) => {
-      if(payload.type==="assistant_thread_started" || payload.type==="assistant_thread_context_changed"){
-        cmap.set(`${context.botId}_${context.botUserId}_${payload.assistant_thread.channel_id}`,payload.assistant_thread);
-      }
-      else if(payload.type==="message"){
-        db.set(`${context.botId}_${context.botUserId}`,[
-          ...(db.get(`${context.botId}_${context.botUserId}_${payload.channel}`) || []),
-          payload]
-        );
-      }
-    },
+
+
+export const threadSetup = setup({
+  types: {} as {
+    context: Thread.Context;
+    events: Messages.Event
+        | Communication.Event
+        | { type: "@thread.end" };
+    input?: Optional<Thread.Input>;
+    actors: {
+      message: Messages.Handler;
+      bootstrap: Thread.Bootstrap;
+    };
   },
-
-
-
-
-  /**
-   * `assistant_thread_started` is sent when a user opens the Assistant container.
-   * This can happen via DM with the app or as a side-container within a channel.
-   * https://api.slack.com/events/assistant_thread_started
-   */
-  threadStarted: async (args) => {
-    const { event, logger, context } = args;
-   const thread = threads.set(
-      event.assistant_thread.thread_ts,
-      createActor(
-        threadMachine.provide({
-          actors: {
-            ...actors(args), 
-            bootstrap: fromPromise(async function(){
-               const {object} = await generateObject<Parameters<typeof args.setSuggestedPrompts>[0]>({
-                model:azure("gpt-4o"),
-                system:'You are a helpful assistant in a slack channel.',
-                prompt:`this is the start of the conversation, you need to say hello to the user and suggest 3 prompts for the user to choose from.
-                          example:{ 
-                            title: "Hello there! I'm Jeki your personal stylist, I can help you look your best!",
-                            prompts: [
-                              { title: "Help me decide between two dresses",
-                                message: "I'm trying to decide between two dresses, which one should I wear?"
-                              },
-                              { title: "Help me find a matching jewlery",
-                                message: "I'm trying to find a matching jewlery for my dress, can you help me?"
-                              },
-                              { title: "What's the best color for my skin tone?",
-                                message: "I'm trying to find the best color for my skin tone?" } ] } `,
-                schema:jsonSchema({
-                  type: "object",
-                  properties:{
-                    title: { type: "string" , description:"the title of the prompt - an hello message to the user "},
-                    prompts: { type: "array", minItems:3, items: { type: "object", properties: { title: { type: "string" }, message: { type: "string" } }, required: ["title", "message"] } },
-                  },
-                  required:["title","prompts"]
-                })
-               })
-               await args.setSuggestedPrompts(object)
-               await args.saveThreadContext()
-            })
-           } ,
-          actions: actions(args),
-        }),
-        {
-          id: event.assistant_thread.thread_ts,
-          input: {
-            bot: context,
-            thread: event.assistant_thread,
-          },
-
-          logger: (...args) => {
-            logger.info(...args);
-          },
-        }
-      )
-    ).get(event.assistant_thread.thread_ts)!
-    thread.start();
-    await waitFor(thread, (state) => state.matches("listening"));
-    console.log("thread started",thread.getPersistedSnapshot());
+  actors: {
+    message: message,
+    bootstrap: bootstrap,
   },
-
-  /**
-   * `assistant_thread_context_changed` is sent when a user switches channels
-   * while the Assistant container is open. If `threadContextChanged` is not
-   * provided, context will be saved using the AssistantContextStore's `save`
-   * method (either the DefaultAssistantContextStore or custom, if provided).
-   * https://api.slack.com/events/assistant_thread_context_changed
-   */
-  threadContextChanged: async ({ logger, saveThreadContext }) => {
-    // const { channel_id, thread_ts, context: assistantContext } = event.assistant_thread;
-    try {
-      await saveThreadContext();
-    } catch (e) {
-      logger.error(e);
-    }
-  },
-
-  /**
-   * Messages sent to the Assistant do not contain a subtype and must
-   * be deduced based on their shape and metadata (if provided).
-   * https://api.slack.com/events/message
-   */
-  userMessage: async (args) => {
-    const {  message } = args;
-    if (isMessageInThread(message) && threads.has(message.thread_ts)) {  
-        const thread = threads.get(message.thread_ts)
-        thread?.send({
-          ...args,
-          type:`@message.${message.subtype}`
-        } ); 
-    }
-    else{
-      args.say("I'm sorry, I can only help in a thread! ");
-    }
-  }
+  actions: {
+    say: (_, params) => console.log("say", params),
+    setStatus: (_, params) => console.log("setStatus", params),
+    setSuggestedPrompts: (_, params) =>
+      console.log("setSuggestedPrompts", params),
+    setTitle: (_, params) => console.log("setTitle", params),
+    saveContext: (_, params) => console.log("saveContext", params),
+  } satisfies Communication.Actions,
 });
 
-export default assistant;
+const threadMachine = threadSetup.createMachine({
+  id: "thread",
+  initial: "boostrap",
+  context: ({ input }) => ({
+    messages: [],
+    ...input,
+  }),
+  on: {
+    prompts: {
+      actions: {
+        type: "setSuggestedPrompts",
+        params: ({ event: { type: _type, ...event } }) =>
+          event as Omit<Communication.Prompts, "type">,
+      },
+      guard: ({ event: { type: _type, prompts } }) => isNotEmpty(prompts),
+    },
+    say: {
+      actions: enqueueActions(({ event: { message }, enqueue }) => {
+        enqueue({
+          type: "say",
+          params: message,
+        });
+      }),
+    },
+    title: {
+      actions: enqueueActions(({ event: { title }, enqueue }) => {
+        enqueue({
+          type: "setTitle",
+          params: title,
+        });
+      }),
+    },
+    status: {
+      actions: enqueueActions(({ event: { status }, enqueue }) => {
+        enqueue({
+          type: "setStatus",
+          params: status,
+        });
+      }),
+    },
+  },
+  states: {
+    boostrap: {
+      entry: {
+        type: "setStatus",
+        params: "is typing...",
+      },
+      invoke: {
+        src: "bootstrap",
+        input: ({ context }) => context,
+        onDone: {
+          target: "listening",
+          actions: {
+            type: "saveContext",
+            params: ({ context }) => context,
+          },
+          onError: {
+            target: "error",
+          },
+        },
+      },
+    },
+    listening: {
+      on: {
+        "@message.bot_message": {
+          actions: assign({
+            messages: ({ event: message, context: { messages: history } }) => [
+              ...(history || []),
+              message,
+            ],
+          }),
+        },
+        "@message.*": {
+          target: "processing",
+          actions: assign({
+            messages: ({ event, context: { messages } }) => [
+              ...messages,
+              event,
+            ],
+          }),
+        },
+      },
+    },
+    processing: {
+      entry: {
+        type: "setStatus",
+        params: "is typing...",
+      },
+      invoke: {
+        src: "message",
+        id: "message-processing",
+        input: ({ context: { messages, ...context } }) => ({
+          messages: isNotEmpty(messages) ? messages : [context.current!],
+          context,
+        }),
+        onDone: {
+          target: "listening",
+          actions: {
+            type: "saveContext",
+            params: ({ context }) => context,
+          },
+        },
+        onError: {
+          target: "error",
+          actions: assign({
+            error: ({ event: { error } }) => error,
+          }),
+        },
+      },
+    },
+
+    done: {
+      type: "final",
+      entry: {
+        type: "say",
+        params: "Goodbye! It was nice talking to you!",
+      },
+    },
+    error: {
+      type: "final",
+      entry: {
+        type: "say",
+        params: ({ context: { error } }) =>
+          "Sorry, something went wrong! " + "message" in error
+            ? error.message
+            : "",
+      },
+    },
+  },
+});
 
 
 
+export default threadMachine;
 
-
-type ThreadMessage = pkg.KnownEventFromType<"message"> & {
-  thread_ts: string;
-};
-
-function isMessageInThread<TMessage extends pkg.KnownEventFromType<"message"> & {thread_ts?:string} | {thread_ts:string}>(
-  message: TMessage
-): message is ThreadMessage & TMessage    {
-  return "thread_ts" in message;
+function isNotEmpty<TItem, TArray extends Array<TItem>>(
+  value: TArray
+): value is NotEmpty<TArray> {
+  return value.length > 0;
 }
-
+declare type NotEmpty<T> = T extends [infer U, ...infer V]
+  ? T & [U, ...U[]]
+  : never;

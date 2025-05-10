@@ -132,12 +132,16 @@ const messageBuilder = {
 
     listToolsMessage: (
         name: string,
-        tools: Tool[],
+        tools:Map<string, Tool>,
     ): {
         blocks: (KnownBlock | Block)[];
         text?: string;
     } => {
-        if (tools.length === 0) {
+        const toolEntries= Array.from(tools.entries()).map(([name, tool]) => ({
+            name: name,
+            ...tool
+        }));
+        if (toolEntries.length === 0) {
             return {
                 blocks: [messageBuilder.textSection(`- *${name}* - No tools available... ❌`)],
                 text: " - " + name + ": No tools available...",
@@ -147,12 +151,12 @@ const messageBuilder = {
             blocks: [
                 messageBuilder.textSection(`- *${name}*:`),
                 messageBuilder.textList(
-                    tools.map((tool) => ({
+                    toolEntries.map((tool) => ({
                         text: tool.name + " - " + tool.description,
                     })),
                 ),
             ],
-            text: " - " + name + ": " + tools.length + " tools available",
+            text: " - " + name + ": " + toolEntries.length + " tools available",
         };
     },
 
@@ -290,26 +294,26 @@ const messageBuilder = {
         };
     },
 
-    // richTextSection: (
-    //     texts: {
-    //         text: string;
-    //         style?: { bold?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean };
-    //     }[],
-    // ) => {
-    //     return {
-    //         type: "rich_text",
-    //         elements: [
-    //             {
-    //                 type: "rich_text_section",
-    //                 elements: texts.map((text) => ({
-    //                     type: "text",
-    //                     text: text.text,
-    //                     style: text.style,
-    //                 })),
-    //             },
-    //         ],
-    //     };
-    // },
+    richTextSection: (
+        texts: {
+            text: string;
+            style?: { bold?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean };
+        }[],
+    ) => {
+        return {
+            type: "rich_text",
+            elements: [
+                {
+                    type: "rich_text_section",
+                    elements: texts.map((text) => ({
+                        type: "text",
+                        text: text.text,
+                        style: text.style,
+                    })),
+                },
+            ],
+        };
+    },
 
     textList: (
         texts: {

@@ -1,26 +1,122 @@
 // import { App, LogLevel } from "https://deno.land/x/slack_bolt@1.0.0/mod.ts";
 import { env } from "node:process";
-import pkg from '@slack/bolt'; 
-const { App, LogLevel } = pkg; 
+import slack from '@slack/bolt'; 
+const { App, LogLevel } = slack; 
+import {
+  ActorRefFromLogic,
+  createActor,
+  waitFor,
+} from "xstate";
+const { Assistant } = slack;
 
-import assistant from './assistant.ts';
+import threadMachine from "./assistant";
+ import prompter from "./assistant.bootstrap";
 
-// import { SocketModeReceiver } from "@slack/bolt";
+ const threads = new Map<string, ActorRefFromLogic<typeof threadMachine>>();
+ const log=(logger:slack.Logger) => (...args:any[])=>{
+   logger.info(...args);
+ }
+ 
+const assistant = new Assistant({
+  /**
+   * A custom ThreadContextStore can be provided, inclusive of methods to
+   * get and save thread context. When provided, these methods will override the `getThreadContext`
+   * and `saveThreadContext` utilities that are made available in other Assistant event listeners.
+   */
+  /*threadContextStore: {
+    get: async ({ context, client, payload }) => {
+    },
+    save: async ({ context, client, payload }) => {
+   }
+  },*/
  
 
+  /**
+   * `assistant_thread_started` is sent when a user opens the Assistant container.
+   * This can happen via DM with the app or as a side-container within a channel.
+   * https://api.slack.com/events/assistant_thread_started
+   */
+  threadStarted: async ({say, setStatus, setSuggestedPrompts, setTitle, saveThreadContext,event, context, logger}) => {
+    const id= event.assistant_thread.thread_ts;
+    const input= {
+      bot: context,
+      thread: event.assistant_thread,
+    }
 
-// const socketModeReceiver = new SocketModeReceiver({
-//   appToken: env.SLACK_APP_TOKEN!
-//   // enable the following if you want to use OAuth
-//    // clientId: Deno.env.get("SLACK_CLIENT_ID"),
-//   // clientSecret: Deno.env.get("SLACK_CLIENT_SECRET"),
-//   // stateSecret: Deno.env.get("STATE_SECRET"),
-//   // scopes: ["channels:read", "chat:write", "app_mentions:read", "channels:manage", "commands"],
-//   //  scopes: [ "channels:read", "groups:read", "mpim:read", "im:read" ]
+    const thread = threads.set(
+      id,
+      createActor(
+        threadMachine.provide({
+          actors: {
+            bootstrap: prompter
+          },
+          actions: {
+            say: (_, params ) => say(params),
+            setStatus: (_, params ) => setStatus(params),
+            setSuggestedPrompts: (_, params ) => {
+              console.log("setting prompts", params);
+              setSuggestedPrompts(params)
+                .then((res) => {
+                  console.log("setting prompts res", res);
+                })
+                .catch((err) => {
+                  console.log("setting prompts err", err);
+                });
+            },
+            setTitle: (_, params: string) => setTitle(params),
+            saveContext: saveThreadContext,
+          }
+        }),
+        {
+          id: id,
+          input: input, 
+          logger: log(logger)
+        }
+      )
+    ).get(id)!;
+    
+    thread.start();
+     
+    waitFor(thread, (state) => state.matches("listening")).then(()=>{
+      console.log("thread started",thread.getPersistedSnapshot());
+     }) 
+  },
+
+  /**
+   * `assistant_thread_context_changed` is sent when a user switches channels
+   * while the Assistant container is open. If `threadContextChanged` is not
+   * provided, context will be saved using the AssistantContextStore's `save`
+   * method (either the DefaultAssistantContextStore or custom, if provided).
+   * https://api.slack.com/events/assistant_thread_context_changed
+   */
+  threadContextChanged: async ({ logger, saveThreadContext }) => {
+    await saveThreadContext().catch(logger.error)
+  },
+
+  /**
+   * Messages sent to the Assistant do not contain a subtype and must
+   * be deduced based on their shape and metadata (if provided).
+   * https://api.slack.com/events/message
+   */
+  userMessage: async ( {message, say}) => {
+    const thread = threads.get("thread_ts" in message && message.thread_ts || message.event_ts || message.ts)
+
+    if( "text" in message && !! message.text){
+      thread?.send({
+        timestamp: message.ts,
+        role: "bot_id" in message ? "assistant" : "user",
+        type:`@message.${message.subtype}`,
+        content: message.text
+      } ); 
+    }
 
 
-// });
-
+    if(!thread){
+      say("I'm sorry, I can only help in a thread! "); 
+    }
+  }
+});
+ 
 const app = new App({
   token: env.SLACK_BOT_TOKEN,
   signingSecret: env.SLACK_SIGNING_SECRET,
@@ -28,142 +124,20 @@ const app = new App({
   // receiver: socketModeReceiver,
   appToken: env.SLACK_APP_TOKEN,
   logLevel: LogLevel.DEBUG,
-});
-
-app.message(":wave:", async ({ message, say,context , ack}) => {
-  console.log('message',message);
-  // Handle only newly posted messages here
-  await say({
-    channel: message.channel,
-    icon_emoji: ':wave:',
-    text: `Hello, ${"user" in message ? `<@${message.user}>` : ''}`,
-  });
-});
-app.event("app_mention", async ({ event, say }) => {
-  console.log('app_mention',event);
-  await say({
-    channel: event.channel,
-    text: `Hello ${"user" in event ? `<@${event.user}>` : ''}, How can I help you today?`,
-  });
-});
-// When a user sends a message or mentions the bot:
-
-
-/** Sample Function Listener */
-app.function("sample_step", async ({ client, inputs, fail, logger }) => {
-  try {
-    const { user_id } = inputs;
-
-    await client.chat.postMessage({
-      channel: user_id as string,
-      text: "Click the button to signal the step has completed",
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: "Click the button to signal the step has completed",
-          },
-          accessory: {
-            type: "button",
-            text: {
-              type: "plain_text",
-              text: "Complete step",
-            },
-            action_id: "sample_button",
-          },
-        },
-      ],
-    });
-  } catch (error) {
-    logger.error(error);
-    await fail({ error: `Failed to handle a step request: ${error}` });
-  }
-});
- 
-
- 
-app.event('app_home_opened', async ({ event, client, logger }) => {
-  console.log('app_home_opened',event);
-  try {
-    // Call views.publish with the built-in client
-    const result = await client.views.publish({
-      // Use the user ID associated with the event
-      user_id: event.user,
-      view: {
-        // Home tabs must be enabled in your app configuration page under "App Home"
-        type: "home",
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: "*Welcome home, <@" + event.user + "> :house:*"
-            }
-          },
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: "Learn how home tabs can be more useful and interactive <https://docs.slack.dev/surfaces/app-home|*in the documentation*>."
-            }
-          }
-        ]
-      }
-    });
-
-    logger.info(result);
-  }
-  catch (error) {
-    logger.error(error);
-  }
-});
-
-app.message('hello', async ({ message, say }) => {
-  // say() sends a message to the channel where the event was triggered
-  await say({
-    blocks: [
-      {
-        "type": "section",
-        "text": {
-          "type": "mrkdwn",
-          "text": `Hey there <@${message.user}>!`
-        },
-        "accessory": {
-          "type": "button",
-          "text": {
-            "type": "plain_text",
-            "text": "Click Me"
-          },
-          "action_id": "button_click"
-        }
-      }
-    ],
-    text: `Hey there <@${message.user}>!`
-  });
-});
-
-app.action('button_click', async ({ body, ack, say }) => {
-  // Acknowledge the action
-  await ack();
-  await say(`<@${body.user.id}> clicked the button`);
-});
-
-
+}); 
 
 (async () => {
   // Start your app
-  await app.start(process.env.PORT || 3000);
+  await app.start(process.env.PORT || 5000);
 
   app.logger.info('⚡️ Bolt app is running!');
 })();
 
 app.assistant(assistant);
 
-
 export default {
   fetch:async function handlePostRequest(req: Request): Promise<Response> {
-    const channels = await app.client.hi.list();
+    const channels = await app.client.conversations.list();
     return new Response( JSON.stringify(channels));
   },
 };
