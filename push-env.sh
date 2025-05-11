@@ -1,5 +1,5 @@
 #!/bin/bash
-APP_NAME=slack  # Change to your app name if different
+APP_NAME=web  # Change to your app name if different
 
 if [ ! -f .env ]; then
   echo ".env file not found!"

@@ -1,11 +1,11 @@
 {
   "compilerOptions": {
-    "types": ["@edge-runtime/types"],
     "lib": ["ESNext", "DOM", "Dom.Iterable", "webworker"],
 
     // Treat files as modules even if it doesn't use import/export
     "moduleDetection": "force",
-
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx"
     // Ignore module structure
     "module": "Preserve",
 
