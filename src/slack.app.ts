@@ -125,10 +125,12 @@ const app = new App({
   appToken: env.SLACK_APP_TOKEN,
   logLevel: LogLevel.DEBUG,
 }); 
+const port = process.env.PORT || 8080;
+
 
 (async () => {
   // Start your app
-  await app.start(process.env.PORT || 5000);
+  await app.start(port);
 
   app.logger.info('⚡️ Bolt app is running!');
 })();
@@ -137,7 +139,7 @@ app.assistant(assistant);
 
 export default {
   fetch:async function handlePostRequest(req: Request): Promise<Response> {
-    const channels = await app.client.conversations.list();
-    return new Response( JSON.stringify(channels));
+ 
+    return new Response( "ok");
   },
 };

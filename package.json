@@ -1,11 +1,22 @@
 {
-  "name": "slack",
+  "name": "assistant",
   "version": "1.0.0",
   "description": "",
-  "main": "main.ts",
+  "main": "./dist/slack.app.js",
+  "bin": "./dist/slack.app.js",
+  "packageManager": "yarn@1.22.22",
+
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx --env-file=.env src/slack.app.ts"
+    "dev": "tsx --env-file=.env src/slack.app.ts",
+    "build:mta": "mbt build -p=cf",
+    "build": "npm run build:pkgroll",
+    "deploy": "cf deploy mta_archives/assistant_0.0.1.mtar -f --retries 1",
+    "build:pkgroll": "pkgroll  --clear-dist --dist ./dist --shims  --treeshake   --target=node22.13.1",
+    "push-env": "./push-env.sh",
+    "build:copypackage": "cp package.json ./dist/ && cp package-lock.json ./dist/ || true",
+    "build:tsup": "pnpx tsup ./src/slack.app.ts --outDir ./dist --target=esnext --format esm --treeshake --shims --publicDir ",
+    "start": "node ./dist/slack.app.cjs"
   },
   "keywords": [],
   "author": "",
@@ -13,7 +24,6 @@
   "type": "module",
   "dependencies": {
     "@ai-sdk/azure": "^1.3.23",
-    "@cxai/stream": "^1.0.20",
     "@slack/bolt": "^4.3.0",
     "ai": "^4.3.15",
     "openai": "^4.97.0",
@@ -23,6 +33,31 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.18",
-    "tsx": "^4.19.4"
+    "tsx": "^4.19.4",
+    "@cxai/stream": "^1.0.20"
+
+
+  },
+  "engines": {
+    "yarn": "1.22.22",
+    "node": "22.13.1"
+  },
+  "overrides": {
+    "yjs": {
+      "dependencies": {
+        "y-protocols": "^1.0.6"
+      },
+      "main": "./dist/yjs.cjs",
+      "module": "./dist/yjs.mjs",
+      "exports": {
+        ".": {}
+      }
+    }
+  },
+  "exports": {
+    ".": {
+      "require": "./dist/slack.app.cjs",
+      "import": "./dist/slack.app.mjs"
+    }
   }
 }
