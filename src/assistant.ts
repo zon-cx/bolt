@@ -3,6 +3,7 @@ import {
   setup,
   assign,
   ActorLogic, Values,
+  emit,
 } from "xstate";
 import { fromEventAsyncGenerator } from "@cxai/stream";
 import message from "./assistant.message";
@@ -54,16 +55,30 @@ export namespace Communication {
   export type Status = { type: "status"; status: string };
 
   export type Event = Prompts | Say | Title | Status;
-  export type Actions = { 
-    say: (_, params: Say["message"]) => void;
-    setStatus: (_, params: Status["status"]) => void;
-    setSuggestedPrompts: (
-        _,
-        params: Omit<Prompts, "type">
-    ) => void;
-    setTitle: (_, params: Title["title"]) => void;
-    saveContext: (_, params: Thread.Context) => void;
-  }; 
+    export type Actions = {
+      type:"say",
+      params: Say["message"]
+    } | {
+      type:"setStatus",
+      params: Status["status"]
+    } | {
+      type:"setTitle",
+      params: Title["title"]
+    }
+
+    export type Emited = {
+      type:"assistant",
+      data: Say["message"]
+    } | {
+      type:"status",
+      data: Status["status"]
+    } | {
+      type:"title",
+      data: Title["title"]
+    }| {
+      type:"prompts",
+      data: Prompts["prompts"]
+    }
 }
 
 export namespace Messages { 
@@ -140,23 +155,37 @@ export const threadSetup = setup({
         | Communication.Event
         | { type: "@thread.end" };
     input?: Optional<Thread.Input>;
+    actions: Communication.Actions
     actors: {
       message: Messages.Handler;
       bootstrap: Thread.Bootstrap;
     };
+    // emitted:  Communication.Emited
   },
   actors: {
     message: message,
     bootstrap: bootstrap,
   },
   actions: {
-    say: (_, params) => console.log("say", params),
-    setStatus: (_, params) => console.log("setStatus", params),
-    setSuggestedPrompts: (_, params) =>
-      console.log("setSuggestedPrompts", params),
-    setTitle: (_, params) => console.log("setTitle", params),
-    saveContext: (_, params) => console.log("saveContext", params),
-  } satisfies Communication.Actions,
+    say: emit((_: any, params: Communication.Say["message"]) => ({
+      type: "assistant",
+      data: params
+    })
+  ) ,
+  setStatus: emit((_, s: string) => ({
+    type: "status",
+    data: s
+  })),
+  setTitle: emit((_: any, t: string) => ({
+    type: "title",
+    data: t
+  })),
+  setSuggestedPrompts: emit((_: any, p: any) => ({
+    type: "prompts",
+    data: p.prompts
+  })),
+  saveContext: () => {}
+  } 
 });
 
 const threadMachine = threadSetup.createMachine({
