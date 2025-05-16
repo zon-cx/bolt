@@ -1,0 +1,239 @@
+import type {
+  AnyActorLogic,
+  AnyStateMachine,
+  EventObject,
+  InspectionEvent,
+  Observer,
+} from "xstate";
+import { createActor, initialTransition, transition } from "xstate";
+import * as Y from "yjs";
+import { fromEventAsyncGenerator } from "@cxai/stream/xstate";
+import { yArrayIterator } from "@cxai/stream/yjs";
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
+import { env } from "node:process";
+import { WebsocketProvider } from "y-websocket";
+
+const map = new Map<string, ReturnType<typeof createActorFromYjs>>();
+export const actorsStore = new Y.Doc({ guid: "@y-actor/store" , collectionid: "store", shouldLoad: true, gc:false });
+connectYjs(actorsStore);
+ 
+
+setTimeout(() => {
+  console.log("actorsStore", JSON.stringify(actorsStore.getMap("@assistant/thread").toJSON()));
+}, 1000);
+
+
+
+export default function yjsActor(logic: AnyActorLogic, options?: {
+  doc?: Y.Doc | string;
+  input?: any;
+  connect?: typeof connectYjs | false;
+  logger: (...args: any[]) => void;
+}) {
+  const { doc, input, connect, logger } = {
+    connect: connectYjs,
+    logger: console.info,
+    ...options || {},
+    doc: typeof options?.doc === "string"
+      ? new Y.Doc({ guid: options.doc, collectionid: `@actors/${logic.id}`, meta: { logic: logic.id } , shouldLoad: true, gc:true })
+      : !options?.doc
+      ? new Y.Doc({ guid: `@actors/${logic.id}`, collectionid: `@actors/${logic.id}`, meta: { logic: logic.id } , shouldLoad: true, gc:true })
+      : options.doc,
+  };
+
+  async function start() {
+    if (!map.has(doc.guid)) {
+      !!connect && connect(doc);
+      map.set(doc.guid, createActorFromYjs(logic, doc, input, logger));
+    }
+
+    return map.get(doc.guid)!;
+  }
+
+  async function send(event: EventObject) {
+    const actor = await start();
+    actor.send(event);
+  }
+
+  return {
+    send,
+    start,
+    doc,
+  };
+}
+
+function createActorFromYjs(logic: AnyActorLogic, doc: Y.Doc, input?: any, logger?: (...args: any[]) => void) {
+  const { persist, restoreFromEvents, restore, inspect } = hydrate(doc);
+  const resroredState = restore();
+  console.info("restored state",doc.guid, resroredState);
+  const runtime = createActor(logic, {
+    id: doc.guid,
+    input: input,
+    snapshot: resroredState,
+    inspect,
+    logger,
+  });
+  runtime.start();
+  persist(runtime);
+  return runtime;
+}
+
+
+
+
+function hydrate(doc: Y.Doc) {
+  const store = actorsStore.getMap(doc.meta?.logic as string);
+  return {
+    restore() {
+      const snapshot = store.get(doc.guid);
+      console.log("restoring", doc.guid, snapshot);
+      return snapshot;
+    },
+
+    restoreFromEvents(machine: AnyStateMachine) {
+      let [nextState, actions] = initialTransition(machine);
+      for (const event of doc.getArray<EventObject>("@events").toArray()) {
+        [nextState, actions] = transition(machine, nextState, event);
+      }
+      return nextState;
+    },
+
+    live() {
+      return fromEventAsyncGenerator(async function*() {
+        const input = doc.getArray<EventObject>("@input");
+        const handled = doc.getMap<EventObject>("@handled");
+        async function* withId<T>(input: AsyncIterable<T>) {
+          let i = 0;
+          for await (const e of input) {
+            yield {
+              id: i++,
+              timestamp: Date.now(),
+              ...e,
+            };
+          }
+        }
+        for await (const event of withId(yArrayIterator(input))) {
+          if (!handled.has(event.id.toString())) {
+            yield event;
+            doc.transact(() => {
+              handled.set(event.id.toString(), event);
+            });
+          }
+        }
+      });
+    },
+
+    inspect: {
+      next: (inspectionEvent: InspectionEvent) => {
+        if (inspectionEvent.type === "@xstate.snapshot") {
+          const snapshot = inspectionEvent.snapshot;
+          doc.transact(() => {
+            doc.getMap("@sessions").set(inspectionEvent.actorRef.sessionId, snapshot.value);
+          });
+        }
+        if (inspectionEvent.type === "@xstate.event") {
+          const event = inspectionEvent.event;
+          const events = doc.getArray("@events");
+          doc.transact(() => {
+            events.push([{
+              session: inspectionEvent.actorRef.sessionId,
+              event: event,
+              timestamp: Date.now(),
+              id: events.length,
+            }]);
+          });
+        }
+      },
+      complete: () => {
+        console.log("complete");
+        doc.getMap("@store").set("status", "complete");
+      },
+    } as Observer<InspectionEvent>,
+
+    persist(actor: ReturnType<typeof createActor>) {
+      actor.subscribe((e) => {
+        const persistedSnapshot = actor.getPersistedSnapshot();
+        store.set(doc.guid, persistedSnapshot);
+        console.log("persisted snapshot", doc.guid, persistedSnapshot);
+        doc.transact(() => {
+          doc.getMap("@store").set("state", "value" in persistedSnapshot ? persistedSnapshot.value : null);
+          doc.getMap("@store").set("event", e.event);
+
+          const snapshotMap = doc.getMap("@snapshot");
+          Object.entries(persistedSnapshot).forEach(([key, value]) => {
+            console.log("snapshot persist", key);
+            snapshotMap.set(key, value);
+          });
+        });
+      });
+    },
+  };
+}
+
+
+
+export  function connectYjs(doc: Y.Doc | string): Y.Doc {
+  const document = typeof doc === "string" ? new Y.Doc({ guid: doc, shouldLoad: true, gc:false }) : doc;
+  // var wsProvider = new WebsocketProvider(
+  //    env.YJS_URL || "wss://websocket.tiptap.dev",
+  //    document.guid,
+  //   document,{
+  //     connect: true,
+  //     resyncInterval: 1000,
+  //     disableBc: true,
+      
+  //   }
+  // );
+  
+  const provider = new HocuspocusProvider({
+    url: env.YJS_URL || "wss://yjs.cfapps.us10-001.hana.ondemand.com",
+    document: document, 
+    forceSyncInterval: 1000,
+    name: document.guid,
+    onConnect: () => {
+      console.log("connected to yjs", provider.document.guid);
+    },
+    onSynced: () => {
+      console.log("synced to yjs", provider.document.guid);
+    },
+    onOpen: () => {
+      console.log("open to yjs", provider.document.guid );
+    },
+    onClose: () => {
+      console.log("close to yjs", provider.document.guid);
+    },
+ 
+    onAuthenticated(data) {
+      console.log("authenticated to yjs");
+    },
+ 
+    onAuthenticationFailed(data) {
+      console.error("authentication failed to yjs");
+    },
+     onOutgoingMessage(data) {
+      // console.log("outgoing message to yjs");
+    },
+    onMessage(data) {
+      // console.log("incoming message to yjs");
+    },
+    onUnsyncedChanges(data) {
+      // console.log("unsynced changes to yjs");
+    },
+    onAwarenessChange(data) {
+      console.log("awareness change to yjs");
+    },
+    onDisconnect(data) {
+      console.log("disconnect to yjs");
+    },
+    
+    
+    
+  });
+  
+
+   provider.connect(); 
+   provider.startSync()
+
+  provider.document.load();
+  return provider.document;
+}

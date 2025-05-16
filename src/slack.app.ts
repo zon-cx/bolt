@@ -1,4 +1,3 @@
-// import { App, LogLevel } from "https://deno.land/x/slack_bolt@1.0.0/mod.ts";
 import { env } from "node:process";
 import slack from '@slack/bolt'; 
 const { App, LogLevel } = slack; 
@@ -11,11 +10,14 @@ const { Assistant } = slack;
 
 import threadMachine from "./assistant";
  import prompter from "./assistant.bootstrap";
+import yjsActor from "./assistant.store";
 
- const threads = new Map<string, ActorRefFromLogic<typeof threadMachine>>();
  const log=(logger:slack.Logger) => (...args:any[])=>{
    logger.info(...args);
  }
+
+ 
+ 
  
 const assistant = new Assistant({
   /**
@@ -43,10 +45,7 @@ const assistant = new Assistant({
       thread: event.assistant_thread,
     }
 
-    const thread = threads.set(
-      id,
-      createActor(
-        threadMachine.provide({
+    const assistant = await yjsActor(threadMachine.provide({
           actors: {
             bootstrap: prompter
           },
@@ -66,19 +65,14 @@ const assistant = new Assistant({
             setTitle: (_, params: string) => setTitle(params),
             saveContext: saveThreadContext,
           }
-        }),
-        {
-          id: id,
-          input: input, 
+        }),{
+          input,
+          doc: `@assistant/${id}`,
           logger: log(logger)
-        }
-      )
-    ).get(id)!;
-    
-    thread.start();
+       }).start();
      
-    waitFor(thread, (state) => state.matches("listening")).then(()=>{
-      console.log("thread started",thread.getPersistedSnapshot());
+    waitFor(assistant, (state) => state.matches("listening")).then(()=>{
+      console.log("thread started",assistant.getPersistedSnapshot());
      }) 
   },
 
@@ -98,22 +92,35 @@ const assistant = new Assistant({
    * be deduced based on their shape and metadata (if provided).
    * https://api.slack.com/events/message
    */
-  userMessage: async ( {message, say}) => {
-    const thread = threads.get("thread_ts" in message && message.thread_ts || message.event_ts || message.ts)
+  userMessage: async ( {message, say, setStatus, setSuggestedPrompts, setTitle, saveThreadContext, logger}) => {
+    const id = ("thread_ts" in message && message.thread_ts) || message.event_ts || message.ts;
+
+    const assistant =await yjsActor(threadMachine.provide({
+      actors: {
+        bootstrap: prompter
+      },
+      actions: {
+        say: (_, params ) => say(params),
+        setStatus: (_, params ) => setStatus(params),
+        setTitle: (_, params: string) => setTitle(params),
+        saveContext: saveThreadContext,
+        setSuggestedPrompts: (_,params) => setSuggestedPrompts(params)
+      }
+    }),{
+      doc: `@assistant/${id}`,
+      logger: log(logger)
+   }).start();
+
+
 
     if( "text" in message && !! message.text){
-      thread?.send({
+      assistant.send({
         timestamp: message.ts,
         role: "bot_id" in message ? "assistant" : "user",
         type:`@message.${message.subtype}`,
         content: message.text
       } ); 
-    }
-
-
-    if(!thread){
-      say("I'm sorry, I can only help in a thread! "); 
-    }
+    } 
   }
 });
  
@@ -143,3 +150,5 @@ export default {
     return new Response( "ok");
   },
 };
+
+

@@ -7,6 +7,7 @@ applications:
     stack: cflinuxfs4
     memory: 512M
     instances: 3
+    version: 0.0.2
     env:
       NODE_OPTIONS: --max-http-header-size=80000
       NODE_ENV: production
@@ -24,6 +25,7 @@ applications:
     stack: cflinuxfs4
     memory: 512M
     instances: 3
+    version: 0.0.2
     env:
       NODE_OPTIONS: --max-http-header-size=80000
       NODE_ENV: production

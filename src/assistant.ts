@@ -188,8 +188,9 @@ export const threadSetup = setup({
   } 
 });
 
+
 const threadMachine = threadSetup.createMachine({
-  id: "thread",
+  id: "@assistant/thread",
   initial: "boostrap",
   context: ({ input }) => ({
     messages: [],
@@ -230,6 +231,11 @@ const threadMachine = threadSetup.createMachine({
     },
   },
   states: {
+    idle: {
+      on: {
+        "@thread.start": "boostrap",
+      },
+    },
     boostrap: {
       entry: {
         type: "setStatus",
@@ -331,3 +337,7 @@ function isNotEmpty<TItem, TArray extends Array<TItem>>(
 declare type NotEmpty<T> = T extends [infer U, ...infer V]
   ? T & [U, ...U[]]
   : never;
+
+// store.subscribe(...)
+// store.sync(...)
+// store.restore()
