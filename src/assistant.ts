@@ -8,7 +8,6 @@ import {
 import { fromEventAsyncGenerator } from "@cxai/stream";
 import message from "./assistant.message";
 
-
 const bootstrap = fromEventAsyncGenerator(async function* ({
   input,
 }: {
@@ -23,133 +22,8 @@ const bootstrap = fromEventAsyncGenerator(async function* ({
     ],
   };
 }) as unknown as Thread.Bootstrap;
-
-
  
-export namespace Communication {
-
-  export type Prompt = {
-    title: string;
-    message: string;
-  };
-  
-  export type Prompts = {
-    type: "prompts";
-    title?: string;
-    prompts: [Prompt, ...Prompt[]];
-  };
-
-  type Block = {
-    type: string;
-    blocks?: Block[];
-  };
-  
-  export type Say = {
-    type: "say";
-    message: string | { text: string; blocks?: Block[] };
-    
-  };
-
-  export type Title = { type: "title"; title: string };
-
-  export type Status = { type: "status"; status: string };
-
-  export type Event = Prompts | Say | Title | Status;
-    export type Actions = {
-      type:"say",
-      params: Say["message"]
-    } | {
-      type:"setStatus",
-      params: Status["status"]
-    } | {
-      type:"setTitle",
-      params: Title["title"]
-    }
-
-    export type Emitted = |{
-      type:"assistant",
-      data: Say["message"]
-    } | {
-      type:"status",
-      data: Status["status"]
-    } | {
-      type:"title",
-      data: Title["title"]
-    }| {
-      type:"prompts",
-      data: Omit<Prompts, "type">
-    } | Messages.Event
-}
-
-export namespace Messages { 
-  export type Event = {
-    type: `@message.${string}`;
-   } & Details;
-  export type Details = {
-    type: `@message.${string}`;
-    content: string;
-    role: "user" | "assistant" | "system";
-    timestamp: string;
-    user: string;
  
-  };
-
-  export type Input = {
-    messages: [Messages.Event, ...Messages.Event[]];
-    context: Omit<Thread.Context, "messages">;
-  };
-  
-  export type Handler =ActorLogic<
-      any,
-      Communication.Event,
-      Input,
-      any,
-      Communication.Event
-  >;
-}
-
-export namespace Thread {
-  export type Event = {
-    type: `@thread.${string}`;
-  }
-  
-  export type Input = {
-    bot?: Record<string, unknown>;
-    thread?: Record<string, unknown>;
-  } & Record<string, unknown>;
-
- 
-  export type Bootstrap = ActorLogic<
-      any,
-      Communication.Event,
-      Input,
-      any,
-      Communication.Event
-  >;
-
-  export type Context = {
-    messages: Messages.Details[];
-    summary?: string;
-    error?: any;
-    thread?: Record<string, unknown>;
-    bot?: Record<string, unknown>;
-    current?: Messages.Details;
-  };
-
-
-}
-
-
- 
-type Optional<T> = {
-  [K in keyof T]?: T[K];
-};
- 
-
-
-
-
-
 export const threadSetup = setup({
   types: {} as {
     context: Thread.Context;
@@ -168,8 +42,8 @@ export const threadSetup = setup({
   },
   actions: { 
    emit: emit((_, e: Communication.Emitted) => (e)), 
-    saveContext: () => {}
-    } 
+   saveContext: () => {}
+   } 
 });
 
 
@@ -323,25 +197,31 @@ const threadMachine = threadSetup.createMachine({
       type: "final",
       entry:{
         type:"emit",
-        params: {
-          type: "assistant",
-          data: "Goodbye! It was nice talking to you!"
+          params:()=>  ({
+            type: "@message.assistant",
+            content: "Goodbye! It was nice talking to you!",
+            role: "assistant",
+            timestamp: Date.now().toString(),
+            user: "assistant"
+          })
         } 
-      }
     },
     error: {
       type: "final",
       entry: {
         type: "emit",
         params: ({ context: { error } }) => ({
-          type: "assistant",
-          data: "Sorry, something went wrong! " + "message" in error
+          type: "@message.assistant",
+          content: "Sorry, something went wrong! " + "message" in error
             ? error.message
             : "",
+          role: "assistant",
+          timestamp: Date.now().toString(),
+          user: "assistant"
         })
       },
     },
-  },
+  }
 }) 
 
 
@@ -356,6 +236,114 @@ declare type NotEmpty<T> = T extends [infer U, ...infer V]
   ? T & [U, ...U[]]
   : never;
 
-// store.subscribe(...)
-// store.sync(...)
-// store.restore()
+
+
+
+
+ 
+export namespace Communication {
+
+  export type Prompt = {
+    title: string;
+    message: string;
+  };
+  
+  export type Prompts = {
+    type: "prompts";
+    title?: string;
+    prompts: [Prompt, ...Prompt[]];
+  };
+
+  type Block = {
+    type: string;
+    blocks?: Block[];
+  };
+  
+  export type Say = {
+    type: "say";
+    message: string | { text: string; blocks?: Block[] };
+    
+  };
+
+  export type Title = { type: "title"; title: string };
+
+  export type Status = { type: "status"; status: string };
+
+  export type Event = Prompts | Say | Title | Status;
+
+    export type Emitted = | {
+      type:"status",
+      data: Status["status"]
+    } | {
+      type:"title",
+      data: Title["title"]
+    }| {
+      type:"prompts",
+      data: Omit<Prompts, "type">
+    } | Messages.Event
+}
+
+export namespace Messages { 
+  export type Event = {
+    type: `@message.${string}`;
+   } & Details;
+  export type Details = {
+    type: `@message.${string}`;
+    content: string;
+    role: "user" | "assistant" | "system";
+    timestamp: string;
+    user: string;
+ 
+  };
+
+  export type Input = {
+    messages: [Messages.Event, ...Messages.Event[]];
+    context: Omit<Thread.Context, "messages">;
+  };
+  
+  export type Handler =ActorLogic<
+      any,
+      Communication.Event,
+      Input,
+      any,
+      Communication.Event
+  >;
+}
+
+export namespace Thread {
+  export type Event = {
+    type: `@thread.${string}`;
+  }
+  
+  export type Input = {
+    bot?: Record<string, unknown>;
+    thread?: Record<string, unknown>;
+  } & Record<string, unknown>;
+
+ 
+  export type Bootstrap = ActorLogic<
+      any,
+      Communication.Event,
+      Input,
+      any,
+      Communication.Event
+  >;
+
+  export type Context = {
+    messages: Messages.Details[];
+    summary?: string;
+    error?: any;
+    thread?: Record<string, unknown>;
+    bot?: Record<string, unknown>;
+    current?: Messages.Details;
+  };
+
+
+}
+
+
+ 
+type Optional<T> = {
+  [K in keyof T]?: T[K];
+};
+ 

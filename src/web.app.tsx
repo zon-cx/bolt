@@ -210,8 +210,8 @@ app.post("/@assistant/:thread/select", (c) => {
   const threadId = c.req.param("thread") || "main";
   const threadsMap = actorsStore.getMap("@assistant/thread");
   return c.html(<div
-    hx-swap="outerHTML"
-    sse-swap="threads"
+    hx-swap="beforeend"
+    sse-swap="thread"
     id="threads"
     class="mb-4 flex flex-wrap gap-2 sticky top-0 bg-white z-10"
   >
@@ -232,7 +232,7 @@ app.post("/@assistant/:thread/select", (c) => {
         hx-target="#threads"
         hx-trigger="click"
         hx-swap="outerHTML"
-        class={`cursor-pointer hover:bg-indigo-50 focus:bg-indigo-100 px-3 py-1 rounded-full text-sm font-medium shadow-sm transition bg-indigo-500 text-white data-[active]:bg-slate-200 data-[active]:text-slate-700 data-[active]:hover:bg-slate-300  `}
+        class={`cursor-pointer hover:bg-indigo-50 focus:bg-indigo-100 px-3 py-1 rounded-full text-sm font-medium shadow-sm transition  text-slate-700 bg-slate-300  `}
         data-active={false}
         >
         {id.replace("@assistant/", "")}
