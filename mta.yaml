@@ -1,0 +1,16 @@
+ID: assistant
+_schema-version: '3.1'
+version: 0.0.1
+
+modules:
+  - name: slack
+    type: nodejs
+    path: src
+    parameters:
+      buildpack: nodejs_buildpack
+      disk-quota: 512M
+      memory: 512M
+    build-parameters:
+      builder: npm
+      ignore:
+        - '*.log' 

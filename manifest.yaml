@@ -1,0 +1,39 @@
+id: assistant
+applications:
+  - name: slack
+    command: npm run start
+    health-check-type: process
+    no-route: true
+    stack: cflinuxfs4
+    memory: 512M
+    instances: 3
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      LOG_SENSITIVE_CONNECTION_DATA: true
+      LOG_REMOTE_USER: true
+      LOG_REFERER: true
+      YJS_URL: 'https://yjs.cfapps.us10-001.hana.ondemand.com:'
+
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack
+  - name: web
+    command: node ./dist/web.app.cjs
+    routes:
+      - route: 'https://assistant.cfapps.eu20-001.hana.ondemand.com'
+    stack: cflinuxfs4
+    memory: 512M
+    instances: 3
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      LOG_SENSITIVE_CONNECTION_DATA: true
+      LOG_REMOTE_USER: true
+      LOG_REFERER: true
+      YJS_URL: 'https://yjs.cfapps.us10-001.hana.ondemand.com:'
+
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack
+    

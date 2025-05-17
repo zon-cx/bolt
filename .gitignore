@@ -3,3 +3,10 @@
 env
 
 .netlify
+/.idea/
+/.vscode/
+/.DS_Store
+/mta_archives/
+/mta-*/
+/dist/
+/node-http/
