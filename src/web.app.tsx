@@ -378,6 +378,16 @@ app.get("/@assistant/:thread/messages", async (c) =>
         });
       }
     );
+    assistant.on("@message.interupt", async (msg: any) => {
+      console.log("interupt", msg);
+      await stream.writeSSE({
+        event: "message",
+        data: <ChatBubble msg={{ user:'You', text:msg.content, time:new Date(msg.timestamp).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }), role: "system" }} />,
+      });
+    });
     stream.onAbort(() => {
       console.log("stream aborted");
       assistant.stop();
@@ -388,34 +398,23 @@ app.get("/@assistant/:thread/messages", async (c) =>
 
 // --- Post Message Route ---
 app.post("/@assistant/:thread/messages", async (c) => {
-  const threadId = c.req.param("thread") || "main";
-  const assistant = await getAssistant(threadId);
 
+  const threadId = c.req.param("thread") || "main";
+  const doc = connectYjs(`@assistant/${threadId}`);
+  const input = doc.getMap<Messages.Event>("@input");
   const body = await c.req.parseBody();
   const text = body.text as string;
-  const time = new Date().toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  const user = {
-    name: "You",
-    avatar:
-      "https://images.unsplash.com/photo-1511367461989-f85a21fda167?auto=format&fit=facearea&w=64&h=64",
-  };
 
-  // Send to assistant
-  assistant.send({
+  console.log("pushing interupt", text, doc.guid, "@input", input.toJSON());
+  input.set(Date.now().toString(), {
     type: "@message.interupt",
     role: "system",
     content: text,
     timestamp: Date.now().toString(),
-    user: "system",
+    user: "interuptor",
+
   });
 
-  // Wait for assistant to process and respond (simulate async)
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
-  return c.html(<ChatBubble msg={{ user, text, time, role: "user" }} />);
 });
 
 function ChatBubble({ msg }: { msg: any }) {

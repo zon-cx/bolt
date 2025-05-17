@@ -138,15 +138,7 @@ const threadMachine = threadSetup.createMachine({
           data: ""
         }
       },
-      on: {
-        "@message.bot_message": {
-          actions: assign({
-            messages: ({ event: message, context: { messages: history } }) => [
-              ...(history || []),
-              message,
-            ],
-          }),
-        },
+      on: { 
         "@message.*": {
           target: "processing",
           actions: [assign({
@@ -160,7 +152,7 @@ const threadMachine = threadSetup.createMachine({
           }]
         },
         
-      },
+      }
     },
     processing: {
       entry: {
