@@ -29,22 +29,27 @@ export default function yjsActor(logic: AnyActorLogic, options?: {
   input?: any;
   connect?: typeof connectYjs | false;
   logger: (...args: any[]) => void;
+  onCreate?: (actor: ReturnType<typeof createActor>) => void;
+  onStart?: (actor: ReturnType<typeof createActor>) => void;
 }) {
-  const { doc, input, connect, logger } = {
+  const { doc, input, connect, logger, onCreate, onStart } = {
     connect: connectYjs,
     logger: console.info,
     ...options || {},
     doc: typeof options?.doc === "string"
-      ? new Y.Doc({ guid: options.doc, collectionid: `@actors/${logic.id}`, meta: { logic: logic.id } , shouldLoad: true, gc:true })
+      ? new Y.Doc({ guid: options.doc, collectionid: `@actors/${(logic as any).id ?? "logic"}`, meta: { logic: (logic as any).id ?? "logic" } , shouldLoad: true, gc:true })
       : !options?.doc
-      ? new Y.Doc({ guid: `@actors/${logic.id}`, collectionid: `@actors/${logic.id}`, meta: { logic: logic.id } , shouldLoad: true, gc:true })
+      ? new Y.Doc({ guid: `@actors/${(logic as any).id ?? "logic"}`, collectionid: `@actors/${(logic as any).id ?? "logic"}`, meta: { logic: (logic as any).id ?? "logic" } , shouldLoad: true, gc:true })
       : options.doc,
   };
 
-  async function start() {
+  async function start( ) {
     if (!map.has(doc.guid)) {
       !!connect && connect(doc);
       map.set(doc.guid, createActorFromYjs(logic, doc, input, logger));
+      onCreate && onCreate(map.get(doc.guid)!);
+      map.get(doc.guid)!.start();
+      onStart && onStart(map.get(doc.guid)!);
     }
 
     return map.get(doc.guid)!;
@@ -69,11 +74,10 @@ function createActorFromYjs(logic: AnyActorLogic, doc: Y.Doc, input?: any, logge
   const runtime = createActor(logic, {
     id: doc.guid,
     input: input,
-    snapshot: resroredState,
+    snapshot: resroredState as any,
     inspect,
     logger,
   });
-  runtime.start();
   persist(runtime);
   return runtime;
 }
@@ -128,7 +132,7 @@ function hydrate(doc: Y.Doc) {
         if (inspectionEvent.type === "@xstate.snapshot") {
           const snapshot = inspectionEvent.snapshot;
           doc.transact(() => {
-            doc.getMap("@sessions").set(inspectionEvent.actorRef.sessionId, snapshot.value);
+            doc.getMap("@sessions").set(inspectionEvent.actorRef.sessionId, (snapshot as any).value ?? null);
           });
         }
         if (inspectionEvent.type === "@xstate.event") {
@@ -153,10 +157,11 @@ function hydrate(doc: Y.Doc) {
     persist(actor: ReturnType<typeof createActor>) {
       actor.subscribe((e) => {
         const persistedSnapshot = actor.getPersistedSnapshot();
-        store.set(doc.guid, persistedSnapshot);
+        store.set(doc.guid, persistedSnapshot as any);
         console.log("persisted snapshot", doc.guid, persistedSnapshot);
         doc.transact(() => {
-          doc.getMap("@store").set("state", "value" in persistedSnapshot ? persistedSnapshot.value : null);
+          const persisted: any = persistedSnapshot;
+          doc.getMap("@store").set("state", "value" in persisted ? persisted.value : null);
           doc.getMap("@store").set("event", e.event);
 
           const snapshotMap = doc.getMap("@snapshot");
@@ -165,6 +170,10 @@ function hydrate(doc: Y.Doc) {
             snapshotMap.set(key, value);
           });
         });
+      });
+
+      actor.on("*", (e)=>{
+         doc.getArray("@output").push([e]);
       });
     },
   };

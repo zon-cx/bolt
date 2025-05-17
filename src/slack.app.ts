@@ -11,14 +11,31 @@ const { Assistant } = slack;
 import threadMachine from "./assistant";
  import prompter from "./assistant.bootstrap";
 import yjsActor from "./assistant.store";
+import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
 
  const log=(logger:slack.Logger) => (...args:any[])=>{
    logger.info(...args);
  }
-
  
- 
- 
+ function listener(args:Pick<AllAssistantMiddlewareArgs,"say" | "setStatus" | "setSuggestedPrompts" | "setTitle"   >){
+  return function listene(actor:ReturnType<typeof createActor>){
+  const {say, setStatus, setSuggestedPrompts, setTitle} = args;
+  actor.on("@message.assistant", (event) => {
+    const {content} = event;
+    say(content);
+  }); 
+  actor.on("status", (event) => {
+    setStatus(event.data);
+  });
+  actor.on("title", (event) => {
+    setTitle(event.data);
+  });
+  actor.on("prompts", (event) => {
+    setSuggestedPrompts(event.data);
+  }); 
+}
+  
+ }
 const assistant = new Assistant({
   /**
    * A custom ThreadContextStore can be provided, inclusive of methods to
@@ -48,29 +65,15 @@ const assistant = new Assistant({
     const assistant = await yjsActor(threadMachine.provide({
           actors: {
             bootstrap: prompter
-          },
-          actions: {
-            say: (_, params ) => say(params),
-            setStatus: (_, params ) => setStatus(params),
-            setSuggestedPrompts: (_, params ) => {
-              console.log("setting prompts", params);
-              setSuggestedPrompts(params)
-                .then((res) => {
-                  console.log("setting prompts res", res);
-                })
-                .catch((err) => {
-                  console.log("setting prompts err", err);
-                });
-            },
-            setTitle: (_, params: string) => setTitle(params),
-            saveContext: saveThreadContext,
           }
         }),{
           input,
           doc: `@assistant/${id}`,
-          logger: log(logger)
-       }).start();
-     
+          logger: log(logger),
+          onCreate: listener({say, setStatus, setSuggestedPrompts, setTitle})
+        }).start();
+
+   
     waitFor(assistant, (state) => state.matches("listening")).then(()=>{
       console.log("thread started",assistant.getPersistedSnapshot());
      }) 
@@ -92,32 +95,27 @@ const assistant = new Assistant({
    * be deduced based on their shape and metadata (if provided).
    * https://api.slack.com/events/message
    */
-  userMessage: async ( {message, say, setStatus, setSuggestedPrompts, setTitle, saveThreadContext, logger}) => {
+  userMessage: async ( {message, say, setStatus, setSuggestedPrompts, setTitle, logger}) => {
     const id = ("thread_ts" in message && message.thread_ts) || message.event_ts || message.ts;
 
     const assistant =await yjsActor(threadMachine.provide({
       actors: {
         bootstrap: prompter
-      },
-      actions: {
-        say: (_, params ) => say(params),
-        setStatus: (_, params ) => setStatus(params),
-        setTitle: (_, params: string) => setTitle(params),
-        saveContext: saveThreadContext,
-        setSuggestedPrompts: (_,params) => setSuggestedPrompts(params)
-      }
+      },    
     }),{
       doc: `@assistant/${id}`,
-      logger: log(logger)
+      logger: log(logger),
+      onCreate: listener({say, setStatus, setSuggestedPrompts, setTitle})
    }).start();
-
-
-
-    if( "text" in message && !! message.text){
+ 
+   
+    if( "text" in message && !! message.text && "user" in message){
       assistant.send({
         timestamp: message.ts,
-        role: "bot_id" in message ? "assistant" : "user",
-        type:`@message.${message.subtype}`,
+        role: "user",
+        user: message.user,
+     
+        type:`@message.${message.subtype || "user"}`,
         content: message.text
       } ); 
     } 

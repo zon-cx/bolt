@@ -66,7 +66,7 @@ export namespace Communication {
       params: Title["title"]
     }
 
-    export type Emited = {
+    export type Emitted = |{
       type:"assistant",
       data: Say["message"]
     } | {
@@ -77,8 +77,8 @@ export namespace Communication {
       data: Title["title"]
     }| {
       type:"prompts",
-      data: Prompts["prompts"]
-    }
+      data: Omit<Prompts, "type">
+    } | Messages.Event
 }
 
 export namespace Messages { 
@@ -88,8 +88,10 @@ export namespace Messages {
   export type Details = {
     type: `@message.${string}`;
     content: string;
-    role: "user" | "assistant";
+    role: "user" | "assistant" | "system";
     timestamp: string;
+    user: string;
+ 
   };
 
   export type Input = {
@@ -155,37 +157,19 @@ export const threadSetup = setup({
         | Communication.Event
         | { type: "@thread.end" };
     input?: Optional<Thread.Input>;
-    actions: Communication.Actions
     actors: {
       message: Messages.Handler;
       bootstrap: Thread.Bootstrap;
     };
-    // emitted:  Communication.Emited
   },
   actors: {
     message: message,
     bootstrap: bootstrap,
   },
-  actions: {
-    say: emit((_: any, params: Communication.Say["message"]) => ({
-      type: "assistant",
-      data: params
-    })
-  ) ,
-  setStatus: emit((_, s: string) => ({
-    type: "status",
-    data: s
-  })),
-  setTitle: emit((_: any, t: string) => ({
-    type: "title",
-    data: t
-  })),
-  setSuggestedPrompts: emit((_: any, p: any) => ({
-    type: "prompts",
-    data: p.prompts
-  })),
-  saveContext: () => {}
-  } 
+  actions: { 
+   emit: emit((_, e: Communication.Emitted) => (e)), 
+    saveContext: () => {}
+    } 
 });
 
 
@@ -198,48 +182,61 @@ const threadMachine = threadSetup.createMachine({
   }),
   on: {
     prompts: {
-      actions: {
-        type: "setSuggestedPrompts",
-        params: ({ event: { type: _type, ...event } }) =>
-          event as Omit<Communication.Prompts, "type">,
-      },
+        actions: {
+          type: "emit",
+          params: ({ event: { type: _type, ...event } }) =>({
+            type: "prompts",
+            data: event
+          }) 
+        },
       guard: ({ event: { type: _type, prompts } }) => isNotEmpty(prompts),
     },
     say: {
-      actions: enqueueActions(({ event: { message }, enqueue }) => {
-        enqueue({
-          type: "say",
-          params: message,
-        });
-      }),
+      actions: [
+     
+        {
+          type: "emit",
+          params: ({event: {message}, context: {bot}}) => ({
+            type: "@message.assistant",
+            content: typeof message === "string" ? message : message.text,
+            role: "assistant",
+            timestamp: Date.now().toString(),
+            user: bot?.botId?.toString() || "assistant"
+          })
+        }
+      ],
     },
     title: {
       actions: enqueueActions(({ event: { title }, enqueue }) => {
         enqueue({
-          type: "setTitle",
-          params: title,
+          type: "emit",
+          params: ({event: {title}}) => ({
+            type: "title",
+            data: title
+          })
         });
       }),
     },
     status: {
       actions: enqueueActions(({ event: { status }, enqueue }) => {
         enqueue({
-          type: "setStatus",
-          params: status,
+          type: "emit",
+          params: ({event: {status}}) => ({
+            type: "status",
+            data: status
+          })
         });
       }),
     },
   },
-  states: {
-    idle: {
-      on: {
-        "@thread.start": "boostrap",
-      },
-    },
+  states: { 
     boostrap: {
       entry: {
-        type: "setStatus",
-        params: "is typing...",
+        type: "emit",
+        params: {
+          type: "status",
+          data: "is typing..."
+        }
       },
       invoke: {
         src: "bootstrap",
@@ -250,13 +247,23 @@ const threadMachine = threadSetup.createMachine({
             type: "saveContext",
             params: ({ context }) => context,
           },
-          onError: {
-            target: "error",
-          },
+        },
+        onError: {
+          target: "error",
+          actions: assign({
+            error: ({ event: { error } }) => error,
+          }),
         },
       },
     },
     listening: {
+      entry: { 
+        type: "emit",
+        params: {
+          type: "status",
+          data: ""
+        }
+      },
       on: {
         "@message.bot_message": {
           actions: assign({
@@ -268,19 +275,26 @@ const threadMachine = threadSetup.createMachine({
         },
         "@message.*": {
           target: "processing",
-          actions: assign({
+          actions: [assign({
             messages: ({ event, context: { messages } }) => [
               ...messages,
               event,
             ],
-          }),
+          }), {
+            type:"emit",
+            params: ({ event }) => event
+          }]
         },
+        
       },
     },
     processing: {
       entry: {
-        type: "setStatus",
-        params: "is typing...",
+        type: "emit",
+        params: {
+          type: "status",
+          data: "is typing..."
+        }
       },
       invoke: {
         src: "message",
@@ -307,24 +321,28 @@ const threadMachine = threadSetup.createMachine({
 
     done: {
       type: "final",
-      entry: {
-        type: "say",
-        params: "Goodbye! It was nice talking to you!",
-      },
+      entry:{
+        type:"emit",
+        params: {
+          type: "assistant",
+          data: "Goodbye! It was nice talking to you!"
+        } 
+      }
     },
     error: {
       type: "final",
       entry: {
-        type: "say",
-        params: ({ context: { error } }) =>
-          "Sorry, something went wrong! " + "message" in error
+        type: "emit",
+        params: ({ context: { error } }) => ({
+          type: "assistant",
+          data: "Sorry, something went wrong! " + "message" in error
             ? error.message
             : "",
+        })
       },
     },
   },
-});
-
+}) 
 
 
 export default threadMachine;
