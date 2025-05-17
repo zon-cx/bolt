@@ -1,0 +1,6 @@
+node_modules
+build/*
+.env
+!mcp-example.json
+mcp*.json
+.vscode

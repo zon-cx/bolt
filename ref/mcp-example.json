@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "my_mcp_server_sse": {
+      "url": "http://localhost:3001/sse"
+    },
+    "time": {
+      "command": "python",
+      "args": ["-m", "mcp_server_time"]
+    },
+    "my_mcp_server_http": {
+      "url": "http://localhost:3002"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "slack-mcp-client",
+  "version": "1.0.0",
+  "description": "MCP client for Slack",
+  "private": true,
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').chmodSync('build/app.js', '755')\"",
+    "dev": "tsx watch src/app.ts"
+  },
+  "bin": {
+    "slack-mcp-client": "./build/app.js"
+  },
+  "files": [
+    "build"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.9.0",
+    "@slack/bolt": "^4.2.1",
+    "@slack/web-api": "^7.9.1",
+    "@types/express": "^5.0.1",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "openai": "^4.92.1",
+    "pino": "^9.6.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.24.0",
+    "@types/node": "^22.14.0",
+    "eslint": "^9.24.0",
+    "globals": "^16.0.0",
+    "pino-pretty": "^13.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.29.1"
+  },
+  "type": "module"
+}
