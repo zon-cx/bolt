@@ -7,7 +7,7 @@ import {
 } from "xstate";
 import { fromEventAsyncGenerator } from "@cxai/stream";
 import message from "./assistant.message.mcp";
-import bootstrap from "./assistant.bootstrap";
+import bootstrap from "./assistant.bootstrap.mcp";
 
 namespace Tools {
   export type Tool = {
@@ -19,12 +19,12 @@ namespace Tools {
 
   export type ToolCall = {
     name: string;
-    args: Record<string, unknown>;
+    args: unknown;
   }
 
   export type ToolResult = {
     name: string;
-    result: Record<string, unknown>;
+    result: unknown;
   }
 
   export type ToolCalls = Record<string, ToolCall>;
@@ -45,14 +45,14 @@ namespace Tools {
 
 export const sessionSetup = setup({
   types: {} as {
-    context: Thread.Context;
+    context: Session.Context;
     events: Messages.Event
         | Communication.Event
-        | { type: "@thread.end" };
-    input?: Optional<Thread.Input>;
+        | { type: "@session.end" };
+    input?: Optional<Session.Input>;
     actors: {
       message: Messages.Handler;
-      bootstrap: Thread.Bootstrap;
+      bootstrap: Session.Bootstrap;
     };
   },
   actors: {
@@ -326,7 +326,7 @@ export namespace Messages {
 
   export type Input = {
     messages: [Messages.Event, ...Messages.Event[]];
-    context: Omit<Thread.Context, "messages">;
+    context: Omit<Session.Context, "messages">;
   };
   
   export type Handler =ActorLogic<
@@ -338,9 +338,9 @@ export namespace Messages {
   >;
 }
 
-export namespace Thread {
+export namespace Session {
   export type Event = {
-    type: `@thread.${string}`;
+    type: `@session.${string}`;
   }
   
   export type Input = {

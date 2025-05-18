@@ -2,7 +2,7 @@ import { fromEventAsyncGenerator } from "@cxai/stream";
 import {jsonSchema, generateObject, generateText} from "ai";
 import { azure } from "@ai-sdk/azure";
 import messageBuilder from "./slack.messages";
-import { Communication, Thread} from "./assistant";
+import { Communication, Session} from "./assistant";
 
 
 const prompter = fromEventAsyncGenerator(async function* (): AsyncGenerator<Communication.Event> {
@@ -67,6 +67,6 @@ const prompter = fromEventAsyncGenerator(async function* (): AsyncGenerator<Comm
   yield { type: "prompts",  prompts, title};
 });
 
-export default prompter as unknown as  Thread.Bootstrap
+export default prompter as unknown as  Session.Bootstrap
 
 

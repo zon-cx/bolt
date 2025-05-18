@@ -9,7 +9,7 @@ import {
 const { Assistant } = slack;
 
 import sessionMachine from "./assistant";
- import prompter from "./assistant.bootstrap.llm";
+ import prompter from "./assistant.bootstrap.mcp";
 import yjsActor from "./assistant.store";
 import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
 import messages from "./slack.messages";
