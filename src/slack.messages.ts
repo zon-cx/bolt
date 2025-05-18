@@ -137,26 +137,25 @@ const messageBuilder = {
         blocks: (KnownBlock | Block)[];
         text?: string;
     } => {
-        const toolEntries= Array.from(tools.entries()).map(([name, tool]) => ({
-            name: name,
-            ...tool
+        const toolEntries = Array.from(tools.entries()).map(([name, tool]) => ({
+            name, ...tool
         }));
-        if (toolEntries.length === 0) {
-            return {
-                blocks: [messageBuilder.textSection(`- *${name}* - No tools available... ❌`)],
-                text: " - " + name + ": No tools available...",
-            };
-        }
+        
         return {
-            blocks: [
-                messageBuilder.textSection(`- *${name}*:`),
-                messageBuilder.textList(
-                    toolEntries.map((tool) => ({
-                        text: tool.name + " - " + tool.description,
-                    })),
-                ),
-            ],
-            text: " - " + name + ": " + toolEntries.length + " tools available",
+          blocks: [
+            {
+              type: "context",
+              elements: [
+                {
+                  type: "mrkdwn",
+                  text: toolEntries.length 
+                    ? `🔍 *${name}*: ${toolEntries.map(t => t.name).join(', ')}`
+                    : `🔍 *${name}*: No tools ❌`
+                }
+              ]
+            }
+          ],
+          text: `${name}: ${toolEntries.length || 'No'} tools`
         };
     },
 

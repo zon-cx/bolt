@@ -6,25 +6,44 @@ import {
   emit,
 } from "xstate";
 import { fromEventAsyncGenerator } from "@cxai/stream";
-import message from "./assistant.message";
+import message from "./assistant.message.mcp";
+import bootstrap from "./assistant.bootstrap";
 
-const bootstrap = fromEventAsyncGenerator(async function* ({
-  input,
-}: {
-  input: Thread.Input;
-}) {
-  yield {
-    type: "prompts",
-    title: `This is a message from unimplemented bootstrap, bot id: ${input.bot?.botId}`,
-    prompts: [
-      { title: "Template 1", message: "Hello " },
-      { title: "Template 2", message: "Hello 2" },
-    ],
-  };
-}) as unknown as Thread.Bootstrap;
- 
- 
-export const threadSetup = setup({
+namespace Tools {
+  export type Tool = {
+    description?: string;
+    parameters?: Zod.ZodUnknown;
+  }
+
+  export type Tools = Record<string, Tool>;
+
+  export type ToolCall = {
+    name: string;
+    args: Record<string, unknown>;
+  }
+
+  export type ToolResult = {
+    name: string;
+    result: Record<string, unknown>;
+  }
+
+  export type ToolCalls = Record<string, ToolCall>;
+  export type ToolResults = Record<string, ToolResult>;
+
+   export type ToolAvailableEvent = {
+    type: "@tool.available"; 
+    tools: {[key: string]: Tool}
+  } 
+  export type ToolCallEvent = {
+    type: "@tool.call";
+  } & ToolCall
+  export type ToolResultEvent = {
+    type: "@tool.result";
+  } & ToolResult
+  export type Event = ToolAvailableEvent | ToolCallEvent | ToolResultEvent;
+}
+
+export const sessionSetup = setup({
   types: {} as {
     context: Thread.Context;
     events: Messages.Event
@@ -41,14 +60,13 @@ export const threadSetup = setup({
     bootstrap: bootstrap,
   },
   actions: { 
-   emit: emit((_, e: Communication.Emitted) => (e)), 
+   emit: emit((_, e: Communication.Emitted ) => (e)), 
    saveContext: () => {}
    } 
 });
 
-
-const threadMachine = threadSetup.createMachine({
-  id: "@assistant/thread",
+const sessionMachine = sessionSetup.createMachine({
+  id: "@assistant/session",
   initial: "boostrap",
   context: ({ input }) => ({
     messages: [],
@@ -66,8 +84,7 @@ const threadMachine = threadSetup.createMachine({
       guard: ({ event: { type: _type, prompts } }) => isNotEmpty(prompts),
     },
     say: {
-      actions: [
-     
+      actions: [ 
         {
           type: "emit",
           params: ({event: {message}, context: {bot}}) => ({
@@ -102,6 +119,14 @@ const threadMachine = threadSetup.createMachine({
         });
       }),
     },
+    "@tool.*": {
+      actions: enqueueActions(({  enqueue }) => {
+        enqueue({
+          type: "emit",
+          params: ({event}) => (event)
+        })
+      }),
+    }
   },
   states: { 
     boostrap: {
@@ -138,7 +163,18 @@ const threadMachine = threadSetup.createMachine({
           data: ""
         }
       },
-      on: { 
+      on: {
+        "@message.assistant": {
+          actions: [assign({
+            messages: ({ event, context: { messages } }) => [
+              ...messages,
+              event,
+            ],
+          }), {
+            type:"emit",
+            params: ({ event }) => event
+          }]
+        },
         "@message.*": {
           target: "processing",
           actions: [assign({
@@ -217,7 +253,7 @@ const threadMachine = threadSetup.createMachine({
 }) 
 
 
-export default threadMachine;
+export default sessionMachine;
 
 function isNotEmpty<TItem, TArray extends Array<TItem>>(
   value: TArray
@@ -261,7 +297,7 @@ export namespace Communication {
 
   export type Status = { type: "status"; status: string };
 
-  export type Event = Prompts | Say | Title | Status;
+  export type Event = Prompts | Say | Title | Status | Tools.Event
 
     export type Emitted = | {
       type:"status",
@@ -272,7 +308,7 @@ export namespace Communication {
     }| {
       type:"prompts",
       data: Omit<Prompts, "type">
-    } | Messages.Event
+    } | Messages.Event | Tools.Event
 }
 
 export namespace Messages { 

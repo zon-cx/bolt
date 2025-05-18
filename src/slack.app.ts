@@ -8,11 +8,11 @@ import {
 } from "xstate";
 const { Assistant } = slack;
 
-import threadMachine from "./assistant";
- import prompter from "./assistant.bootstrap";
+import sessionMachine from "./assistant";
+ import prompter from "./assistant.bootstrap.llm";
 import yjsActor from "./assistant.store";
 import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
-
+import messages from "./slack.messages";
  const log=(logger:slack.Logger) => (...args:any[])=>{
    logger.info(...args);
  }
@@ -33,6 +33,20 @@ import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
   actor.on("prompts", (event) => {
     setSuggestedPrompts(event.data);
   }); 
+  actor.on("@tool.call", (event) => {
+    console.log("tool call", event);
+    say(messages.listToolsMessage("tool call", event));
+  });
+  actor.on("@tool.result", (event) => {
+    console.log("tool result", event);
+    say(messages.listToolsMessage("tool result", event));
+  });
+  actor.on("@tool.available", (event) => {
+    console.log("tool available", event);
+
+    say(messages.listToolsMessage("available tools", new Map(Object.entries(event.tools))));
+
+  });
 }
   
  }
@@ -61,8 +75,14 @@ const assistant = new Assistant({
       bot: context,
       thread: event.assistant_thread,
     }
+    logger.debug(
+      "Thread started for user " +
+          event.assistant_thread.user_id +
+          " with thread ts " +
+          event.assistant_thread.thread_ts,
+     );
 
-    const assistant = await yjsActor(threadMachine.provide({
+    const assistant = await yjsActor(sessionMachine.provide({
           actors: {
             bootstrap: prompter
           }
@@ -98,7 +118,7 @@ const assistant = new Assistant({
   userMessage: async ( {message, say, setStatus, setSuggestedPrompts, setTitle, logger}) => {
     const id = ("thread_ts" in message && message.thread_ts) || message.event_ts || message.ts;
 
-    const assistant =await yjsActor(threadMachine.provide({
+    const assistant =await yjsActor(sessionMachine.provide({
       actors: {
         bootstrap: prompter
       },    
