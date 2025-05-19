@@ -3,13 +3,15 @@ import slack from '@slack/bolt';
 const { App, LogLevel } = slack; 
 import {
   ActorRefFromLogic,
+  assertEvent,
   createActor,
+  EventObject,
+  fromCallback,
   waitFor,
 } from "xstate";
 const { Assistant } = slack;
 
 import sessionMachine from "./assistant";
- import prompter from "./assistant.bootstrap.mcp";
 import yjsActor from "./assistant.store";
 import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
 import messages from "./slack.messages";
@@ -82,11 +84,7 @@ const assistant = new Assistant({
           event.assistant_thread.thread_ts,
      );
 
-    const assistant = await yjsActor(sessionMachine.provide({
-          actors: {
-            bootstrap: prompter
-          }
-        }),{
+    const assistant = await yjsActor(sessionMachine,{
           input,
           doc: `@assistant/${id}`,
           logger: log(logger),
@@ -115,21 +113,19 @@ const assistant = new Assistant({
    * be deduced based on their shape and metadata (if provided).
    * https://api.slack.com/events/message
    */
-  userMessage: async ( {message, say, setStatus, setSuggestedPrompts, setTitle, logger}) => {
+  userMessage: async ( {message, say, setStatus, setSuggestedPrompts, setTitle, logger, context}) => {
     const id = ("thread_ts" in message && message.thread_ts) || message.event_ts || message.ts;
+    console.log("userMessage",message); 
 
-    const assistant =await yjsActor(sessionMachine.provide({
-      actors: {
-        bootstrap: prompter
-      },    
-    }),{
+    const assistant =await yjsActor(sessionMachine,{
+      input: context,
       doc: `@assistant/${id}`,
       logger: log(logger),
       onCreate: listener({say, setStatus, setSuggestedPrompts, setTitle})
    }).start();
  
-   
     if( "text" in message && !! message.text && "user" in message){
+      console.log("sending message");
       assistant.send({
         timestamp: message.ts,
         role: "user",
@@ -138,9 +134,88 @@ const assistant = new Assistant({
         type:`@message.${message.subtype || "user"}`,
         content: message.text
       } ); 
+
+      console.log("message sent",assistant.getPersistedSnapshot());
+
     } 
   }
 });
+
+
+/*
+userMessage: async ( {message, say, setStatus, setSuggestedPrompts, setTitle, logger, context}) => {
+    const id = ("thread_ts" in message && message.thread_ts) || message.event_ts || message.ts;
+    console.log("userMessage",message);
+    
+     
+      
+ 
+    const mcpActor= createActor(mcpSession.provide({
+      actors: {
+        "messages/callback": mcpSession,
+        "communication/callback": fromCallback(({ receive }) => {
+              receive((event) => {
+                console.debug("command/callback",event); 
+
+                if(checkEvent(event, "@communication.say")){
+                  say(event.message);
+                }
+                if(checkEvent(event, "@communication.status")){
+                  setStatus(event.status);
+                }
+                if(checkEvent(event, "@communication.title")){
+                  setTitle( event.title);
+                }
+                if(checkEvent(event, "@communication.prompts")){
+                  setSuggestedPrompts(event);
+                }
+                if(checkEvent(event, "@communication.toolListChanged")){
+                  say(messages.listToolsMessage("available tools", new Map(Object.entries(event.tools))));
+                }
+                
+              });
+            }),
+      }
+
+    }),{
+      input: context,
+      id: `@assistant/${id}`,
+      logger: log(logger),
+      systemId:`@assistant/mcp/${id}`
+  });
+  
+     mcpActor.start();
+
+     console.log("mcpActor created",mcpActor.getPersistedSnapshot().status);
+  //   const assistant =await yjsActor(sessionMachine.provide({
+  //     actors: {
+  //       bootstrap: prompter
+  //     },    
+  //   }),{
+  //     doc: `@assistant/${id}`,
+  //     logger: log(logger),
+  //     onCreate: listener({say, setStatus, setSuggestedPrompts, setTitle})
+  //  }).start();
+ 
+    await waitFor(mcpActor, (state) => state.matches("connected")).catch(logger.error);
+   console.log("connected mcpActor/",mcpActor.getPersistedSnapshot());
+    if( "text" in message && !! message.text && "user" in message){
+      console.log("sending message");
+      mcpActor.send({
+        timestamp: message.ts,
+        role: "user",
+        user: message.user,
+     
+        type:`@message.${message.subtype || "user"}`,
+        content: message.text
+      } ); 
+
+      console.log("message sent",mcpActor.getPersistedSnapshot());
+
+    } 
+  }
+});
+*/
  
 const app = new App({
   token: env.SLACK_BOT_TOKEN,
@@ -169,4 +244,8 @@ export default {
   },
 };
 
+
+function checkEvent<TType extends string>(event:  EventObject,type: TType ): event is EventObject & {type: TType} {
+  return event.type === type;
+}
 

@@ -37,5 +37,5 @@
     "outDir": "./dist"
 
   },
-  "include": ["src"],
+  "include": ["src", "ref/mcp.*/mcp.client.ts", "ref/mcp.*/mcp.server.tsx", "ref/mcp.*/mcp.session.ts", "ref/mcp.*/mcp.store.mts", "ref/mcp.*/assistant.mcp.ts", "ref/mcp.*/tool.repair.ts"],
 }

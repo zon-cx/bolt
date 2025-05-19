@@ -151,7 +151,13 @@ const messageBuilder = {
                   text: toolEntries.length 
                     ? `🔍 *${name}*: ${toolEntries.map(t => t.name).join(', ')}`
                     : `🔍 *${name}*: No tools ❌`
-                }
+                },
+                // {
+                //   type: "mrkdwn",
+                //   text: toolEntries.length 
+                //     ? `🔍 *${name}*: ${toolEntries.map(t => JSON.stringify(t,null,2)).join('\n/n')} `
+                //     : `🔍 *${name}*: No tools ❌`
+                // }
               ]
             }
           ],

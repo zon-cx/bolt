@@ -4,43 +4,27 @@ import {
   assign,
   ActorLogic, Values,
   emit,
+  spawnChild,
 } from "xstate";
-import { fromEventAsyncGenerator } from "@cxai/stream";
 import message from "./assistant.message.mcp";
 import bootstrap from "./assistant.bootstrap.mcp";
+import { mcpClient } from "./assistant.mcp.client";
+import { CoreAssistantMessage, CoreMessage, CoreSystemMessage, CoreToolMessage, CoreUserMessage, Tool, ToolCall, ToolResult } from "ai";
 
-namespace Tools {
-  export type Tool = {
-    description?: string;
-    parameters?: Zod.ZodUnknown;
-  }
-
-  export type Tools = Record<string, Tool>;
-
-  export type ToolCall = {
-    name: string;
-    args: unknown;
-  }
-
-  export type ToolResult = {
-    name: string;
-    result: unknown;
-  }
-
-  export type ToolCalls = Record<string, ToolCall>;
-  export type ToolResults = Record<string, ToolResult>;
-
+export namespace Tools {
    export type ToolAvailableEvent = {
     type: "@tool.available"; 
     tools: {[key: string]: Tool}
   } 
   export type ToolCallEvent = {
     type: "@tool.call";
-  } & ToolCall
+  } & ToolCall<string, unknown>
   export type ToolResultEvent = {
     type: "@tool.result";
-  } & ToolResult
-  export type Event = ToolAvailableEvent | ToolCallEvent | ToolResultEvent;
+  } & ToolResult<string, unknown, unknown>
+
+  export type Event =   ToolAvailableEvent | ToolCallEvent | ToolResultEvent
+
 }
 
 export const sessionSetup = setup({
@@ -56,6 +40,7 @@ export const sessionSetup = setup({
     };
   },
   actors: {
+    mcpClient: mcpClient,
     message: message,
     bootstrap: bootstrap,
   },
@@ -68,6 +53,13 @@ export const sessionSetup = setup({
 const sessionMachine = sessionSetup.createMachine({
   id: "@assistant/session",
   initial: "boostrap",
+  entry: [
+    spawnChild("mcpClient",{
+      systemId: "mcpClient",
+      id: "mcpClient",
+      input: undefined
+    })
+  ],
   context: ({ input }) => ({
     messages: [],
     ...input,
@@ -289,7 +281,7 @@ export namespace Communication {
   
   export type Say = {
     type: "say";
-    message: string | { text: string; blocks?: Block[] };
+    message: string | { text: string; blocks?: Block[] }
     
   };
 
@@ -312,18 +304,34 @@ export namespace Communication {
 }
 
 export namespace Messages { 
-  export type Event = {
-    type: `@message.${string}`;
-   } & Details;
+ 
+  export type ToolMessageEvent= {
+    type: "@message.tool"; 
+  }& CoreToolMessage & Details
+
+  export type AssistantMessageEvent= {
+    type: "@message.assistant"; 
+  }& CoreAssistantMessage & Details
+
+  export type SystemMessageEvent= {
+    type: "@message.system"; 
+  }& CoreSystemMessage & Details
+
+  export type UserMessgeEvent ={
+    type: "@message.user"
+  } & CoreUserMessage & Details
+
+  export type Event =  
+    ToolMessageEvent | AssistantMessageEvent | SystemMessageEvent | UserMessgeEvent 
+  
+
   export type Details = {
     type: `@message.${string}`;
-    content: string;
-    role: "user" | "assistant" | "system";
     timestamp: string;
-    user: string;
- 
-  };
-
+    user: string; 
+    role: "user" | "assistant" | "system" | "tool";
+    content: unknown
+  }  
   export type Input = {
     messages: [Messages.Event, ...Messages.Event[]];
     context: Omit<Session.Context, "messages">;

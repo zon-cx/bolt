@@ -1,43 +1,8 @@
 import { fromEventAsyncGenerator } from "@cxai/stream";
-import { generateObject, generateText, Tool, ToolExecutionError } from "ai";
+import { generateText } from "ai";
 import { azure } from "@ai-sdk/azure";
-import { experimental_createMCPClient as createMCPClient } from "ai";
 import { Communication, Messages } from "./assistant";
 
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-// new StdioMCPTransport({
-//     command: "npx",
-//     args: ["@modelcontextprotocol/server-slack", "-y", "--port", "3000"],
-//     env: {
-//       SLACK_BOT_TOKEN: env.SLACK_BOT_TOKEN!,
-//       SLACK_TEAM_ID: env.SLACK_TEAM_ID!,
-//     },
-//   })
-const mcpClient = await createMCPClient({
-  transport: new StreamableHTTPClientTransport(
-    new URL(process.env.MCP_SERVER_URL!),
-    {
-      requestInit: {
-        headers: {
-          Authorization: "Bearer YOUR TOKEN HERE",
-        },
-      },
-      // transport: new SSEClientTransport(
-      //     new URL(process.env.MCP_SERVER_URL!), {
-      //   requestInit: {
-      //     headers: {
-      //       Authorization: "Bearer YOUR TOKEN HERE",
-      //   },
-      // },
-      // TODO add OAuth client provider if you want
-    //   authProvider:  new OAuthClientProvider({
-    //     clientId: process.env.MCP_CLIENT_ID!,
-    //     clientSecret: process.env.MCP_CLIENT_SECRET!,
-    //     redirectUri: process.env.MCP_REDIRECT_URI!,
-    //   }),
-    }
-  ),
-});
 
 /**
  * Extend the generic MessageInput with an optional prompt field.
@@ -64,17 +29,16 @@ export type MCPMessageInput = {
  * 4. Emits Communication.Event objects so the surrounding state-machine can
  *    update the UI (status → say → title).
  */
-const mcpMessage = fromEventAsyncGenerator(async function* ({
-  input: { prompt, messages, context },
-}: {
-  input: MCPMessageInput;
+const mcpMessage = fromEventAsyncGenerator<Communication.Event,MCPMessageInput,Communication.Event>(async function* ({
+  system,
+  input: { prompt, messages },
 }): AsyncGenerator<Communication.Event> {
   // 1. Inform UI that we are about to connect to the tool server
   yield { type: "status", status: "connecting to tool server…" };
 
   // Fetch the list of tools that the server exposes. We do not provide
   // explicit schemas here – discovery mode will infer them for us.
-  const tools = await mcpClient.tools();
+  const {tools} = await system.get("mcpClient").getSnapshot().context;
 
   yield {
     type: "@tool.available",
@@ -115,14 +79,14 @@ const mcpMessage = fromEventAsyncGenerator(async function* ({
     yield { type: "say", message: text };
 
     for (const [key, toolResult] of Object.entries(toolResults)) {
-      yield { ...toolResult, type: "@tool.result", name: key };
+      yield { ...toolResult, type: "@tool.result", toolCallId: key };
     }
 
     for (const [key, toolCall] of Object.entries(toolCalls)) {
       yield {
         ...toolCall,
         type: "@tool.call",
-        name: key,
+        toolName: key,
         args: toolCall.args as Record<string, unknown>,
       };
     }

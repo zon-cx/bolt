@@ -1,9 +1,6 @@
 import { fromEventAsyncGenerator } from "@cxai/stream";
-import { jsonSchema, generateObject, generateText } from "ai";
-import { azure } from "@ai-sdk/azure";
-import messageBuilder from "./slack.messages";
-import { Communication, Messages, Session } from "./assistant";
-import { ActorLogic, setup } from "xstate";
+import { Communication, Session } from "./assistant";
+import { ActorLogic } from "xstate";
 
 export type Bootstrap = ActorLogic<
   any,
