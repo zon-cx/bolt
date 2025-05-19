@@ -2,7 +2,7 @@ import {
   StreamableHTTPClientTransport,
   StreamableHTTPClientTransportOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { experimental_createMCPClient as createMCPClient } from "ai";
+import { experimental_createMCPClient as createMCPClient, Tool, ToolCall, ToolResult } from "ai";
 import { createMachine, fromPromise } from "xstate";
 
 
@@ -11,7 +11,7 @@ import { createMachine, fromPromise } from "xstate";
 type McpClient = Awaited<ReturnType<typeof createMCPClient>>
 type McpTool = Awaited<ReturnType<McpClient["tools"]>>[0]
 
- export const mcpClient= createMachine({
+export default createMachine({
   id: "mcpClient",
   initial: "init",
   types:{} as{
@@ -78,3 +78,21 @@ type McpTool = Awaited<ReturnType<McpClient["tools"]>>[0]
     },
   },
 )
+
+export namespace Tools {
+  export type ToolAvailableEvent = {
+   type: "@tool.available"; 
+   tools: {[key: string]: Tool}
+ } 
+ export type ToolCallEvent = {
+   type: "@tool.call";
+ } & ToolCall<string, unknown>
+ export type ToolResultEvent = {
+   type: "@tool.result";
+ } & ToolResult<string, unknown, unknown>
+
+ export type Event =   ToolAvailableEvent | ToolCallEvent | ToolResultEvent
+
+}
+
+

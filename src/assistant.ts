@@ -7,36 +7,19 @@ import {
   spawnChild,
 } from "xstate";
 import message from "./assistant.mcp.message";
-import bootstrap from "./assistant.mcp.bootstrap";
-import { mcpClient } from "./assistant.mcp";
-import { CoreAssistantMessage, CoreMessage, CoreSystemMessage, CoreToolMessage, CoreUserMessage, Tool, ToolCall, ToolResult } from "ai";
+import bootstrap, { Bootstrap } from "./assistant.mcp.bootstrap";
+import mcpClient, { Tools } from "./assistant.mcp.client";
+import { Chat } from "./assistant.chat";
 
-export namespace Tools {
-   export type ToolAvailableEvent = {
-    type: "@tool.available"; 
-    tools: {[key: string]: Tool}
-  } 
-  export type ToolCallEvent = {
-    type: "@tool.call";
-  } & ToolCall<string, unknown>
-  export type ToolResultEvent = {
-    type: "@tool.result";
-  } & ToolResult<string, unknown, unknown>
-
-  export type Event =   ToolAvailableEvent | ToolCallEvent | ToolResultEvent
-
-}
 
 export const sessionSetup = setup({
   types: {} as {
     context: Session.Context;
-    events: Messages.Event
-        | Communication.Event
-        | { type: "@session.end" };
+      events: Session.Event
     input?: Optional<Session.Input>;
     actors: {
-      message: Messages.Handler;
-      bootstrap: Session.Bootstrap;
+      message: Chat.Messages.Handler;
+      bootstrap: Bootstrap;
     };
   },
   actors: {
@@ -45,7 +28,7 @@ export const sessionSetup = setup({
     bootstrap: bootstrap,
   },
   actions: { 
-   emit: emit((_, e: Communication.Emitted ) => (e)), 
+   emit: emit((_, e: Chat.Messages.Event | Chat.Say.Event | Tools.Event ) => (e)), 
    saveContext: () => {}
    } 
 });
@@ -64,50 +47,12 @@ const sessionMachine = sessionSetup.createMachine({
     messages: [],
     ...input,
   }),
-  on: {
-    prompts: {
-        actions: {
-          type: "emit",
-          params: ({ event: { type: _type, ...event } }) =>({
-            type: "prompts",
-            data: event
-          }) 
-        },
-      guard: ({ event: { type: _type, prompts } }) => isNotEmpty(prompts),
-    },
-    say: {
-      actions: [ 
-        {
-          type: "emit",
-          params: ({event: {message}, context: {bot}}) => ({
-            type: "@message.assistant",
-            content: typeof message === "string" ? message : message.text,
-            role: "assistant",
-            timestamp: Date.now().toString(),
-            user: bot?.botId?.toString() || "assistant"
-          })
-        }
-      ],
-    },
-    title: {
-      actions: enqueueActions(({ event: { title }, enqueue }) => {
+  on: { 
+    "@chat.*": {
+      actions: enqueueActions(({ event, enqueue }) => {
         enqueue({
           type: "emit",
-          params: ({event: {title}}) => ({
-            type: "title",
-            data: title
-          })
-        });
-      }),
-    },
-    status: {
-      actions: enqueueActions(({ event: { status }, enqueue }) => {
-        enqueue({
-          type: "emit",
-          params: ({event: {status}}) => ({
-            type: "status",
-            data: status
-          })
+          params: ({event}) => event
         });
       }),
     },
@@ -115,7 +60,7 @@ const sessionMachine = sessionSetup.createMachine({
       actions: enqueueActions(({  enqueue }) => {
         enqueue({
           type: "emit",
-          params: ({event}) => (event)
+          params: ({event}) => event
         })
       }),
     }
@@ -125,8 +70,8 @@ const sessionMachine = sessionSetup.createMachine({
       entry: {
         type: "emit",
         params: {
-          type: "status",
-          data: "is typing..."
+          type: "@chat.status",
+          status: "is typing..."
         }
       },
       invoke: {
@@ -151,8 +96,8 @@ const sessionMachine = sessionSetup.createMachine({
       entry: { 
         type: "emit",
         params: {
-          type: "status",
-          data: ""
+          type: "@chat.status",
+          status: ""
         }
       },
       on: {
@@ -186,8 +131,8 @@ const sessionMachine = sessionSetup.createMachine({
       entry: {
         type: "emit",
         params: {
-          type: "status",
-          data: "is typing..."
+          type: "@chat.status",
+          status: "is typing..."
         }
       },
       invoke: {
@@ -260,96 +205,13 @@ declare type NotEmpty<T> = T extends [infer U, ...infer V]
 
 
 
- 
-export namespace Communication {
-
-  export type Prompt = {
-    title: string;
-    message: string;
-  };
-  
-  export type Prompts = {
-    type: "prompts";
-    title?: string;
-    prompts: [Prompt, ...Prompt[]];
-  };
-
-  type Block = {
-    type: string;
-    blocks?: Block[];
-  };
-  
-  export type Say = {
-    type: "say";
-    message: string | { text: string; blocks?: Block[] }
-    
-  };
-
-  export type Title = { type: "title"; title: string };
-
-  export type Status = { type: "status"; status: string };
-
-  export type Event = Prompts | Say | Title | Status | Tools.Event
-
-    export type Emitted = | {
-      type:"status",
-      data: Status["status"]
-    } | {
-      type:"title",
-      data: Title["title"]
-    }| {
-      type:"prompts",
-      data: Omit<Prompts, "type">
-    } | Messages.Event | Tools.Event
-}
-
-export namespace Messages { 
- 
-  export type ToolMessageEvent= {
-    type: "@message.tool"; 
-  }& CoreToolMessage & Details
-
-  export type AssistantMessageEvent= {
-    type: "@message.assistant"; 
-  }& CoreAssistantMessage & Details
-
-  export type SystemMessageEvent= {
-    type: "@message.system"; 
-  }& CoreSystemMessage & Details
-
-  export type UserMessgeEvent ={
-    type: "@message.user"
-  } & CoreUserMessage & Details
-
-  export type Event =  
-    ToolMessageEvent | AssistantMessageEvent | SystemMessageEvent | UserMessgeEvent 
-  
-
-  export type Details = {
-    type: `@message.${string}`;
-    timestamp: string;
-    user: string; 
-    role: "user" | "assistant" | "system" | "tool";
-    content: unknown
-  }  
-  export type Input = {
-    messages: [Messages.Event, ...Messages.Event[]];
-    context: Omit<Session.Context, "messages">;
-  };
-  
-  export type Handler =ActorLogic<
-      any,
-      Communication.Event,
-      Input,
-      any,
-      Communication.Event
-  >;
-}
 
 export namespace Session {
   export type Event = {
     type: `@session.${string}`;
-  }
+  } | Chat.Messages.Event
+  | Chat.Say.Event
+  | Tools.Event
   
   export type Input = {
     bot?: Record<string, unknown>;
@@ -357,21 +219,15 @@ export namespace Session {
   } & Record<string, unknown>;
 
  
-  export type Bootstrap = ActorLogic<
-      any,
-      Communication.Event,
-      Input,
-      any,
-      Communication.Event
-  >;
+
 
   export type Context = {
-    messages: Messages.Details[];
+    messages: Chat.Messages.Details[];
     summary?: string;
     error?: any;
     thread?: Record<string, unknown>;
     bot?: Record<string, unknown>;
-    current?: Messages.Details;
+    current?: Chat.Messages.Details;
   };
 
 

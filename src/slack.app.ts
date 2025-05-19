@@ -8,6 +8,8 @@ import {
   EventObject,
   fromCallback,
   waitFor,
+  ActorRefLike,
+  ActorRef
 } from "xstate";
 const { Assistant } = slack;
 
@@ -15,33 +17,41 @@ import sessionMachine from "./assistant";
 import yjsActor from "./assistant.store";
 import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
 import messages from "./slack.messages";
+import { Chat } from "./assistant.chat";
+import { Tools } from "./assistant.mcp.client";
  const log=(logger:slack.Logger) => (...args:any[])=>{
    logger.info(...args);
  }
  
  function listener(args:Pick<AllAssistantMiddlewareArgs,"say" | "setStatus" | "setSuggestedPrompts" | "setTitle"   >){
-  return function listene(actor:ReturnType<typeof createActor>){
+  return function listene(actor:ActorRef<any,any,Chat.Messages.Event | Chat.Say.Event| Tools.Event>){
   const {say, setStatus, setSuggestedPrompts, setTitle} = args;
   actor.on("@message.assistant", (event) => {
     const {content} = event;
-    say(content);
+    say(content.toString());
   }); 
-  actor.on("status", (event) => {
-    setStatus(event.data);
+  actor.on("@chat.message", ({message}) => {
+    say(message);
   });
-  actor.on("title", (event) => {
-    setTitle(event.data);
+  actor.on("@chat.blocks", ({blocks}) => {
+    say({blocks});
   });
-  actor.on("prompts", (event) => {
-    setSuggestedPrompts(event.data);
+  actor.on("@chat.status", ({status}) => {
+    setStatus(status);
+  });
+  actor.on("@chat.title", ({title}) => {
+    setTitle(title);
+  });
+  actor.on("@chat.prompts", ({prompts}) => {
+    setSuggestedPrompts({prompts});
   }); 
   actor.on("@tool.call", (event) => {
     console.log("tool call", event);
-    say(messages.listToolsMessage("tool call", event));
+    say(messages.toolRequest([{toolName:event.toolName, toolArgs:event.args as Record<string, unknown> }]));
   });
   actor.on("@tool.result", (event) => {
     console.log("tool result", event);
-    say(messages.listToolsMessage("tool result", event));
+    // say(messages.toolResult([{toolName:event.toolName, toolArgs:event.args as Record<string, unknown> }]));
   });
   actor.on("@tool.available", (event) => {
     console.log("tool available", event);
@@ -71,7 +81,7 @@ const assistant = new Assistant({
    * This can happen via DM with the app or as a side-container within a channel.
    * https://api.slack.com/events/assistant_thread_started
    */
-  threadStarted: async ({say, setStatus, setSuggestedPrompts, setTitle, saveThreadContext,event, context, logger}) => {
+  threadStarted: async ({say, setStatus, setSuggestedPrompts,setTitle, saveThreadContext,event, context, logger}) => {
     const id= event.assistant_thread.thread_ts;
     const input= {
       bot: context,
@@ -113,10 +123,10 @@ const assistant = new Assistant({
    * be deduced based on their shape and metadata (if provided).
    * https://api.slack.com/events/message
    */
-  userMessage: async ( {message, say, setStatus, setSuggestedPrompts, setTitle, logger, context}) => {
+  userMessage: async ( {message, say, ack, setStatus, setSuggestedPrompts, setTitle, logger, context}) => {
     const id = ("thread_ts" in message && message.thread_ts) || message.event_ts || message.ts;
     console.log("userMessage",message); 
-
+    ack && await ack();
     const assistant =await yjsActor(sessionMachine,{
       input: context,
       doc: `@assistant/${id}`,

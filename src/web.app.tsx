@@ -11,7 +11,7 @@ import {
   NonReducibleUnknown,
   toPromise,
 } from "xstate";
-import assistantMachine, { Communication, Messages } from "./assistant";
+import assistantMachine from "./assistant";
 import yjsActor, { actorsStore, connectYjs } from "./assistant.store";
 import { jsxRenderer } from "hono/jsx-renderer";
 import { env } from "process";
@@ -23,17 +23,18 @@ import {
 } from "@cxai/stream";
 import * as Y from "yjs";
 import message from "./assistant.message";
+import { Chat } from "./assistant.chat";
 // Helper to lazily create / retrieve an assistant actor backed by Yjs for a given thread id
 function getAssistant(threadId: string) {
   const doc = connectYjs(`@assistant/${threadId}`);
   const remoteAssistant = fromCallback<
-    Messages.Event,
+    Chat.Messages.Event,
     NonReducibleUnknown,
-    Communication.Emitted | Messages.Event
+    Chat.Say.Event | Chat.Messages.Event
   >(function ({ sendBack, receive, emit }) {
     async function asyncListener() {
       for await (const event of yArrayIterator(
-        doc.getArray<Communication.Emitted>("@output")
+        doc.getArray<Chat.Messages.Event>("@output")
       )) {
         console.log("remote event", event);
         sendBack(event);
@@ -51,7 +52,7 @@ function getAssistant(threadId: string) {
     );
     receive(async (event) => {
       console.log("receive", event);
-      doc.getArray<Messages.Event>("@input").push([event]);
+      doc.getArray<Chat.Messages.Event>("@input").push([event]);
     });
   });
   return createActor(remoteAssistant).start();
@@ -297,23 +298,23 @@ app.get("/@assistant/:thread/messages", async (c) =>
     //   });
     // });
 
-    assistant.on("status", async (msg: any) => {
+    assistant.on("@chat.status", async ({status}) => {
       await stream.writeSSE({
         event: "status",
-        data: msg.data,
+        data: status
       });
     });
 
-    assistant.on("title", async (msg: any) => {
+    assistant.on("@chat.title", async ({title}) => {
       await stream.writeSSE({
         event: "title",
-        data: msg.data,
+        data: title,
       });
     });
-    assistant.on("prompts", async (msg: any) => {
+    assistant.on("@chat.prompts", async ({prompts}) => {
       await stream.writeSSE({
         event: "prompts",
-        data: <PromptsBar prompts={msg.data.prompts} />,
+        data: <PromptsBar prompts={prompts} />,
       });
     });
 
@@ -401,7 +402,7 @@ app.post("/@assistant/:thread/messages", async (c) => {
 
   const threadId = c.req.param("thread") || "main";
   const doc = connectYjs(`@assistant/${threadId}`);
-  const input = doc.getMap<Messages.Event>("@input");
+  const input = doc.getMap<Chat.Messages.Event>("@input");
   const body = await c.req.parseBody();
   const text = body.text as string;
 

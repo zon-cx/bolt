@@ -1,14 +1,16 @@
 import { fromEventAsyncGenerator } from "@cxai/stream";
 import { jsonSchema, generateObject, streamText } from "ai";
 import { azure } from "@ai-sdk/azure";
-import { Communication, Session } from "./assistant";
-import {  waitFor } from "xstate";
+import {  ActorLogic, waitFor } from "xstate";
+import { Chat } from "./assistant.chat";
+import { Session } from "./assistant";
+import { Tools } from "./assistant.mcp.client";
  
 
 export const boostrap= fromEventAsyncGenerator(async function* ({
   input,
   system
-}): AsyncGenerator<Communication.Event> {
+}): AsyncGenerator<Chat.Say.Event | Tools.Event> {
 
   await waitFor(system.get("mcpClient"), (state) => state.matches("connected")).catch(console.error);
   const {client} = await system.get("mcpClient").getSnapshot().context;
@@ -53,10 +55,8 @@ export const boostrap= fromEventAsyncGenerator(async function* ({
       textBuffer += event.textDelta;
       if (textBuffer.includes("\n") || textBuffer.includes("```")) {
         yield {
-          type: "say",
-          message: {
-            text: textBuffer,
-          },
+          type: "@chat.message",
+          message: textBuffer,
         };
         textBuffer = "";
       }
@@ -67,7 +67,7 @@ export const boostrap= fromEventAsyncGenerator(async function* ({
     object: { title, prompts },
   } = await generateObject<{
     title: string;
-    prompts: Communication.Prompts["prompts"];
+    prompts: Chat.Say.Prompts["prompts"];
   }>({
     model: azure("gpt-4o"),
     system: "You are a helpful assistant in a slack channel.",
@@ -112,7 +112,16 @@ export const boostrap= fromEventAsyncGenerator(async function* ({
     }),
   });
 
-  yield { type: "prompts", prompts, title };
-}) as unknown as Session.Bootstrap
+  yield { type: "@chat.prompts", prompts, title };
+}) as unknown as Bootstrap
 
 export default boostrap
+
+
+export type Bootstrap = ActorLogic<
+any,
+Chat.Say.Event | Tools.Event,
+Session.Input,
+any,
+Chat.Messages.Event | Tools.Event
+>;
