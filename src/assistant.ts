@@ -6,9 +6,9 @@ import {
   emit,
   spawnChild,
 } from "xstate";
-import message from "./assistant.message.mcp";
-import bootstrap from "./assistant.bootstrap.mcp";
-import { mcpClient } from "./assistant.mcp.client";
+import message from "./assistant.mcp.message";
+import bootstrap from "./assistant.mcp.bootstrap";
+import { mcpClient } from "./assistant.mcp";
 import { CoreAssistantMessage, CoreMessage, CoreSystemMessage, CoreToolMessage, CoreUserMessage, Tool, ToolCall, ToolResult } from "ai";
 
 export namespace Tools {
