@@ -4,6 +4,7 @@ import { azure } from "@ai-sdk/azure";
 import { Chat  } from "./assistant.chat";
 import { Tools } from "./assistant.mcp.client";
 import { MCPClientManager } from "./mcp.session";
+import { Session } from "./assistant";
 
 
 /**
@@ -92,7 +93,7 @@ const mcpMessage = fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessage
 });
 
 export function fromMcpMessageHandler(session:MCPClientManager){
-   return fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessageInput,Chat.Messages.Event | Tools.Event>(async function* ({
+   return fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessageInput,Session.Event>(async function* ({
     system,
     input: { prompt, messages },
   }): AsyncGenerator<Chat.Say.Event | Tools.Event> {
@@ -139,11 +140,11 @@ export function fromMcpMessageHandler(session:MCPClientManager){
         };
       }
     } catch (err) {
-      console.error("Something went wrong", err);
+      console.error("Error handle message", err);
       yield {
-        type: "@chat.message",
-        message: "Something went wrong. " + "error: " + (err as Error).message,
-      };
+        type: "@error.message-handler",
+        error: err as Error,
+      }; 
     }
   
     return "done";

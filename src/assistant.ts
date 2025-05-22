@@ -33,6 +33,37 @@ export function fromMcpSession(session: MCPClientManager) {
       emit: emit(
         (_, e: Chat.Messages.Event | Chat.Say.Event | Tools.Event) => e
       ),
+      reportError:  emit((_e, error:Error)=>({
+          type:"@chat.blocks",
+          "blocks": [
+            {
+              "type": "section",
+              "text": {
+                "text": "*Sorry!* something went wrong! ",
+                "type": "mrkdwn"
+              },
+              "fields": [
+                {
+                  "type": "mrkdwn",
+                  "text": "*Message*"
+                },
+               
+                {
+                  "type": "mrkdwn",
+                  "text": `\`\`\`\n${(error as Error).message}\n\`\`\``
+                },
+                {
+                  "type": "mrkdwn",
+                  "text": "*Stack Trace*"
+                },
+                {
+                  "type": "mrkdwn",
+                  "text":  `\`\`\`\n${(error as Error).stack}\n\`\`\``
+                }, 
+              ]
+            }
+          ]
+      })),
       saveContext: () => {},
     },
   });
@@ -67,6 +98,12 @@ export function fromMcpSession(session: MCPClientManager) {
             params: ({ event }) => event,
           });
         }),
+      },
+      "@error.*": {
+        actions: { 
+          type: "reportError",
+          params: ({ event: { error } }) => error,
+        },
       },
     },
     states: {
@@ -202,19 +239,11 @@ export function fromMcpSession(session: MCPClientManager) {
         },
       },
       error: {
-        type: "final",
+        target: "listening",
+
         entry: {
-          type: "emit",
-          params: ({ context: { error } }) => ({
-            type: "@message.assistant",
-            content:
-              "Sorry, something went wrong! " + "message" in error
-                ? error.message
-                : "",
-            role: "assistant",
-            timestamp: Date.now().toString(),
-            user: "assistant",
-          }),
+          type: "reportError",
+          params: ({ event: { error } }) => error,
         },
       },
     },
@@ -222,6 +251,7 @@ export function fromMcpSession(session: MCPClientManager) {
   return sessionMachine;
 }
 
+ 
 export default fromMcpSession;
 
 function isNotEmpty<TItem, TArray extends Array<TItem>>(
@@ -237,6 +267,10 @@ export namespace Session {
   export type Event =
     | {
         type: `@session.${string}`;
+      }
+    | {
+        type: "@error.*";
+        error: Error;
       }
     | Chat.Messages.Event
     | Chat.Say.Event

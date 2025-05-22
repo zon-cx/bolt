@@ -33,9 +33,9 @@ export class MCPClientManager {
    * @param _version Version of the MCP Client
    * @param auth Auth paramters if being used to create a DurableObjectOAuthClientProvider
    */
-  constructor(private _name: string, private _version: string, private _store: Y.Map<serverConfig>) {
+  constructor(private _name: string, private _version: string, public  store: Y.Map<serverConfig>) {
     
-    for(const [key, value] of _store.entries()){
+    for(const [key, value] of store.entries()){
        if(!this.mcpConnections[key]) {
         const {url}= value;
         this.connect(url, {
@@ -43,10 +43,10 @@ export class MCPClientManager {
         });
       }
     }
-    _store.observe((event) => {
+    store.observe((event) => {
         for (const [key, {action}] of event.changes.keys.entries()) {
             if (action === "add" || action === "update" && !this.mcpConnections[key]) {
-              const {url}= _store.get(key)!;
+              const {url}= store.get(key)!;
               this.connect(url, {
                 id:key 
               });
@@ -84,7 +84,7 @@ export class MCPClientManager {
         },
         ...options,
       });
-      this._store.set(id, {
+      this.store.set(id, {
         id,
         url,
         name: this._name,

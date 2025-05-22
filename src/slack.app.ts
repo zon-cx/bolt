@@ -239,11 +239,6 @@ function buildServerBlocks(session:MCPClientManager) {
         placeholder: {
           type: "plain_text",
           text: "Enter the MCP server URL"
-        },
-        dispatch_action_config: {
-          trigger_actions_on: [
-              "on_character_entered"
-          ]
         }
       },
       label: {
@@ -298,7 +293,7 @@ function buildServerBlocks(session:MCPClientManager) {
                 text: { type: "plain_text", text: "Remove", emoji: true },
                 style: "danger",
                 value: name,
-                action_id: "remove_mcp_server"
+                action_id: "disconnect_mcp_server"
               }
             }))
           ]
@@ -321,18 +316,24 @@ app.action('connect_mcp_server', async ({ ack, client, logger, body, action }) =
     view: {
       type: "home",
       blocks: [
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: `*Welcome home, <@${user}> :house:*` }
-        },
         ...buildServerBlocks(session),
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: "Learn how home tabs can be more useful and interactive <https://docs.slack.dev/surfaces/app-home|*in the documentation*>."
-          }
-        }
+      ]
+    }
+  });
+});
+
+app.action('disconnect_mcp_server', async ({ ack, body, logger,action , options, client}) => {
+  console.log("disconnect_mcp_server",action,body);
+  const session = getOrCreateMcpSession(body.user.id);
+  await session.store.delete(action.value);
+  await ack();
+  await client.views.update({
+    view_id: body.view.id,
+    hash: body.view.hash,
+    view: {
+      type: "home",
+      blocks: [
+        ...buildServerBlocks(session),
       ]
     }
   });
@@ -363,25 +364,9 @@ app.event('app_home_opened', async ({ event, client, logger }) => {
       user_id: event.user,
       view: {
         type: "home",
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `*Welcome home, <@${event.user}> :house:*`
-            }
-          }, 
+        blocks: [ 
           ...buildServerBlocks(session),
-          {
-            type: "divider",
-          },
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: "Learn how home tabs can be more useful and interactive <https://docs.slack.dev/surfaces/app-home|*in the documentation*>."
-            }
-          }
+          
         ]
       }
     });
