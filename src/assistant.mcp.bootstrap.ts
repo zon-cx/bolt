@@ -5,16 +5,16 @@ import {  ActorLogic, waitFor } from "xstate";
 import { Chat } from "./assistant.chat";
 import { Session } from "./assistant";
 import { Tools } from "./assistant.mcp.client";
+import { MCPClientManager } from "./mcp.session";
  
 
-export const boostrap= fromEventAsyncGenerator(async function* ({
+export function fromMcpBootstrap(session:MCPClientManager){
+ return fromEventAsyncGenerator(async function* ({
   input,
   system
 }): AsyncGenerator<Chat.Say.Event | Tools.Event> {
 
-  await waitFor(system.get("mcpClient"), (state) => state.matches("connected")).catch(console.error);
-  const {client} = await system.get("mcpClient").getSnapshot().context;
-  const tools = await client.tools()
+  const tools= session.unstable_getAITools();
   yield {
     type: "@tool.available",
     tools: tools ,
@@ -114,8 +114,8 @@ export const boostrap= fromEventAsyncGenerator(async function* ({
 
   yield { type: "@chat.prompts", prompts, title };
 }) as unknown as Bootstrap
-
-export default boostrap
+}
+export default fromMcpBootstrap
 
 
 export type Bootstrap = ActorLogic<

@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { azure } from "@ai-sdk/azure";
 import { Chat  } from "./assistant.chat";
 import { Tools } from "./assistant.mcp.client";
+import { MCPClientManager } from "./mcp.session";
 
 
 /**
@@ -16,6 +17,7 @@ export type MCPMessageInput = {
    */
   prompt?: string;
   serverUrl?: string;
+  session?: string;
 } & Chat.Messages.Input;
 
 /**
@@ -30,6 +32,7 @@ export type MCPMessageInput = {
  * 4. Emits Communication.Event objects so the surrounding state-machine can
  *    update the UI (status → say → title).
  */
+
 const mcpMessage = fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessageInput,Chat.Messages.Event | Tools.Event>(async function* ({
   system,
   input: { prompt, messages },
@@ -88,5 +91,64 @@ const mcpMessage = fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessage
   return "done";
 });
 
+export function fromMcpMessageHandler(session:MCPClientManager){
+   return fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessageInput,Chat.Messages.Event | Tools.Event>(async function* ({
+    system,
+    input: { prompt, messages },
+  }): AsyncGenerator<Chat.Say.Event | Tools.Event> {
+  
+  
+    yield { type: "@chat.status", status: "connecting to tool server…" };
+  
+  
+    yield {
+      type: "@tool.available",
+      tools: session.unstable_getAITools() ,
+    };
+  
+    const count = Object.keys(session.listTools()).length;
+    yield {
+      type: "@chat.status",
+      status: `connected – ${count} tool${count === 1 ? "" : "s"} available`,
+    };
+  
+    yield { type: "@chat.status", status: "generating response…" };
+  
+  
+    try {
+      const { text, toolResults, toolCalls } = await generateText({
+        model: azure("gpt-4o"),
+        messages: [...messages],
+        prompt,
+        tools:session.unstable_getAITools(),
+        maxRetries: 10,
+        maxSteps: 20, // give the model enough room for tool → result → follow-up,
+      });
+      yield { type: "@chat.message", message: text };
+  
+      for (const [key, toolResult] of Object.entries(toolResults)) {
+        yield { ...toolResult, type: "@tool.result", toolCallId: key };
+      }
+  
+      for (const [key, toolCall] of Object.entries(toolCalls)) {
+        yield {
+          ...toolCall,
+          type: "@tool.call",
+          toolName: key,
+          args: toolCall.args as Record<string, unknown>,
+        };
+      }
+    } catch (err) {
+      console.error("Something went wrong", err);
+      yield {
+        type: "@chat.message",
+        message: "Something went wrong. " + "error: " + (err as Error).message,
+      };
+    }
+  
+    return "done";
+  }) as unknown as Chat.Messages.Handler;
+} 
+ 
 export default mcpMessage as unknown as Chat.Messages.Handler;
 

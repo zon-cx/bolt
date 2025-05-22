@@ -22,8 +22,8 @@ import {
   yMapIterate,
 } from "@cxai/stream";
 import * as Y from "yjs";
-import message from "./assistant.message";
 import { Chat } from "./assistant.chat";
+import { getOrCreateMcpSession } from "./mcp.session";
 // Helper to lazily create / retrieve an assistant actor backed by Yjs for a given thread id
 function getAssistant(threadId: string) {
   const doc = connectYjs(`@assistant/${threadId}`);
@@ -244,6 +244,8 @@ app.post("/@assistant/:thread/select", (c) => {
 
 app.get("/@assistant/:thread", async (c) => {
   const threadId = c.req.param("thread");
+  const session = getOrCreateMcpSession(threadId);
+  const servers = Object.keys(session.mcpConnections);
   return c.html(
     <div
       hx-ext="sse"
@@ -251,9 +253,41 @@ app.get("/@assistant/:thread", async (c) => {
       id="thread"
       hx-swap="outerHTML"
     >
+      {/* MCP Servers Section */}
+      <section class="mb-6">
+        <h2 class="text-lg font-semibold mb-2 flex items-center gap-2">
+          <iconify-icon icon="lucide:server" class="w-5 h-5 text-indigo-500" />
+          Connected MCP Servers
+        </h2>
+        <ul class="mb-2">
+          {servers.length === 0 && (
+            <li class="text-slate-500 italic">No servers connected.</li>
+          )}
+          {servers.map((url) => (
+            <li key={url} class="flex items-center gap-2 mb-1">
+              <span class="truncate flex-1">{url}</span>
+              <form method="post" action={`/@assistant/${threadId}/remove-server`} hx-post={`/@assistant/${threadId}/remove-server`} hx-target="#servers-list" hx-swap="outerHTML">
+                <input type="hidden" name="url" value={url} />
+                <button type="submit" class="text-red-500 hover:text-red-700 px-2 py-1 rounded transition" title="Remove">
+                  <iconify-icon icon="lucide:x" class="w-4 h-4" />
+                </button>
+              </form>
+            </li>
+          ))}
+        </ul>
+        <form method="post" action={`/@assistant/${threadId}/add-server`} hx-post={`/@assistant/${threadId}/add-server`} hx-target="#servers-list" hx-swap="outerHTML" class="flex gap-2">
+          <input name="url" type="url" required placeholder="Add MCP server URL..." class="flex-1 border border-slate-300 rounded px-3 py-1" />
+          <button type="submit" class="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1 rounded font-medium transition flex items-center gap-1">
+            <iconify-icon icon="lucide:plus" class="w-4 h-4" />
+            Add
+          </button>
+        </form>
+      </section>
+      <div id="servers-list">
+        {/* This div is targeted for server list updates */}
+      </div>
       <StatusBar />
       <PromptsBar />
-
       <div
         id="messages"
         sse-swap="message"
@@ -416,6 +450,73 @@ app.post("/@assistant/:thread/messages", async (c) => {
 
   });
 
+});
+
+// Add endpoints for add/remove MCP server
+app.post("/@assistant/:thread/add-server", async (c) => {
+  const threadId = c.req.param("thread");
+  const url = (await c.req.parseBody()).url;
+  const session = getOrCreateMcpSession(threadId);
+  if (url) {
+    try {
+      await session.connect(url);
+    } catch (e) {
+      // Optionally handle error
+    }
+  }
+  // Return updated server list
+  const servers = Object.keys(session.mcpConnections);
+  return c.html(
+    <ul class="mb-2">
+      {servers.length === 0 && (
+        <li class="text-slate-500 italic">No servers connected.</li>
+      )}
+      {servers.map((url) => (
+        <li key={url} class="flex items-center gap-2 mb-1">
+          <span class="truncate flex-1">{url}</span>
+          <form method="post" action={`/@assistant/${threadId}/remove-server`} hx-post={`/@assistant/${threadId}/remove-server`} hx-target="#servers-list" hx-swap="outerHTML">
+            <input type="hidden" name="url" value={url} />
+            <button type="submit" class="text-red-500 hover:text-red-700 px-2 py-1 rounded transition" title="Remove">
+              <iconify-icon icon="lucide:x" class="w-4 h-4" />
+            </button>
+          </form>
+        </li>
+      ))}
+    </ul>
+  );
+});
+
+app.post("/@assistant/:thread/remove-server", async (c) => {
+  const threadId = c.req.param("thread");
+  const url = (await c.req.parseBody()).url;
+  const session = getOrCreateMcpSession(threadId);
+  if (url) {
+    try {
+      await session.closeConnection(url);
+    } catch (e) {
+      // Optionally handle error
+    }
+  }
+  // Return updated server list
+  const servers = Object.keys(session.mcpConnections);
+  return c.html(
+    <ul class="mb-2">
+      {servers.length === 0 && (
+        <li class="text-slate-500 italic">No servers connected.</li>
+      )}
+      {servers.map((url) => (
+        <li key={url} class="flex items-center gap-2 mb-1">
+          <span class="truncate flex-1">{url}</span>
+          <form method="post" action={`/@assistant/${threadId}/remove-server`} hx-post={`/@assistant/${threadId}/remove-server`} hx-target="#servers-list" hx-swap="outerHTML">
+            <input type="hidden" name="url" value={url} />
+            <button type="submit" class="text-red-500 hover:text-red-700 px-2 py-1 rounded transition" title="Remove">
+              <iconify-icon icon="lucide:x" class="w-4 h-4" />
+            </button>
+          </form>
+        </li>
+      ))}
+    </ul>
+  );
 });
 
 function ChatBubble({ msg }: { msg: any }) {

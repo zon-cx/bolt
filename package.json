@@ -17,7 +17,8 @@
     "build:copypackage": "cp package.json ./dist/ && cp package-lock.json ./dist/ || true",
     "build:tsup": "pnpx tsup ./src/slack.app.ts --outDir ./dist --target=esnext --format esm --treeshake --shims --publicDir ",
     "start": "node ./dist/slack.app.cjs",
-    "node-with-import": "node --import ./start.js /.main.mjs"
+    "node-with-import": "node --import ./start.js /.main.mjs",
+    "inspector": "npx @modelcontextprotocol/inspector  "
   },
   "keywords": [],
   "author": "",
@@ -30,6 +31,7 @@
     "@modelcontextprotocol/sdk": "^1.11.4",
     "@slack/bolt": "^4.3.0",
     "@statelyai/inspect": "^0.4.0",
+    "@xstate/store": "^3.6.2",
     "ai": "^4.3.15",
     "hono": "^4.7.9",
     "lucide-react": "^0.509.0",
