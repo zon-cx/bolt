@@ -18,8 +18,9 @@ import yjsActor from "./assistant.store";
 import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
 import messages from "./slack.messages";
 import { Chat } from "./assistant.chat";
-import { Tools } from "./assistant.mcp.client";
-import { getOrCreateMcpAgent, MCPClientManager } from "./mcp.agent";
+import { Tools } from "./assistant";
+import { getOrCreateMcpAgent } from "./gateway.mcp.connection.store";
+import {type MCPClientManager } from "./gateway.mcp.connection";
   const log=(logger:slack.Logger) => (...args:any[])=>{
    logger.info(...args);
  }

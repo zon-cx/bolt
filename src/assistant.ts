@@ -8,11 +8,11 @@ import {
   spawnChild,
   fromPromise,
 } from "xstate";
-import message, { fromMcpMessageHandler } from "./assistant.mcp.message.ts";
-import bootstrap, { Bootstrap, fromMcpBootstrap } from "./assistant.mcp.bootstrap.ts";
-import mcpClient, { Tools } from "./assistant.mcp.client.ts";
+import{ fromMcpMessageHandler } from "./assistant.message.ts";
+import { Bootstrap, fromMcpBootstrap } from "./assistant.bootstrap.ts";
 import { Chat } from "./assistant.chat.ts";
-import { type MCPClientManager } from "./mcp.agent.ts";
+import { type MCPClientManager } from "./gateway.mcp.connection.ts";
+import { Tool, ToolCall, ToolResult } from "ai";
 
 export function fromMcpSession(session: MCPClientManager) {
   const sessionSetup = setup({
@@ -71,13 +71,6 @@ export function fromMcpSession(session: MCPClientManager) {
   const sessionMachine = sessionSetup.createMachine({
     id: "@assistant/session",
     initial: "boostrap",
-    entry: [
-      // spawnChild("mcpClient", {
-      //   systemId: "mcpClient",
-      //   id: "mcpClient",
-      //   input: undefined,
-      // }),
-    ],
     context: ({ input }) => ({
       messages: [],
       ...input,
@@ -106,28 +99,7 @@ export function fromMcpSession(session: MCPClientManager) {
         },
       },
     },
-    states: {
-      // init: {
-      //   entry: {
-      //     type: "emit",
-      //     params: {
-      //       type: "@chat.status",
-      //       status: "connecting to tool server...",
-      //     },
-      //   },
-      //   invoke: {
-      //     src: "init",
-      //     onDone: {
-      //       target: "boostrap",
-      //     },
-      //     onError: {
-      //       target: "error",
-      //       actions: assign({
-      //         error: ({ event: { error } }) => error,
-      //       }),
-      //     },
-      //   },
-      // },
+    states: { 
       boostrap: {
         entry: {
           type: "emit",
@@ -295,3 +267,19 @@ export namespace Session {
 type Optional<T> = {
   [K in keyof T]?: T[K];
 };
+
+
+export namespace Tools {
+  export type ToolAvailableEvent = {
+    type: "@tool.available";
+    tools: { [key: string]: Tool };
+  };
+  export type ToolCallEvent = {
+    type: "@tool.call";
+  } & ToolCall<string, unknown>;
+  export type ToolResultEvent = {
+    type: "@tool.result";
+  } & ToolResult<string, unknown, unknown>;
+
+  export type Event = ToolAvailableEvent | ToolCallEvent | ToolResultEvent;
+}

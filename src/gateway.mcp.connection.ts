@@ -20,8 +20,8 @@ import type {
 import { Atom, createAtom } from "@xstate/store";
 import { jsonSchema, type ToolSet } from "ai";
 import * as Y from "yjs";
-import { connectYjs } from "./assistant.store.ts";
-import { MCPClientConnection } from "./mcp.connect.ts";
+import { MCPClientConnection } from "./gateway.mcp.client.ts";
+import { serverConfig } from "./gateway.mcp.connection.store.ts";
 
 
 /**
@@ -266,11 +266,11 @@ export class MCPClientManager {
     async complete({ref, ...params}: CompleteRequest["params"], options?: RequestOptions): Promise<any> {
    
       const source =ref.type === "ref/resource"? 
-        await findSourceAsync(this.resources, ref.uri): 
+        await findSourceAsync(this.resources, ref.uri  ): 
         await findSourceAsync(this.prompts, ref.name);
 
       if (!source || !source.server) {
-        throw new Error(`No MCP client found for resource URI: ${uri}`);
+        throw new Error(`No MCP client found for resource name: ${ref.name}  URI: ${ref.uri}  URI Template: ${ref.uriTemplate}`);
       }
       return this.mcpConnections[source.server].client.complete({
         ...params,
@@ -369,122 +369,30 @@ export class MCPClientManager {
     return namespacedData as NamespacedData[T]; // Type assertion needed due to TS limitations with conditional return types
   }
   
-  export const mcpAgents: Record<string, MCPClientManager> = {};
-  
-  type serverConfig = {
-    id: string;
-    url: string;
-    name: string;
-    version: string;
+async function findSourceAsync<T extends NamespacedData[keyof NamespacedData][number] = NamespacedData[keyof NamespacedData][number]>(
+  atom: Atom<T[]>,
+  name: string,
+): Promise<{ name: string; server: string; uri?: string }> {
+  const result = await findAsync(atom, (value) => value && value.name === name || value.uri === name || value.uriTemplate === name) ;
+  if (!result || !result.source) {
+    throw new Error(`Resource with uri '${name}' not found in any MCP client connection.`);
+  }
+  return {
+    name: (result.source as any).name,
+    server: (result.source as any).server,
+    uri: (result.source as any).uri,
   };
-  
-  type agentConfig = {
-    id: string;
-    name: string;
-    created: string;
-  };
-  
-  const doc = connectYjs("mcp:server");
-  const userServerStore = (agentId: string) => {
-    return doc.getMap<serverConfig>(`${agentId}`);
-  };
-  
-  const agentsStore = doc.getMap<agentConfig>("agents");
-  
-  export function createMcpAgent(id: string, name = id) {
-    const agent = new MCPClientManager("assistant", "1.0.0", userServerStore(id), id, id);
-    mcpAgents[id] = agent;
-  
-    // Store agent metadata
-    agentsStore.set(id, {
-      id,
-      name,
-      created: new Date().toISOString(),
-    });
-  
-    return agent;
-  }
-  
-  export function getMcpAgent(id: string) {
-    return mcpAgents[id];
-  }
-  
-  export function getOrCreateMcpAgent(id: string) {
-    if (mcpAgents[id]) {
-      return mcpAgents[id];
-    }
-  
-    // Check if agent exists in storage
-    const agentConfig = agentsStore.get(id);
-    if (agentConfig) {
-      const agent = new MCPClientManager(
-        "assistant",
-        "1.0.0",
-        userServerStore(id),
-        id,
-        id,
-      );
-      mcpAgents[id] = agent;
-      return agent;
-    }
-  
-    // Create new agent if it doesn't exist
-    return createMcpAgent(id);
-  }
-  
-  export function listAgents() {
-    const agents: agentConfig[] = [];
-    for (const [id, config] of agentsStore.entries()) {
-      agents.push(config);
-    }
-    return agents;
-  }
-  
-  async function findSourceAsync<T extends NamespacedData[keyof NamespacedData][number] = NamespacedData[keyof NamespacedData][number]>(
-    atom: Atom<T[]>,
-    name: string,
-  ): Promise<{ name: string; server: string; uri?: string }> {
-    const result = await findAsync(atom, (value) => value && value.name === name || value.uri === name || value.uriTemplate === name) ;
-    if (!result || !result.source) {
-      throw new Error(`Resource with uri '${name}' not found in any MCP client connection.`);
-    }
-    return {
-      name: (result.source as any).name,
-      server: (result.source as any).server,
-      uri: (result.source as any).uri,
-    };
-  }
-  
-  async function findAsync<T extends any = any>(atom: Atom<T[]>, predicate: (value: T) => boolean): Promise<T | undefined> {
-    return new Promise((resolve) => {
-      function onAtomChange() {
-        const value = atom.get().find(predicate);
-        if (value) {
-          resolve(value);
-        }
+}
+
+async function findAsync<T extends any = any>(atom: Atom<T[]>, predicate: (value: T) => boolean): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    function onAtomChange() {
+      const value = atom.get().find(predicate);
+      if (value) {
+        resolve(value);
       }
-      onAtomChange();
-      atom.subscribe(onAtomChange);
-    });
-  }
-  
-  export function deleteAgent(id: string) {
-    console.log("deleting agent", id);
-    if (mcpAgents[id]) {
-      mcpAgents[id].closeAllConnections();
-      delete mcpAgents[id];
     }
-  
-    agentsStore.delete(id);
-  
-    // Clean up server connections for this agent
-    const serverStore = userServerStore(id);
-    for (const key of serverStore.keys()) {
-      serverStore.delete(key);
-    }
-  }
-  
-  // Initialize existing agents from storage
-  for (const [id] of agentsStore.entries()) {
-    getOrCreateMcpAgent(id);
-  }
+    onAtomChange();
+    atom.subscribe(onAtomChange);
+  });
+}

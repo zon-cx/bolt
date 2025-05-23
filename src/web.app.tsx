@@ -22,7 +22,7 @@ import {
 } from "@cxai/stream";
 import * as Y from "yjs";
 import { Chat } from "./assistant.chat";
-import { getOrCreateMcpAgent } from "./mcp.agent";
+import { getOrCreateMcpAgent } from "./gateway.mcp.connection";
 // Helper to lazily create / retrieve an assistant actor backed by Yjs for a given thread id
 function getAssistant(threadId: string) {
   const doc = connectYjs(`@assistant/${threadId}`);

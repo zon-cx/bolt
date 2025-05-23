@@ -1,15 +1,26 @@
-import express from "express";
 import { randomUUID } from "node:crypto";
 import {   Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest, CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema, CompatibilityCallToolResultSchema, CompleteRequestSchema, Prompt, ResourceTemplateSchema } from "@modelcontextprotocol/sdk/types.js";
-import { getOrCreateMcpAgent } from "./mcp.agent.ts";
+import {  CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema, CompatibilityCallToolResultSchema, CompleteRequestSchema, Prompt, ResourceTemplateSchema } from "@modelcontextprotocol/sdk/types.js";
+import { getOrCreateMcpAgent } from "./gateway.mcp.connection.store";
 import { env } from "node:process";
 import { Subscription } from "@xstate/store";
- 
+import { Hono } from "hono";
+import { serve } from "@hono/node-server";
+import { toFetchResponse, toReqRes } from "fetch-to-node";
 
-const app = express();
-app.use(express.json());
+// const app = express();
+// app.use(express.json());
+const app = new Hono();
+// Unwrap Hono errors to see original error details
+app.onError((err, c) => {
+  console.error("Hono error:", err);
+  return c.json({
+    error: String(err),
+    stack: err.stack,
+  }, 500);
+});
+
 
 // Map to store transports by session ID
 const transports: { [sessionId: string]: StreamableHTTPServerTransport } = {};
@@ -112,12 +123,34 @@ async function createSessionTransport() {
 
   // Connect the MCP server to the transport
    await mcpServer.connect(transport);
+   mcpServer.onerror = console.error.bind(console);
+
   return transport;
 }
 
+app.use("*", async (c, next)=>{
+  try {
+    return await next();
+  } catch (err) {
+    console.error(err);
+    return c.json(
+      {
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message: "Internal server error",
+        },
+        id: null,
+      },
+      { status: 500 }
+    );
+  }
+});
 // POST handler for client-to-server communication
-app.post('/mcp', async (req, res) => {
-  const sessionId = req.headers['mcp-session-id'] as string | undefined;
+app.post('/mcp', async (c) => {
+  const { req, res } = toReqRes(c.req.raw);
+
+  const sessionId = c.req.header('mcp-session-id') as string | undefined;
   let transport: StreamableHTTPServerTransport;
   if (sessionId && transports[sessionId]) {
     transport = transports[sessionId];
@@ -125,16 +158,65 @@ app.post('/mcp', async (req, res) => {
     transport = await createSessionTransport();
   } 
 
-  await transport.handleRequest(req, res, req.body);
+  await transport.handleRequest(req, res, await c.req.json());
+  return toFetchResponse(res);
 });
 
- 
- 
+// Reusable handler for GET and DELETE requests
+
+// GET for server-to-client notifications via SSE
+app.get("/mcp", async (c) => {
+  console.log("Received GET MCP request");
+  return c.json(
+    {
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Method not allowed.",
+      },
+      id: null,
+    },
+    { status: 405 }
+  );
+});
+
+app.delete("/mcp", async (c) => {
+  console.log("Received DELETE MCP request");
+  return c.json(
+    {
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Method not allowed.",
+      },
+      id: null,
+    },
+    { status: 405 }
+  );
+});
+
+
 // Health check
-app.get('/healthz', (req, res) => { res.send('OK'); });
+app.get('/healthz', (c) => { return c.text('OK'); });
 
-const port = parseInt(env.PORT || "8080", 10);
-console.log(`MCP Gateway Server running on http://localhost:${port}`);
-app.listen(port);
+// const port = parseInt(env.PORT || "8080", 10);
+// console.log(`MCP Gateway Server running on http://localhost:${port}`);
+// app.listen(port);
+serve({
+  fetch: app.fetch,
+  // createServer,
+  port: parseInt(env.PORT || "8080", 10),
+});
+// export default app;
 
-export default app;
+// createServer(
+//   async (req, res) => {
+//     const sessionId = req.headers['mcp-session-id'] as string | undefined;
+//     if (!sessionId || !transports[sessionId]) {
+//       return res.writeHead(400).end('Invalid or missing session ID');
+//     }
+//     const transport = transports[sessionId];
+//     await transport.handleRequest(req, res);
+  
+//   }
+// )

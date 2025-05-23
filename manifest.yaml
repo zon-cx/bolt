@@ -57,7 +57,7 @@ applications:
     routes:
       - route: 'https://gateway.cfapps.eu20-001.hana.ondemand.com'
 
-    command: node ./dist/mcp.gateway.hono.cjs
+    command: node ./dist/mcp.gateway.cjs
     stack: cflinuxfs4
     memory: 1024M
     instances: 1

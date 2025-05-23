@@ -37,5 +37,5 @@
     "outDir": "./dist"
 
   },
-  "include": ["src", "src/mcp.connect.ts", "ref/mcp.*/mcp.server.tsx", "ref/mcp.*/mcp.session.ts", "ref/mcp.*/mcp.store.mts", "ref/mcp.*/assistant.mcp.ts", "ref/mcp.*/tool.repair.ts", "ref/mcp-ga/transport.tap.ts", "ref/mcp-ga/mcp.proxy.multi.ts", "ref/mcp-ga/mcp.proxy.ts"],
+  "include": ["src", "src/gateway.mcp.client.ts", "ref/mcp.*/mcp.server.tsx", "ref/mcp.*/mcp.session.ts", "ref/mcp.*/mcp.store.mts", "ref/mcp.*/assistant.mcp.ts", "ref/mcp.*/tool.repair.ts", "ref/mcp-ga/transport.tap.ts", "ref/mcp-ga/mcp.proxy.multi.ts", "ref/mcp-ga/mcp.proxy.ts"],
 }
