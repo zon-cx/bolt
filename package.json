@@ -9,6 +9,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx   --env-file=.env src/slack.app.ts",
     "web": "tsx --env-file=.env src/web.app.tsx",
+    "gateway": "tsx --env-file=.env src/mcp.gateway.hono.ts",
+    "gateway:client": "tsx --env-file=.env src/mcp.client.ts",
     "build:mta": "mbt build -p=cf",
     "build": "npm run build:pkgroll",
     "deploy": "cf deploy mta_archives/assistant_0.0.1.mtar -f --retries 1",
@@ -17,6 +19,8 @@
     "build:copypackage": "cp package.json ./dist/ && cp package-lock.json ./dist/ || true",
     "build:tsup": "pnpx tsup ./src/slack.app.ts --outDir ./dist --target=esnext --format esm --treeshake --shims --publicDir ",
     "start": "node ./dist/slack.app.cjs",
+    "start:gateway": "node ./dist/mcp.gateway.cjs",
+    "start:gateway:client": "node ./dist/mcp.client.cjs",
     "node-with-import": "node --import ./start.js /.main.mjs",
     "inspector": "npx @modelcontextprotocol/inspector  "
   },
@@ -33,6 +37,7 @@
     "@statelyai/inspect": "^0.4.0",
     "@xstate/store": "^3.6.2",
     "ai": "^4.3.15",
+    "fetch-to-node": "^2.1.0",
     "hono": "^4.7.9",
     "lucide-react": "^0.509.0",
     "openai": "^4.97.0",
@@ -77,6 +82,21 @@
       "require": "./dist/web.app.cjs",
       "import": "./dist/web.app.mjs",
       "bin": "./dist/web.app.js"
+    },
+    "./mcp": {
+      "require": "./dist/mcp.gateway.cjs",
+      "import": "./dist/mcp.gateway.mjs",
+      "bin": "./dist/mcp.gateway.js"
+    },
+    "./gateway": {
+      "require": "./dist/mcp.gateway.hono.cjs",
+      "import": "./dist/mcp.gateway.hono.mjs",
+      "bin": "./dist/mcp.gateway.hono.js"
+    },
+    "./mcp.client": {
+      "require": "./dist/mcp.client.cjs",
+      "import": "./dist/mcp.client.mjs",
+      "bin": "./dist/mcp.client.js"
     }
   }
 }

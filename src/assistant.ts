@@ -8,11 +8,11 @@ import {
   spawnChild,
   fromPromise,
 } from "xstate";
-import message, { fromMcpMessageHandler } from "./assistant.mcp.message";
-import bootstrap, { Bootstrap, fromMcpBootstrap } from "./assistant.mcp.bootstrap";
-import mcpClient, { Tools } from "./assistant.mcp.client";
-import { Chat } from "./assistant.chat";
-import { MCPClientManager } from "./mcp.session";
+import message, { fromMcpMessageHandler } from "./assistant.mcp.message.ts";
+import bootstrap, { Bootstrap, fromMcpBootstrap } from "./assistant.mcp.bootstrap.ts";
+import mcpClient, { Tools } from "./assistant.mcp.client.ts";
+import { Chat } from "./assistant.chat.ts";
+import { type MCPClientManager } from "./mcp.agent.ts";
 
 export function fromMcpSession(session: MCPClientManager) {
   const sessionSetup = setup({

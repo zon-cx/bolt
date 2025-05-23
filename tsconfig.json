@@ -5,7 +5,7 @@
     // Treat files as modules even if it doesn't use import/export
     "moduleDetection": "force",
     "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx"
+    "jsxImportSource": "hono/jsx",
     // Ignore module structure
     "module": "Preserve",
 
@@ -37,5 +37,5 @@
     "outDir": "./dist"
 
   },
-  "include": ["src", "src/mcp.client.ts", "ref/mcp.*/mcp.server.tsx", "ref/mcp.*/mcp.session.ts", "ref/mcp.*/mcp.store.mts", "ref/mcp.*/assistant.mcp.ts", "ref/mcp.*/tool.repair.ts"],
+  "include": ["src", "src/mcp.connect.ts", "ref/mcp.*/mcp.server.tsx", "ref/mcp.*/mcp.session.ts", "ref/mcp.*/mcp.store.mts", "ref/mcp.*/assistant.mcp.ts", "ref/mcp.*/tool.repair.ts", "ref/mcp-ga/transport.tap.ts", "ref/mcp-ga/mcp.proxy.multi.ts", "ref/mcp-ga/mcp.proxy.ts"],
 }

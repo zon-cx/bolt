@@ -15,7 +15,7 @@ import {
   fromCallback,
   fromPromise,
 } from "xstate";
-import { MCPClientConnection } from "./mcp.client";
+import { MCPClientConnection } from "../gateway/mcp.connect";
 import { Atom, createStore } from "@xstate/store";
 import { MCPClientManager } from "./mcp.session";
 

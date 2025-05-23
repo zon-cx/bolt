@@ -19,9 +19,8 @@ import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
 import messages from "./slack.messages";
 import { Chat } from "./assistant.chat";
 import { Tools } from "./assistant.mcp.client";
-import { getOrCreateMcpSession, MCPClientManager, mcpSessions } from "./mcp.session";
-import { MCPClientConnection } from "./mcp.client";
- const log=(logger:slack.Logger) => (...args:any[])=>{
+import { getOrCreateMcpAgent, MCPClientManager } from "./mcp.agent";
+  const log=(logger:slack.Logger) => (...args:any[])=>{
    logger.info(...args);
  }
  
@@ -86,7 +85,7 @@ const assistant = new Assistant({
   threadStarted: async ({say, setStatus, setSuggestedPrompts,setTitle, saveThreadContext,event, context, logger}) => {
     const id= event.assistant_thread.thread_ts;
 
-    const session= getOrCreateMcpSession(event.assistant_thread.user_id);
+    const session= getOrCreateMcpAgent(event.assistant_thread.user_id);
     const input= {
       bot: context,
       thread: event.assistant_thread,
@@ -132,7 +131,7 @@ const assistant = new Assistant({
     console.log("userMessage",message); 
     setStatus("thinking...");
     ack && await ack();
-    const assistant =await yjsActor(fromMcpSession(getOrCreateMcpSession(message.user)),{
+    const assistant =await yjsActor(fromMcpSession(getOrCreateMcpAgent(message.user)),{
       input: context,
       doc: `@assistant/${id}`,
       logger: log(logger),
@@ -188,7 +187,7 @@ app.command('/mcp-connect', async ({ command, ack, respond }) => {
     return;
   }
   try {
-    const session = getOrCreateMcpSession(sessionId);
+    const session = getOrCreateMcpAgent(sessionId);
    await session.connect(url);
     await respond(`Connected to MCP server at ${url}`);
   } catch (err) {
@@ -206,7 +205,7 @@ app.command('/mcp-disconnect', async ({ command, ack, respond }) => {
     return;
   }
   try {
-    const session = getOrCreateMcpSession(sessionId);
+    const session = getOrCreateMcpAgent(sessionId);
     await session.closeConnection(serverId);
     await respond(`Disconnected from MCP server with id: ${serverId}`);
   } catch (err) {
@@ -307,7 +306,7 @@ app.action('connect_mcp_server', async ({ ack, client, logger, body, action }) =
   await ack();
   const url = body.view.state.values.mcp_server.url.value;
   const name = body.view.state.values.mcp_server_name.name.value;
-  const session = getOrCreateMcpSession(body.user.id);
+  const session = getOrCreateMcpAgent(body.user.id);
   await session.connect(url, { id: name });
   const user = body.user.id;
   await client.views.update({
@@ -324,7 +323,7 @@ app.action('connect_mcp_server', async ({ ack, client, logger, body, action }) =
 
 app.action('disconnect_mcp_server', async ({ ack, body, logger,action , options, client}) => {
   console.log("disconnect_mcp_server",action,body);
-  const session = getOrCreateMcpSession(body.user.id);
+  const session = getOrCreateMcpAgent(body.user.id);
   await session.store.delete(action.value);
   await ack();
   await client.views.update({
@@ -357,7 +356,7 @@ app.options('mcp_servers', async ({ ack, body, logger , options}) => {
 app.event('app_home_opened', async ({ event, client, logger }) => {
   try {
     
-    const session = getOrCreateMcpSession(event.user);
+    const session = getOrCreateMcpAgent(event.user);
 
     // Call views.publish with the built-in client
     const result = await client.views.publish({

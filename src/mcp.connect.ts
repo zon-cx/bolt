@@ -25,29 +25,32 @@ import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 export class MCPClientConnection {
   client: Client;
-  connectionState: Atom<
+  public connectionState: Atom<
     | "authenticating"
     | "connecting"
     | "ready"
     | "discovering"
     | "failed"
   >;
-  instructions: Atom<string | undefined>;
-  tools: Atom<Tool[]>;
-  prompts: Atom<Prompt[]>;
-  resources: Atom<Resource[]>;
-  resourceTemplates: Atom<ResourceTemplate[]>;
-  serverCapabilities: Atom<ServerCapabilities | undefined>;
-
+  public instructions: Atom<string | undefined>;
+  public tools: Atom<Tool[]>;
+  public prompts: Atom<Prompt[]>;
+  public resources: Atom<Resource[]>;
+  public resourceTemplates: Atom<ResourceTemplate[]>;
+  public serverCapabilities: Atom<ServerCapabilities | undefined>;
+  public transport: Transport;
+  public name: string;
   constructor(
     public url: URL,
     public options: {
-    info: ConstructorParameters<typeof Client>[0], 
-    client?: ConstructorParameters<typeof Client>[1],
-    transport?: Transport
-    }
+      info: ConstructorParameters<typeof Client>[0];
+      client?: ConstructorParameters<typeof Client>[1];
+      transport?: Transport;
+    },
   ) {
-    const {info,client,transport}=this.options
+    const { info, client, transport } = this.options || {};
+    this.transport = transport ?? new StreamableHTTPClientTransport(url);
+    this.name = info?.name;
     this.connectionState = createAtom<
       | "authenticating"
       | "connecting"
@@ -62,26 +65,16 @@ export class MCPClientConnection {
     this.resourceTemplates = createAtom<ResourceTemplate[]>([]);
     this.serverCapabilities = createAtom<ServerCapabilities | undefined>(undefined);
     this.client = new Client(info, client);
+
   }
 
   /**
    * Initialize a client connection
    */
-  async init( ) {
+  async init() {
     try {
-      const transport = this.options.transport ?? new  StreamableHTTPClientTransport(
-        new URL(this.url || env.MCP_SERVER_URL!),
-        {
-          requestInit: {
-            headers: {
-              Authorization: "Bearer YOUR TOKEN HERE",
-            },
-          },
-          ...(this.options || {}),
-        }
-      );
-
-      await this.client.connect(transport);
+   
+      await this.client.connect(this.transport);
       // biome-ignore lint/suspicious/noExplicitAny: allow for the error check here
     } catch (e: any) {
       if (e.toString().includes("Unauthorized")) {
@@ -101,14 +94,13 @@ export class MCPClientConnection {
     }
     this.serverCapabilities.set(serverCapabilities);
 
-    const [instructions, tools, resources, prompts, resourceTemplates] =
-      await Promise.all([
-        this.client.getInstructions(),
-        this.registerTools(),
-        this.registerResources(),
-        this.registerPrompts(),
-        this.registerResourceTemplates(),
-      ]);
+    const [instructions, tools, resources, prompts, resourceTemplates] = await Promise.all([
+      this.client.getInstructions(),
+      this.registerTools(),
+      this.registerResources(),
+      this.registerPrompts(),
+      this.registerResourceTemplates(),
+    ]);
 
     this.instructions.set(instructions);
     this.tools.set(tools);
@@ -134,7 +126,7 @@ export class MCPClientConnection {
         async (_notification) => {
           const tools = await this.fetchTools();
           this.tools.set(tools);
-        }
+        },
       );
     }
 
@@ -153,7 +145,7 @@ export class MCPClientConnection {
         async (_notification) => {
           const resources = await this.fetchResources();
           this.resources.set(resources);
-        }
+        },
       );
     }
 
@@ -172,7 +164,7 @@ export class MCPClientConnection {
         async (_notification) => {
           const prompts = await this.fetchPrompts();
           this.prompts.set(prompts);
-        }
+        },
       );
     }
 
@@ -243,12 +235,16 @@ export class MCPClientConnection {
         .catch(
           capabilityErrorHandler(
             { resourceTemplates: [] },
-            "resources/templates/list"
-          )
+            "resources/templates/list",
+          ),
         );
       templatesAgg = templatesAgg.concat(templatesResult.resourceTemplates);
     } while (templatesResult.nextCursor);
     return templatesAgg;
+  }
+
+  async cleanup() {
+    await this.transport.close();
   }
 }
 
@@ -257,7 +253,9 @@ function capabilityErrorHandler<T>(empty: T, method: string) {
     // server is badly behaved and returning invalid capabilities. This commonly occurs for resource templates
     if (e.code === -32601) {
       console.error(
-        `The server advertised support for the capability ${method.split("/")[0]}, but returned "Method not found" for '${method}'.`
+        `The server advertised support for the capability ${
+          method.split("/")[0]
+        }, but returned "Method not found" for '${method}'.`,
       );
       return empty;
     }

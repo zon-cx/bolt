@@ -11,7 +11,6 @@ import {
   NonReducibleUnknown,
   toPromise,
 } from "xstate";
-import assistantMachine from "./assistant";
 import yjsActor, { actorsStore, connectYjs } from "./assistant.store";
 import { jsxRenderer } from "hono/jsx-renderer";
 import { env } from "process";
@@ -23,7 +22,7 @@ import {
 } from "@cxai/stream";
 import * as Y from "yjs";
 import { Chat } from "./assistant.chat";
-import { getOrCreateMcpSession } from "./mcp.session";
+import { getOrCreateMcpAgent } from "./mcp.agent";
 // Helper to lazily create / retrieve an assistant actor backed by Yjs for a given thread id
 function getAssistant(threadId: string) {
   const doc = connectYjs(`@assistant/${threadId}`);
@@ -244,7 +243,7 @@ app.post("/@assistant/:thread/select", (c) => {
 
 app.get("/@assistant/:thread", async (c) => {
   const threadId = c.req.param("thread");
-  const session = getOrCreateMcpSession(threadId);
+  const session = getOrCreateMcpAgent(threadId);
   const servers = Object.keys(session.mcpConnections);
   return c.html(
     <div
@@ -456,7 +455,7 @@ app.post("/@assistant/:thread/messages", async (c) => {
 app.post("/@assistant/:thread/add-server", async (c) => {
   const threadId = c.req.param("thread");
   const url = (await c.req.parseBody()).url;
-  const session = getOrCreateMcpSession(threadId);
+  const session = getOrCreateMcpAgent(threadId);
   if (url) {
     try {
       await session.connect(url);
@@ -489,7 +488,7 @@ app.post("/@assistant/:thread/add-server", async (c) => {
 app.post("/@assistant/:thread/remove-server", async (c) => {
   const threadId = c.req.param("thread");
   const url = (await c.req.parseBody()).url;
-  const session = getOrCreateMcpSession(threadId);
+  const session = getOrCreateMcpAgent(threadId);
   if (url) {
     try {
       await session.closeConnection(url);
@@ -602,5 +601,5 @@ function PromptsBar({ prompts }: { prompts?: any[] }) {
 
 serve({
   fetch: app.fetch,
-  port: env.PORT ? parseInt(env.PORT) : 8080,
+  port: env.PORT ? parseInt(env.PORT) : 8090,
 });

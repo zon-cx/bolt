@@ -4,7 +4,7 @@ import { azure } from "@ai-sdk/azure";
 import {  ActorLogic, waitFor } from "xstate";
 import { Chat } from "./assistant.chat";
 import { Session } from "./assistant";
-import { Tools } from "./assistant.mcp.client";
+import { Tools } from "../assistant.mcp.client";
 import { MCPClientManager } from "./mcp.session";
  
 
