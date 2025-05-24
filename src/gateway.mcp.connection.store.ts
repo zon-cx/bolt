@@ -1,6 +1,7 @@
 import { Atom } from "@xstate/store";
 import { MCPClientManager } from "./gateway.mcp.connection";
 import { connectYjs } from "./store.yjs";
+import { MCPClientConnection } from "./gateway.mcp.client";
 
 export const mcpAgents: Record<string, MCPClientManager> = {};
   
@@ -94,3 +95,4 @@ export function deleteAgent(id: string) {
 for (const [id] of agentsStore.entries()) {
   getOrCreateMcpAgent(id);
 }
+

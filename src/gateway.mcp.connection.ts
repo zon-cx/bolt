@@ -139,7 +139,7 @@ export class MCPClientManager {
      */
     unstable_getAITools(): ToolSet {
       return Object.fromEntries(
-        getNamespacedData(this.mcpConnections, "tools").map((tool) => {
+        this.tools.get().map((tool) => {
           return [
             tool.name,
             {
@@ -149,7 +149,6 @@ export class MCPClientManager {
                 const result = await this.callTool({
                   name: tool.name,
                   arguments: args,
-                  serverId: tool.serverId,
                 });
                 if (result.isError) {
                   // @ts-expect-error TODO we should fix this
@@ -308,6 +307,8 @@ export class MCPClientManager {
         name,
       }, options);
     }
+
+    
   }
   
   type NamespacedSource = {

@@ -32,14 +32,16 @@ applications:
       LOG_REMOTE_USER: true
       LOG_REFERER: true
       YJS_URL: 'https://yjs.cfapps.us10-001.hana.ondemand.com:'
+      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu20-001.hana.ondemand.com'
+      MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu20-001.hana.ondemand.com'
       
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
 
-  - name: gateway-client
+  - name: dashboard
     routes:
-      - route: 'https://gateway-client.cfapps.eu20-001.hana.ondemand.com'
-    command: node ./dist/mcp.client.cjs
+      - route: 'https://dashboard.cfapps.eu20-001.hana.ondemand.com'
+    command: node ./dist/gateway.dashboard.cjs
     stack: cflinuxfs4
     memory: 512M
     instances: 1
@@ -57,7 +59,7 @@ applications:
     routes:
       - route: 'https://gateway.cfapps.eu20-001.hana.ondemand.com'
 
-    command: node ./dist/mcp.gateway.cjs
+    command: node ./dist/gateway.mcp.server.cjs
     stack: cflinuxfs4
     memory: 1024M
     instances: 1

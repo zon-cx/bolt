@@ -8,6 +8,7 @@ import { Subscription } from "@xstate/store";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { toFetchResponse, toReqRes } from "fetch-to-node";
+import { MCPClientManager } from "./gateway.mcp.connection";
 
 // const app = express();
 // app.use(express.json());
@@ -30,7 +31,7 @@ const agent = getOrCreateMcpAgent("default");
 
  
 // Helper to create a new MCP server and transport for a session
-async function createSessionTransport() {
+async function createSessionTransport(agent: MCPClientManager) {
   const mcpServer = new McpServer(
     {
       name: "mcp-gateway-server",
@@ -147,7 +148,7 @@ app.use("*", async (c, next)=>{
   }
 });
 // POST handler for client-to-server communication
-app.post('/mcp', async (c) => {
+app.post('/:id', async (c) => {
   const { req, res } = toReqRes(c.req.raw);
 
   const sessionId = c.req.header('mcp-session-id') as string | undefined;
@@ -155,17 +156,30 @@ app.post('/mcp', async (c) => {
   if (sessionId && transports[sessionId]) {
     transport = transports[sessionId];
   } else  {
-    transport = await createSessionTransport();
+    transport = await createSessionTransport(agent);
   } 
 
   await transport.handleRequest(req, res, await c.req.json());
   return toFetchResponse(res);
 });
 
-// Reusable handler for GET and DELETE requests
 
+// app.post("/:id", async (c) => {
+//   const { id } = c.req.param();
+//   const { req, res } = toReqRes(c.req.raw);
+//   const sessionId = c.req.header('mcp-session-id') as string | undefined;
+//   let transport: StreamableHTTPServerTransport;
+//   if (sessionId && transports[sessionId]) {
+//     transport = transports[sessionId];
+//   } else  {
+//     transport = await createSessionTransport(getOrCreateMcpAgent(id));
+//   }  
+//   await transport.handleRequest(req, res, await c.req.json());
+// })
+
+ 
 // GET for server-to-client notifications via SSE
-app.get("/mcp", async (c) => {
+app.get("/:id", async (c) => {
   console.log("Received GET MCP request");
   return c.json(
     {
@@ -180,7 +194,7 @@ app.get("/mcp", async (c) => {
   );
 });
 
-app.delete("/mcp", async (c) => {
+app.delete("/:id", async (c) => {
   console.log("Received DELETE MCP request");
   return c.json(
     {

@@ -22,6 +22,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { env } from "node:process";
 import { createAtom, Atom } from "@xstate/store";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { jsonSchema, tool, ToolExecutionOptions } from "ai";
 
 export class MCPClientConnection {
   client: Client;
@@ -262,3 +263,4 @@ function capabilityErrorHandler<T>(empty: T, method: string) {
     throw e;
   };
 }
+

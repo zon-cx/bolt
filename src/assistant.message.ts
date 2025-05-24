@@ -4,7 +4,9 @@ import { azure } from "@ai-sdk/azure";
 import { Chat  } from "./assistant.chat";
 import { MCPClientManager } from "./gateway.mcp.connection";
 import { Session ,Tools} from "./assistant";
-
+import { MCPClientConnection } from "./gateway.mcp.client";
+import { aiTools } from "./mcp.client";
+import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
 
 /**
  * Extend the generic MessageInput with an optional prompt field.
@@ -91,7 +93,7 @@ const mcpMessage = fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessage
   return "done";
 });
 
-export function fromMcpMessageHandler(session:MCPClientManager){
+export function fromMcpMessageHandler(client:McpClient){
    return fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessageInput,Session.Event>(async function* ({
     system,
     input: { prompt, messages },
@@ -100,17 +102,18 @@ export function fromMcpMessageHandler(session:MCPClientManager){
   
     yield { type: "@chat.status", status: "connecting to tool server…" };
   
-  
-    yield {
+    const tools= await aiTools(client);
+      yield {
       type: "@tool.available",
-      tools: session.unstable_getAITools() ,
+      tools: tools ,
     };
   
-    const count = Object.keys(session.listTools()).length;
+    const count = Object.keys(tools).length;
     yield {
       type: "@chat.status",
       status: `connected – ${count} tool${count === 1 ? "" : "s"} available`,
     };
+    console.log("mcp connected",tools);
   
     yield { type: "@chat.status", status: "generating response…" };
   
@@ -120,7 +123,7 @@ export function fromMcpMessageHandler(session:MCPClientManager){
         model: azure("gpt-4o"),
         messages: [...messages],
         prompt,
-        tools:session.unstable_getAITools(),
+        tools:tools,
         maxRetries: 10,
         maxSteps: 20, // give the model enough room for tool → result → follow-up,
       });

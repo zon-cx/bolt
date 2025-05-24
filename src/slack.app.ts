@@ -12,7 +12,7 @@ import {
   ActorRef
 } from "xstate";
 const { Assistant } = slack;
-
+import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
 import sessionMachine, { fromMcpSession } from "./assistant";
 import yjsActor from "./assistant.store";
 import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
@@ -21,6 +21,14 @@ import { Chat } from "./assistant.chat";
 import { Tools } from "./assistant";
 import { getOrCreateMcpAgent } from "./gateway.mcp.connection.store";
 import {type MCPClientManager } from "./gateway.mcp.connection";
+import { MCPClientConnection } from "./gateway.mcp.client";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { aiTools } from "./mcp.client";
+import { experimental_createMCPClient, generateText, smoothStream, streamText } from "ai";
+import { azure } from "@ai-sdk/azure";
+import { trace } from  '@opentelemetry/api';
+const tracer = trace.getTracer('console-tracer');
+
   const log=(logger:slack.Logger) => (...args:any[])=>{
    logger.info(...args);
  }
@@ -28,6 +36,7 @@ import {type MCPClientManager } from "./gateway.mcp.connection";
  function listener(args:Pick<AllAssistantMiddlewareArgs,"say" | "setStatus" | "setSuggestedPrompts" | "setTitle"   >){
   return function listene(actor:ActorRef<any,any,Chat.Messages.Event | Chat.Say.Event| Tools.Event>){
   const {say, setStatus, setSuggestedPrompts, setTitle} = args;
+  
   actor.on("@message.assistant", (event) => {
     const {content} = event;
     say(content.toString());
@@ -49,7 +58,9 @@ import {type MCPClientManager } from "./gateway.mcp.connection";
   }); 
   actor.on("@tool.call", (event) => {
     console.log("tool call", event);
-    say(messages.toolRequest([{toolName:event.toolName, toolArgs:event.args as Record<string, unknown> }]));
+    say(messages.listTools("calling tool", [event.toolName]));
+
+    // say(messages.toolRequest([{toolName:event.toolName, toolArgs:event.args as Record<string, unknown> }]));
   });
   actor.on("@tool.result", (event) => {
     console.log("tool result", event);
@@ -83,10 +94,10 @@ const assistant = new Assistant({
    * This can happen via DM with the app or as a side-container within a channel.
    * https://api.slack.com/events/assistant_thread_started
    */
-  threadStarted: async ({say, setStatus, setSuggestedPrompts,setTitle, saveThreadContext,event, context, logger}) => {
+  threadStarted: async ({say, setStatus, setSuggestedPrompts,setTitle, saveThreadContext, client,event, context, logger}) => {
     const id= event.assistant_thread.thread_ts;
 
-    const session= getOrCreateMcpAgent(event.assistant_thread.user_id);
+    const session= await getOrCreateMcpClient(event.assistant_thread.user_id);
     const input= {
       bot: context,
       thread: event.assistant_thread,
@@ -109,6 +120,9 @@ const assistant = new Assistant({
     waitFor(assistant, (state) => state.matches("listening")).then(()=>{
       console.log("thread started",assistant.getPersistedSnapshot());
      }) 
+    
+    
+
   },
 
   /**
@@ -130,9 +144,10 @@ const assistant = new Assistant({
   userMessage: async ( {message, say, ack, setStatus, setSuggestedPrompts, setTitle, logger, context}) => {
     const id = ("thread_ts" in message && message.thread_ts) || message.event_ts || message.ts;
     console.log("userMessage",message); 
-    setStatus("thinking...");
-    ack && await ack();
-    const assistant =await yjsActor(fromMcpSession(getOrCreateMcpAgent(message.user)),{
+    // setStatus("thinking...");
+    // ack && await ack();
+    
+    const assistant =await yjsActor(fromMcpSession(await getOrCreateMcpClient(message.user)),{
       input: context,
       doc: `@assistant/${id}`,
       logger: log(logger),
@@ -220,13 +235,46 @@ app.command('/mcp-disconnect', async ({ command, ack, respond }) => {
 
 
 // Helper to build the server blocks for the home view
-function buildServerBlocks(session:MCPClientManager) {
+function buildServerBlocks(session:MCPClientManager,user:string) {
   const servers = Object.entries(session.mcpConnections).map(([name, {url}]) => ({name, url}));
   return [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: "MCP Server: " + `${env.MCP_GATEWAY_URL}/${user}` },
+    },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: "MCP Dashboard: " + `${env.MCP_DASHBOARD_URL}/agents/${user}` },
+    },
+    { type: "divider" },
+    ...(
+      servers.length === 0
+        ? [{
+            type: "context",
+            elements: [{ type: "mrkdwn", text: "No servers connected." }]
+          }]
+        : [
+            {
+              type: "section",
+              text: { type: "mrkdwn", text: "*Connected Servers:*" }
+            },
+            ...servers.map(({name, url}) => ({
+              type: "section",
+              text: { type: "plain_text", text: `${name} (${url})` },
+              accessory: {
+                type: "button",
+                text: { type: "plain_text", text: "Remove", emoji: true },
+                style: "danger",
+                value: name,
+                action_id: "disconnect_mcp_server"
+              }
+            }))
+          ]
+    ),
     { type: "divider" },
     {
       type: 'section',
-      text: { type: 'plain_text', text: 'Connect a new MCP server' },
+      text: { type: 'mrkdwn', text: '*Add Server*' },
     },
     {
       type: "input",
@@ -243,7 +291,7 @@ function buildServerBlocks(session:MCPClientManager) {
       },
       label: {
         type: "plain_text",
-        text: "Server URL"
+        text: "URL"
       }
     },
     {
@@ -255,12 +303,12 @@ function buildServerBlocks(session:MCPClientManager) {
         initial_value: "mcpagent.val.run",
         placeholder: {
           type: "plain_text",
-          text: "Server Name (auto-filled from URL)"
+          text: "Server Name"
         }
       },
       label: {
         type: "plain_text",
-        text: "Server Name"
+        text: "Name"
       }
     },
     {
@@ -272,33 +320,7 @@ function buildServerBlocks(session:MCPClientManager) {
           action_id: "connect_mcp_server"
         }
       ]
-    },
-    { type: "divider" },
-    ...(
-      servers.length === 0
-        ? [{
-            type: "context",
-            elements: [{ type: "mrkdwn", text: "No servers connected." }]
-          }]
-        : [
-            {
-              type: "section",
-              text: { type: "mrkdwn", text: "*Connected MCP Servers:*" }
-            },
-            ...servers.map(({name, url}) => ({
-              type: "section",
-              text: { type: "plain_text", text: `${name} (${url})` },
-              accessory: {
-                type: "button",
-                text: { type: "plain_text", text: "Remove", emoji: true },
-                style: "danger",
-                value: name,
-                action_id: "disconnect_mcp_server"
-              }
-            }))
-          ]
-    ),
-    { type: "divider" },
+    }
   ];
 }
   
@@ -316,7 +338,7 @@ app.action('connect_mcp_server', async ({ ack, client, logger, body, action }) =
     view: {
       type: "home",
       blocks: [
-        ...buildServerBlocks(session),
+        ...buildServerBlocks(session,user),
       ]
     }
   });
@@ -333,7 +355,7 @@ app.action('disconnect_mcp_server', async ({ ack, body, logger,action , options,
     view: {
       type: "home",
       blocks: [
-        ...buildServerBlocks(session),
+        ...buildServerBlocks(session,body.user.id),
       ]
     }
   });
@@ -365,7 +387,7 @@ app.event('app_home_opened', async ({ event, client, logger }) => {
       view: {
         type: "home",
         blocks: [ 
-          ...buildServerBlocks(session),
+          ...buildServerBlocks(session,event.user),
           
         ]
       }
@@ -393,3 +415,20 @@ function checkEvent<TType extends string>(event:  EventObject,type: TType ): eve
   return event.type === type;
 }
 
+const clients= new Map<string,McpClient>();
+ async function getOrCreateMcpClient(id: string) {
+  // return getOrCreateMcpAgent(id);
+  if(clients.has(id)){
+    return clients.get(id)!;
+  }
+  const client =new McpClient({
+   name: `mcp-client-${id}`,
+   version: "1.0.0",
+   url: new URL(`${env.MCP_GATEWAY_URL}/${id}`),
+  });
+
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${env.MCP_GATEWAY_URL}/${id}`)));
+  
+  return client;
+
+}

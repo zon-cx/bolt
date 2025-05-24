@@ -12,9 +12,11 @@ import{ fromMcpMessageHandler } from "./assistant.message.ts";
 import { Bootstrap, fromMcpBootstrap } from "./assistant.bootstrap.ts";
 import { Chat } from "./assistant.chat.ts";
 import { type MCPClientManager } from "./gateway.mcp.connection.ts";
-import { Tool, ToolCall, ToolResult } from "ai";
-
-export function fromMcpSession(session: MCPClientManager) {
+import { Tool, ToolCall, ToolResult ,experimental_createMCPClient} from "ai";
+import { MCPClientConnection } from "./gateway.mcp.client.ts";
+import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
+// type McpClient = ReturnType<typeof experimental_createMCPClient>;
+export function fromMcpSession(client:McpClient) {
   const sessionSetup = setup({
     types: {} as {
       context: Session.Context;
@@ -26,8 +28,8 @@ export function fromMcpSession(session: MCPClientManager) {
       };
     },
     actors: {
-      message: fromMcpMessageHandler(session),
-      bootstrap: fromMcpBootstrap(session),
+      message: fromMcpMessageHandler(client),
+      bootstrap: fromMcpBootstrap(client),
     },
     actions: {
       emit: emit(
@@ -119,10 +121,11 @@ export function fromMcpSession(session: MCPClientManager) {
             },
           },
           onError: {
-            target: "error",
-            actions: assign({
-              error: ({ event: { error } }) => error,
-            }),
+            target: "listening",
+            actions:[({event})=>console.log("bootstrap error",event),{
+              type: "reportError",
+              params: ({ event: { error } }) => error,
+            }]
           },
         },
       },

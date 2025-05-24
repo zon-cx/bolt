@@ -129,7 +129,38 @@ const messageBuilder = {
             text: " - " + serverName + ": Checking what tools are available...",
         };
     },
-
+    listTools: (
+        name: string,
+        tools:string[]
+    ): {
+        blocks: (KnownBlock | Block)[];
+        text?: string;
+    } => {
+    
+        
+        return {
+          blocks: [
+            {
+              type: "context",
+              elements: [
+                {
+                  type: "mrkdwn",
+                  text: tools.length 
+                    ? `🔍 *${name}*: ${tools.join(', ')}`
+                    : `🔍 *${name}*: No tools ❌`
+                },
+                // {
+                //   type: "mrkdwn",
+                //   text: toolEntries.length 
+                //     ? `🔍 *${name}*: ${toolEntries.map(t => JSON.stringify(t,null,2)).join('\n/n')} `
+                //     : `🔍 *${name}*: No tools ❌`
+                // }
+              ]
+            }
+          ],
+          text: `${name}: ${tools.length || 'No'} tools`
+        };
+    },
     listToolsMessage: (
         name: string,
         tools:Map<string, Tool>,

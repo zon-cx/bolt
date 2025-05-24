@@ -1,26 +1,29 @@
 import { fromEventAsyncGenerator } from "@cxai/stream";
-import { jsonSchema, generateObject, streamText } from "ai";
+import { jsonSchema, generateObject, streamText, smoothStream } from "ai";
 import { azure } from "@ai-sdk/azure";
 import {  ActorLogic, waitFor } from "xstate";
 import { Chat } from "./assistant.chat";
 import { Session } from "./assistant";
 import { Tools } from "./assistant";
 import { MCPClientManager } from "./gateway.mcp.connection";
- 
+import { MCPClientConnection } from "./gateway.mcp.client";
+import { aiTools } from "./mcp.client";
+ import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
 
-export function fromMcpBootstrap(session:MCPClientManager){
+export function fromMcpBootstrap(client:McpClient){
  return fromEventAsyncGenerator(async function* ({
   input,
   system
 }): AsyncGenerator<Chat.Say.Event | Tools.Event> {
 
-  const tools= session.unstable_getAITools();
+  const tools= await aiTools(client);
+
   yield {
     type: "@tool.available",
     tools: tools ,
   };
 
-
+  console.log("mcp connected.\ttools:",tools);
 
   const { text: hello, fullStream } = await streamText({
     model: azure("gpt-4o"),
@@ -32,37 +35,41 @@ export function fromMcpBootstrap(session:MCPClientManager){
                 .join("\n")}"""
              `,
     tools,
-    maxRetries: 10,
-    maxSteps: 20, // give the model enough room for tool → result → follow-up,
-  });
-
-  let textBuffer = "";
+    maxSteps: 10,
+    experimental_continueSteps: true,
+    experimental_transform: smoothStream({ chunking: "line" }),
+    maxRetries: 0,
+    toolChoice: "auto",
+   });
 
   for await (const event of fullStream) {
     if (event.type === "tool-call") {
+      console.log("tool-call-event",event.toolName);
       yield {
         ...event,
         type: "@tool.call",
       };
     }
     if (event.type === "tool-result") {
+      console.log("tool-result-event",event.toolName);
       yield {
         ...event,
         type: "@tool.result",
       };
     }
     if (event.type === "text-delta") {
-      textBuffer += event.textDelta;
-      if (textBuffer.includes("\n") || textBuffer.includes("```")) {
+      // console.log("text-delta-event",event.textDelta);
+      // textBuffer += event.textDelta;
+      // if (textBuffer.includes("\n") || textBuffer.includes("```")) {
         yield {
           type: "@chat.message",
-          message: textBuffer,
+          message: event.textDelta,
         };
-        textBuffer = "";
+        // textBuffer = "";
       }
     }
-  }
 
+  console.log("llm stream done.","hello",await hello);
   const {
     object: { title, prompts },
   } = await generateObject<{
@@ -113,6 +120,7 @@ export function fromMcpBootstrap(session:MCPClientManager){
   });
 
   yield { type: "@chat.prompts", prompts, title };
+
 }) as unknown as Bootstrap
 }
 export default fromMcpBootstrap
