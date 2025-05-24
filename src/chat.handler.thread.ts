@@ -8,9 +8,9 @@ import {
   spawnChild,
   fromPromise,
 } from "xstate";
-import{ fromMcpMessageHandler } from "./assistant.message.ts";
-import { Bootstrap, fromMcpBootstrap } from "./assistant.bootstrap.ts";
-import { Chat } from "./assistant.chat.ts";
+import{ fromMcpMessageHandler } from "./chat.handler.message.ts";
+import { Bootstrap, fromMcpBootstrap } from "./chat.handler.bootstrap.ts";
+import { Chat } from "./chat.ts";
 import { type MCPClientManager } from "./gateway.mcp.connection.ts";
 import { Tool, ToolCall, ToolResult ,experimental_createMCPClient} from "ai";
 import { MCPClientConnection } from "./gateway.mcp.client.ts";

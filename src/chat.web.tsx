@@ -11,7 +11,7 @@ import {
   NonReducibleUnknown,
   toPromise,
 } from "xstate";
-import yjsActor, { actorsStore } from "./assistant.store";
+import yjsActor, { actorsStore } from "./chat.store";
 import { jsxRenderer } from "hono/jsx-renderer";
 import { env } from "process";
 import {
@@ -21,7 +21,7 @@ import {
   yMapIterate,
 } from "@cxai/stream";
 import * as Y from "yjs";
-import { Chat } from "./assistant.chat";
+import { Chat } from "./chat";
 import { connectYjs } from "./store.yjs";
 import { getOrCreateMcpAgent } from "./gateway.mcp.connection.store";
 // Helper to lazily create / retrieve an assistant actor backed by Yjs for a given thread id

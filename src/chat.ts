@@ -5,7 +5,7 @@ import {
   CoreUserMessage,
 } from "ai";
 import { ActorLogic } from "xstate";
-import { Session } from "./assistant";
+import { Session } from "./chat.handler.thread";
  
 export namespace Chat {
   export namespace Say {

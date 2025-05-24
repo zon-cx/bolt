@@ -1,7 +1,7 @@
 id: assistant
 applications:
   - name: slack
-    command: npm run start
+    command: node ./dist/chat.slack.cjs
     health-check-type: process
     no-route: true
     stack: cflinuxfs4
@@ -18,7 +18,7 @@ applications:
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
   - name: web
-    command: node ./dist/web.app.cjs
+    command: node ./dist/chat.web.cjs
     routes:
       - route: 'https://assistant.cfapps.eu20-001.hana.ondemand.com'
     stack: cflinuxfs4

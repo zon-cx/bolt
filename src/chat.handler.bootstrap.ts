@@ -2,12 +2,12 @@ import { fromEventAsyncGenerator } from "@cxai/stream";
 import { jsonSchema, generateObject, streamText, smoothStream } from "ai";
 import { azure } from "@ai-sdk/azure";
 import {  ActorLogic, waitFor } from "xstate";
-import { Chat } from "./assistant.chat";
-import { Session } from "./assistant";
-import { Tools } from "./assistant";
+import { Chat } from "./chat";
+import { Session } from "./chat.handler.thread";
+import { Tools } from "./chat.handler.thread";
 import { MCPClientManager } from "./gateway.mcp.connection";
 import { MCPClientConnection } from "./gateway.mcp.client";
-import { aiTools } from "./mcp.client";
+import { aiTools } from "./chat.mcp.client";
  import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
 
 export function fromMcpBootstrap(client:McpClient){
