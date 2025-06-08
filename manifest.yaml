@@ -3,24 +3,30 @@ applications:
   - name: slack
     command: node ./dist/chat.slack.cjs
     health-check-type: process
-    no-route: true
+    routes:
+      - route: 'https://slack.cfapps.eu12.hana.ondemand.com'
     stack: cflinuxfs4
     memory: 512M
     instances: 3
     version: 0.0.2
+    
     env:
       NODE_OPTIONS: --max-http-header-size=80000
       NODE_ENV: production
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
       LOG_REFERER: true
-      YJS_URL: 'https://yjs.cfapps.us10-001.hana.ondemand.com:'
+      PORT: 8080
+      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
+      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com'
+      BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
   - name: web
     command: node ./dist/chat.web.cjs
     routes:
-      - route: 'https://assistant.cfapps.eu20-001.hana.ondemand.com'
+      - route: 'https://assistant.cfapps.eu12.hana.ondemand.com'
     stack: cflinuxfs4
     memory: 512M
     instances: 3
@@ -31,16 +37,16 @@ applications:
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
       LOG_REFERER: true
-      YJS_URL: 'https://yjs.cfapps.us10-001.hana.ondemand.com:'
-      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu20-001.hana.ondemand.com'
-      MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu20-001.hana.ondemand.com'
-      
+      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com'
+      MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
+      BASE_URL: 'https://assistant.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
 
   - name: dashboard
     routes:
-      - route: 'https://dashboard.cfapps.eu20-001.hana.ondemand.com'
+      - route: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
     command: node ./dist/gateway.dashboard.cjs
     stack: cflinuxfs4
     memory: 512M
@@ -52,12 +58,13 @@ applications:
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
       LOG_REFERER: true
-      YJS_URL: 'https://yjs.cfapps.us10-001.hana.ondemand.com:'
+      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      BASE_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
   - name: gateway
     routes:
-      - route: 'https://gateway.cfapps.eu20-001.hana.ondemand.com'
+      - route: 'https://gateway.cfapps.eu12.hana.ondemand.com'
 
     command: node ./dist/gateway.mcp.server.cjs
     stack: cflinuxfs4
@@ -71,13 +78,34 @@ applications:
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
       LOG_REFERER: true
-      YJS_URL: 'https://yjs.cfapps.us10-001.hana.ondemand.com:'
-      
+      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      BASE_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
+  - name: whoami
+    routes:
+      - route: 'https://whoami.cfapps.eu12.hana.ondemand.com'
+
+    command: node ./dist/mcp.server.whoami.cjs
+    stack: cflinuxfs4
+    memory: 524M
+    instances: 1
+    version: 0.0.2
+
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      LOG_SENSITIVE_CONNECTION_DATA: true
+      LOG_REMOTE_USER: true
+      LOG_REFERER: true
+      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      BASE_URL: 'https://whoami.cfapps.eu12.hana.ondemand.com'
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack
+      
   - name: inspector
     routes:
-      - route: 'https://inspector.cfapps.eu20-001.hana.ondemand.com'
+      - route: 'https://inspector.cfapps.eu12.hana.ondemand.com'
     command: npm run inspector
     stack: cflinuxfs4
     memory: 256M

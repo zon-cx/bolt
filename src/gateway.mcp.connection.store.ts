@@ -1,7 +1,8 @@
-import { Atom } from "@xstate/store";
+import {Atom, Subscription} from "@xstate/store";
 import { MCPClientManager } from "./gateway.mcp.connection";
 import { connectYjs } from "./store.yjs";
 import { MCPClientConnection } from "./gateway.mcp.client";
+import McpServer from "../ref/mcp.*/mcp.server.tsx";
 
 export const mcpAgents: Record<string, MCPClientManager> = {};
   
@@ -25,16 +26,41 @@ const agentServerStore = (agentId: string) => {
 
 const agentsStore = doc.getMap<agentConfig>("agents");
 
-export function createMcpAgent(id: string, name = id) {
+export function createMcpAgent(id: string, mcpServer?:McpServer) {
   const agent = new MCPClientManager("assistant", "1.0.0", agentServerStore(id), id, id);
   mcpAgents[id] = agent;
 
   // Store agent metadata
   agentsStore.set(id, {
     id,
-    name,
+    name: id,
     created: new Date().toISOString(),
   });
+
+  if(!!mcpServer) {
+    const subscriptions: Subscription[] = [
+      agent.tools.subscribe(() => {
+        if (agent.tools.get()) mcpServer.sendToolListChanged();
+      }),
+      agent.prompts.subscribe(() => {
+        if (agent.prompts.get()) mcpServer.sendPromptListChanged();
+      })
+      , agent.resources.subscribe(() => {
+        if (agent.resources.get()) mcpServer.sendResourceListChanged();
+      }),
+      agent.resourceTemplates.subscribe(() => {
+        if (agent.resourceTemplates.get()) mcpServer.sendResourceListChanged();
+      })
+    ];
+    agent.onClose( () => {
+      console.log("Agent closed", id);
+      delete mcpAgents[id];
+      subscriptions.forEach((sub) => {
+        sub.unsubscribe();
+      })
+    });
+  }
+
 
   return agent;
 }
@@ -43,27 +69,14 @@ export function getMcpAgent(id: string) {
   return mcpAgents[id];
 }
 
-export function getOrCreateMcpAgent(id: string) {
+export function getOrCreateMcpAgent(id: string, mcpServer?:McpServer) {
   if (mcpAgents[id]) {
     return mcpAgents[id];
   }
-
-  // Check if agent exists in storage
-  const agentConfig = agentsStore.get(id);
-  if (agentConfig) {
-    const agent = new MCPClientManager(
-      "assistant",
-      "1.0.0",
-      agentServerStore(id),
-      id,
-      id,
-    );
-    mcpAgents[id] = agent;
-    return agent;
-  }
-
+ 
+  
   // Create new agent if it doesn't exist
-  return createMcpAgent(id);
+  return createMcpAgent(id, mcpServer);
 }
 
 export function listAgents() {

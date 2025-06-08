@@ -21,17 +21,16 @@ import { Chat } from "./chat";
 import { Tools } from "./chat.handler.thread";
 import { getOrCreateMcpAgent } from "./gateway.mcp.connection.store";
 import {type MCPClientManager } from "./gateway.mcp.connection";
-import { MCPClientConnection } from "./gateway.mcp.client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { aiTools } from "./chat.mcp.client";
-import { experimental_createMCPClient, generateText, smoothStream, streamText } from "ai";
-import { azure } from "@ai-sdk/azure";
 import { trace } from  '@opentelemetry/api';
+import { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import { authCallback, SlackInteractiveOAuthClient} from "./chat.slack.auth";
 const tracer = trace.getTracer('console-tracer');
-
-  const log=(logger:slack.Logger) => (...args:any[])=>{
+ const log=(logger:slack.Logger) => (...args:any[])=>{
    logger.info(...args);
  }
+
+ 
  
  function listener(args:Pick<AllAssistantMiddlewareArgs,"say" | "setStatus" | "setSuggestedPrompts" | "setTitle"   >){
   return function listene(actor:ActorRef<any,any,Chat.Messages.Event | Chat.Say.Event| Tools.Event>){
@@ -75,6 +74,8 @@ const tracer = trace.getTracer('console-tracer');
 }
   
  }
+const slackMcpClients = new Map<string, SlackInteractiveOAuthClient>();
+
 const assistant = new Assistant({
   /**
    * A custom ThreadContextStore can be provided, inclusive of methods to
@@ -95,9 +96,25 @@ const assistant = new Assistant({
    * https://api.slack.com/events/assistant_thread_started
    */
   threadStarted: async ({say, setStatus, setSuggestedPrompts,setTitle, saveThreadContext, client,event, context, logger}) => {
+    const userId = event.assistant_thread.user_id;
     const id= event.assistant_thread.thread_ts;
 
-    const session= await getOrCreateMcpClient(event.assistant_thread.user_id);
+    let slackClient = slackMcpClients.get(userId);
+    if (!slackClient) {
+      slackClient = new SlackInteractiveOAuthClient(
+        env.MCP_SERVER_URL!,
+        userId,
+        id,
+        say,
+        setStatus,
+        setSuggestedPrompts,
+        setTitle
+      );
+      slackMcpClients.set(userId, slackClient);
+      await slackClient.connect();
+    }
+
+    // const session= await getOrCreateMcpClient(event.assistant_thread.user_id,getOAuthProvider({say, setStatus, setSuggestedPrompts,setTitle, context}));
     const input= {
       bot: context,
       thread: event.assistant_thread,
@@ -109,7 +126,7 @@ const assistant = new Assistant({
           event.assistant_thread.thread_ts,
      );
 
-    const assistant = await yjsActor(fromMcpSession(session),{
+    const assistant = await yjsActor(fromMcpSession(slackClient.client!),{
           input,
           doc: `@assistant/${id}`,
           logger: log(logger),
@@ -141,18 +158,41 @@ const assistant = new Assistant({
    * be deduced based on their shape and metadata (if provided).
    * https://api.slack.com/events/message
    */
-  userMessage: async ( {message, say, ack, setStatus, setSuggestedPrompts, setTitle, logger, context}) => {
+  userMessage: async ({message, say, ack, setStatus, setSuggestedPrompts, setTitle, logger, context}) => {
+    // Type guard for Slack message events
+    let userId: string | undefined = undefined;
+    if (typeof message === 'object' && 'user' in message && typeof message.user === 'string') {
+      userId = message.user;
+    } else if (context && context.user && context.user.id) {
+      userId = context.user.id;
+    }
+    if (!userId) {
+      logger.error("No user ID found in message or context");
+      return;
+    }
     const id = ("thread_ts" in message && message.thread_ts) || message.event_ts || message.ts;
-    console.log("userMessage",message); 
-    // setStatus("thinking...");
-    // ack && await ack();
-    
-    const assistant =await yjsActor(fromMcpSession(await getOrCreateMcpClient(message.user)),{
+
+    let slackClient = slackMcpClients.get(userId);
+    if (!slackClient) {
+      slackClient = new SlackInteractiveOAuthClient(
+        env.MCP_SERVER_URL!,
+        userId,
+          id,
+        say,
+        setStatus,
+        setSuggestedPrompts,
+        setTitle
+      );
+      slackMcpClients.set(userId, slackClient);
+      await slackClient.connect();
+    }
+    console.log("userMessage", message);
+    const assistant = await yjsActor(fromMcpSession(slackClient.client!), {
       input: context,
       doc: `@assistant/${id}`,
       logger: log(logger),
       onCreate: listener({say, setStatus, setSuggestedPrompts, setTitle})
-   }).start();
+    }).start();
  
     if( "text" in message && !! message.text && "user" in message){
       console.log("sending message");
@@ -180,6 +220,22 @@ const app = new App({
   // receiver: socketModeReceiver,
   appToken: env.SLACK_APP_TOKEN,
   logLevel: LogLevel.DEBUG,
+  port: 8090,
+  customRoutes: [{
+    path: "/",
+    method: "GET",
+    handler: async (req, res) => {
+       res.writeHead(200, { "Content-Type": "text/html" });
+       res.end("<h1>Slack MCP Chat</h1><p>Install application <a>https://api.slack.com/apps/A08RC4RM7JN</a></p>");
+    }
+  },
+    {
+      path: "/oauth/callback",
+      method: "GET",
+      handler:  authCallback((userId => slackMcpClients.get(userId)))
+    }
+  ]
+     
 }); 
 const port = process.env.PORT || 8080;
 
@@ -411,12 +467,14 @@ export default {
 };
 
 
+
 function checkEvent<TType extends string>(event:  EventObject,type: TType ): event is EventObject & {type: TType} {
   return event.type === type;
 }
 
+
 const clients= new Map<string,McpClient>();
- async function getOrCreateMcpClient(id: string) {
+ async function getOrCreateMcpClient(id: string,oauthProvider:OAuthClientProvider) {
   // return getOrCreateMcpAgent(id);
   if(clients.has(id)){
     return clients.get(id)!;
@@ -424,11 +482,17 @@ const clients= new Map<string,McpClient>();
   const client =new McpClient({
    name: `mcp-client-${id}`,
    version: "1.0.0",
-   url: new URL(`${env.MCP_GATEWAY_URL}/${id}`),
+   url: new URL(`${env.MCP_GATEWAY_URL}/mcp}`),
   });
+  clients.set(id,client);
 
-  await client.connect(new StreamableHTTPClientTransport(new URL(`${env.MCP_GATEWAY_URL}/${id}`)));
-  
+  console.log('🔐 OAuth provider created');
+
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${env.MCP_GATEWAY_URL}/mcp`), {
+    authProvider: oauthProvider
+  }))
+
   return client;
 
 }
+ 

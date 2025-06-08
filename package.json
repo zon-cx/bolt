@@ -2,19 +2,21 @@
   "name": "assistant",
   "version": "0.0.2",
   "description": "",
-  "main": "./dist/slack.app.js",
-  "bin": "./dist/slack.app.js",
+  "main": "./dist/chat.slack.js",
+  "bin": "./dist/chat.slack.js",
   "packageManager": "yarn@1.22.22",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx   --env-file=.env src/chat.slack.ts",
     "web": "tsx --env-file=.env src/chat.web.tsx",
+    "simple": "tsx --env-file=.env src/simple.ts",
+
     "gateway": "tsx --env-file=.env src/gateway.mcp.server.ts",
     "gateway:client": "tsx --env-file=.env src/gateway.dashboard.tsx",
     "build:mta": "mbt build -p=cf",
     "build": "npm run build:pkgroll",
     "deploy": "cf deploy mta_archives/assistant_0.0.1.mtar -f --retries 1",
-    "build:pkgroll": "pkgroll  --clear-dist --dist ./dist --shims  --treeshake   --target=node22.13.1",
+    "build:pkgroll": "npx pkgroll  --clear-dist --dist ./dist --shims  --treeshake   --target=node22.16.0 -y",
     "push-env": "./push-env.sh",
     "build:copypackage": "cp package.json ./dist/ && cp package-lock.json ./dist/ || true",
     "build:tsup": "pnpx tsup ./src/chat.slack.ts --outDir ./dist --target=esnext --format esm --treeshake --shims --publicDir ",
@@ -32,7 +34,7 @@
     "@ai-sdk/azure": "^1.3.23",
     "@hocuspocus/provider": "^3.1.1",
     "@hono/node-server": "^1.14.1",
-    "@modelcontextprotocol/sdk": "^1.11.4",
+    "@modelcontextprotocol/sdk": "^1.12.1",
     "@opentelemetry/api": "^1.9.0",
     "@slack/bolt": "^4.3.0",
     "@statelyai/inspect": "^0.4.0",
@@ -41,6 +43,7 @@
     "fetch-to-node": "^2.1.0",
     "hono": "^4.7.9",
     "lucide-react": "^0.509.0",
+    "node-fetch": "^3.3.2",
     "openai": "^4.97.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -59,7 +62,7 @@
   },
   "engines": {
     "yarn": "1.22.22",
-    "node": "22.13.1"
+    "node": "22.16.0"
   },
   "overrides": {
     "yjs": {
@@ -93,6 +96,11 @@
       "require": "./dist/gateway.dashboard.cjs",
       "import": "./dist/gateway.dashboard.mjs",
       "bin": "./dist/gateway.dashboard.js"
+    },
+    "./whoami": {
+      "require": "./dist/mcp.server.whoami.cjs",
+      "import": "./dist/mcp.server.whoami.mjs",
+      "bin": "./dist/mcp.server.whoami.js"
     }
   }
 }

@@ -172,6 +172,13 @@ export class MCPClientManager {
         }),
       );
     }
+    
+    onClose(callback: () => void) { 
+        // This is a placeholder for any cleanup logic you might want to add
+        // when the MCPClientManager is closed.
+        // For now, it does nothing.
+        console.log("MCPClientManager onClose event registered");
+     }   
   
     /**
      * Closes a connection to an MCP server

@@ -17,7 +17,8 @@ export const gigyaOAuthProvider = new ProxyOAuthServerProvider({
   verifyAccessToken: async (token) => {
     console.log("verifyAccessToken", token);
     const response = await fetch(`${GIGYA_ISSUER}/userinfo`, {
-      headers: { Authorization: `Bearer ${token}` },
+      method: "POST"
+     
     });
   
     if (!response.ok) {
@@ -46,10 +47,14 @@ export const gigyaOAuthProvider = new ProxyOAuthServerProvider({
       client_id,
       scope: "openid profile email",
       redirect_uris: [
+        "http://localhost:6274/oauth/callback",
+        'http://localhost:8080/oauth/callback',
+
+        'http://localhost:8090/oauth/callback',
         `${baseUrl}/oauth/callback`,
         `${baseUrl}/oauth/callback/debug`,
+        "http://localhost:8090/callback",
         "http://localhost:6274/oauth/callback/debug",
-        "http://localhost:6274/oauth/callback",
       ],
     };
   },
@@ -90,7 +95,7 @@ gigyaOAuthProvider.exchangeAuthorizationCode = async function (
         code: code,
         code_verifier: codeVerifier!,
         grant_type: "authorization_code",
-        redirect_uri: "http://localhost:6274/oauth/callback",
+        redirect_uri:"http://localhost:8080/oauth/callback",
         client_id: client.client_id,
       }),
     });
@@ -135,6 +140,30 @@ if (originalExchangeRefreshToken) {
   };
 }
 
+
+/* debug client registration */
+
+// Log available methods on clientsStore
+const clientStore = gigyaOAuthProvider.clientsStore;
+console.log("[DCR] clientsStore methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(clientStore)));
+
+// Wrap 'registerClient' method if present
+const originalRegisterClient = clientStore.registerClient?.bind(clientStore);
+if (originalRegisterClient) {
+  clientStore.registerClient = async function(params) {
+    try {
+      console.log("[DCR] registerClient called with params:", params);
+      const result = await originalRegisterClient(params);
+      console.log("[DCR] registerClient result:", result);
+      return result;
+    } catch (err) {
+      console.error("[DCR] registerClient error:", err);
+      throw err;
+    }
+  };
+}
+
+
 // Express middleware to log all /register requests
 const app = express();
 app.use(express.json());
@@ -164,26 +193,4 @@ export const requireAuth = requireBearerAuth({
 //   console.log(`OIDC Auth server running at http://localhost:${port}`);
 // });
 
-/* debug client registration
 
-// Log available methods on clientsStore
-const clientStore = gigyaOAuthProvider.clientsStore;
-console.log("[DCR] clientsStore methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(clientStore)));
-
-// Wrap 'registerClient' method if present
-const originalRegisterClient = clientStore.registerClient?.bind(clientStore);
-if (originalRegisterClient) {
-  clientStore.registerClient = async function(params) {
-    try {
-      console.log("[DCR] registerClient called with params:", params);
-      const result = await originalRegisterClient(params);
-      console.log("[DCR] registerClient result:", result);
-      return result;
-    } catch (err) {
-      console.error("[DCR] registerClient error:", err);
-      throw err;
-    }
-  };
-}
-
-*/

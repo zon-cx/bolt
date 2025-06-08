@@ -85,11 +85,11 @@ const messageBuilder = {
                             type: "button",
                             text: {
                                 type: "plain_text",
-                                text: text,
+                                text: text || "Authorize",
                             },
                             url: url,
                             action_id: "redirect",
-                            value: value,
+                            value: value || url,
                         },
                     ],
                 },
