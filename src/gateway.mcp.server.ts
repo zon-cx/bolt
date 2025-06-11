@@ -104,7 +104,9 @@ app.use(async (req, res, next) => {
   });
 
 function getId(extra: RequestHandlerExtra<any,any>): string {
-  return extra?.authInfo?.extra?.subject as string || extra.sessionId || "default";
+  const id = extra?.authInfo?.extra?.subject as string || extra.sessionId || "default";
+  console.log("agent id", id, extra?.authInfo?.extra);
+  return id;
 }
 
 // Helper to create a new MCP server and transport for a session

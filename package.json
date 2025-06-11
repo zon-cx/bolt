@@ -10,7 +10,7 @@
     "dev": "tsx   --env-file=.env src/chat.slack.ts",
     "web": "tsx --env-file=.env src/chat.web.tsx",
     "simple": "tsx --env-file=.env src/simple.ts",
-
+    "dashboard": "tsx --env-file=.env src/dashboard.server.ts",
     "gateway": "tsx --env-file=.env src/gateway.mcp.server.ts",
     "gateway:client": "tsx --env-file=.env src/gateway.dashboard.tsx",
     "build:mta": "mbt build -p=cf",
@@ -24,7 +24,7 @@
     "start:gateway": "node ./dist/gateway.mcp.server.cjs",
     "start:gateway:client": "node ./dist/gateway.dashboard.cjs",
     "node-with-import": "node --import ./start.js /.main.mjs",
-    "inspector": "npx @modelcontextprotocol/inspector  "
+    "inspector": "npx @modelcontextprotocol/inspector "
   },
   "keywords": [],
   "author": "",
