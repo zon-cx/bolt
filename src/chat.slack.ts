@@ -19,7 +19,7 @@ import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
 import messages from "./chat.slack.messages";
 import { Chat } from "./chat";
 import { Tools } from "./chat.handler.thread";
-import { getOrCreateMcpAgent } from "./gateway.mcp.connection.store";
+import {getOrCreateMcpAgent, serverConfig} from "./gateway.mcp.connection.store";
 import {type MCPClientManager } from "./gateway.mcp.connection";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { trace } from  '@opentelemetry/api';
@@ -95,10 +95,11 @@ const assistant = new Assistant({
    * This can happen via DM with the app or as a side-container within a channel.
    * https://api.slack.com/events/assistant_thread_started
    */
-  threadStarted: async ({say, setStatus, setSuggestedPrompts,setTitle, saveThreadContext, client,event, context, logger}) => {
+  threadStarted: async ({say,getThreadContext, setStatus, setSuggestedPrompts,setTitle, saveThreadContext, client,event, context, logger}) => {
     const userId = event.assistant_thread.user_id;
     const id= event.assistant_thread.thread_ts;
-
+      const ctx = await getThreadContext();
+      console.log("thread context",ctx,context);
     let slackClient = slackMcpClients.get(userId);
     if (!slackClient) {
       slackClient = new SlackInteractiveOAuthClient(
@@ -260,7 +261,7 @@ app.command('/mcp-connect', async ({ command, ack, respond }) => {
   }
   try {
     const session = getOrCreateMcpAgent(sessionId);
-   await session.connect(url);
+     await session.connect(url);
     await respond(`Connected to MCP server at ${url}`);
   } catch (err) {
     await respond(`Failed to connect: ${err}`);
@@ -291,20 +292,28 @@ app.command('/mcp-disconnect', async ({ command, ack, respond }) => {
 
 
 // Helper to build the server blocks for the home view
-function buildServerBlocks(session:MCPClientManager,user:string) {
-  const servers = Object.entries(session.mcpConnections).map(([name, {url}]) => ({name, url}));
+function buildServerBlocks(connections: Array<serverConfig &{status:string}>,user:string) {
   return [
     {
       type: "section",
-      text: { type: "mrkdwn", text: "MCP Server: " + `${env.MCP_GATEWAY_URL}/${user}` },
+      text: { type: "mrkdwn", text: "*MCP Gateway:* " + `${env.MCP_GATEWAY_URL}/${user}` },
     },
     {
       type: "section",
-      text: { type: "mrkdwn", text: "MCP Dashboard: " + `${env.MCP_DASHBOARD_URL}/agents/${user}` },
+      text: { type: "mrkdwn", text: "*MCP Dashboard:* " + `${env.MCP_DASHBOARD_URL}/agents/${user}` },
+    },
+    { type: "divider" },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: "*OAuth Status*" },
+    },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: "Connect your MCP servers securely using OAuth 2.0" },
     },
     { type: "divider" },
     ...(
-      servers.length === 0
+        connections.length === 0
         ? [{
             type: "context",
             elements: [{ type: "mrkdwn", text: "No servers connected." }]
@@ -314,7 +323,7 @@ function buildServerBlocks(session:MCPClientManager,user:string) {
               type: "section",
               text: { type: "mrkdwn", text: "*Connected Servers:*" }
             },
-            ...servers.map(({name, url}) => ({
+            ...connections.map(({name, url}) => ({
               type: "section",
               text: { type: "plain_text", text: `${name} (${url})` },
               accessory: {
@@ -330,12 +339,11 @@ function buildServerBlocks(session:MCPClientManager,user:string) {
     { type: "divider" },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: '*Add Server*' },
+      text: { type: 'mrkdwn', text: '*Add New Server*' },
     },
     {
       type: "input",
       block_id: "mcp_server",
-      // dispatch_action: true,
       element: {
         type: "url_text_input",
         action_id: "url",
@@ -347,7 +355,7 @@ function buildServerBlocks(session:MCPClientManager,user:string) {
       },
       label: {
         type: "plain_text",
-        text: "URL"
+        text: "Server URL"
       }
     },
     {
@@ -364,7 +372,7 @@ function buildServerBlocks(session:MCPClientManager,user:string) {
       },
       label: {
         type: "plain_text",
-        text: "Name"
+        text: "Server Name"
       }
     },
     {
@@ -372,32 +380,108 @@ function buildServerBlocks(session:MCPClientManager,user:string) {
       elements: [
         {
           type: "button",
-          text: { type: "plain_text", text: "Connect :spm-connectors:" },
-          action_id: "connect_mcp_server"
+          text: { type: "plain_text", text: "Connect with OAuth :lock:" },
+          action_id: "connect_mcp_server_oauth",
+          style: "primary"
         }
       ]
     }
   ];
 }
   
-// Update connect_mcp_server to use the name
-app.action('connect_mcp_server', async ({ ack, client, logger, body, action }) => {
+// Update the connect_mcp_server_oauth action handler
+app.action('connect_mcp_server_oauth', async ({ ack, client, logger, body, action }) => {
   await ack();
-  const url = body.view.state.values.mcp_server.url.value;
-  const name = body.view.state.values.mcp_server_name.name.value;
-  const session = getOrCreateMcpAgent(body.user.id);
-  await session.connect(url, { id: name });
-  const user = body.user.id;
-  await client.views.update({
-    view_id: body.view.id,
-    hash: body.view.hash,
-    view: {
-      type: "home",
-      blocks: [
-        ...buildServerBlocks(session,user),
-      ]
+  try {
+    // Type guard to ensure we have a view
+    if (!('view' in body) || !body.view) {
+      throw new Error('No view found in action body');
     }
-  });
+
+    const view = body.view;
+    const url = view.state.values.mcp_server.url.value;
+    const name = view.state.values.mcp_server_name.name.value;
+
+    if (!url) {
+      throw new Error('No URL provided');
+    }
+
+    
+    // Create a new SlackInteractiveOAuthClient
+    const slackClient = new SlackInteractiveOAuthClient(
+      "http://localhost:8080/mcp",
+      body.user.id,
+      view.id,
+      async (msg) => {
+        // Handle messages in the home tab
+        await client.chat.postMessage({
+          channel: body.user.id,
+          text: typeof msg === 'string' ? msg : msg.text || 'Processing request...',
+          ...(typeof msg === 'object' ? msg : {})
+        });
+      },
+      async (status) => {
+        console.log("status", status);
+        // // Update status in the home tab
+        // await client.views.update({
+        //   view_id: view.id,
+        //   hash: view.hash,
+        //   view: {
+        //     type: "home",
+        //     blocks: [
+        //       ...buildServerBlocks(session, body.user.id),
+        //       {
+        //         type: "section",
+        //         text: { type: "mrkdwn", text: `*Status:* ${status}` }
+        //       }
+        //     ]
+        //   }
+        // });
+      }
+    );
+    
+      
+
+    // Connect using OAuth
+    await slackClient.connect();
+    const  result= await  slackClient.callTool("connect", {
+            url,
+            id:name
+     }) ;
+    console.log("connect result",result);
+    if (!result || result.isError) {
+      throw new Error(`Failed to connect to MCP server: ${result?.content.map(e=>e.text) || 'Unknown error'}`);
+    }
+    // Store the connection in the session
+    const listConnections = await slackClient.callTool("list-connections", {})
+    console.log("listConnections", listConnections);
+    // Update the home view
+    await client.views.update({
+      view_id: view.id,
+      hash: view.hash,
+      view: {
+        type: "home",
+        blocks: [
+          ...buildServerBlocks(listConnections.structuredContent.connections as any, body.user.id)
+        ]
+      }
+    });
+  } catch (error) {
+    logger.error(error);
+    await client.chat.postMessage({
+      channel: body.user.id,
+      text: `Failed to connect: ${error}`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Connection Error*\n${error}`
+          }
+        }
+      ]
+    });
+  }
 });
 
 app.action('disconnect_mcp_server', async ({ ack, body, logger,action , options, client}) => {
@@ -436,6 +520,7 @@ app.event('app_home_opened', async ({ event, client, logger }) => {
   try {
     
     const session = getOrCreateMcpAgent(event.user);
+    const connections = await session.listConnections();
 
     // Call views.publish with the built-in client
     const result = await client.views.publish({
@@ -443,7 +528,7 @@ app.event('app_home_opened', async ({ event, client, logger }) => {
       view: {
         type: "home",
         blocks: [ 
-          ...buildServerBlocks(session,event.user),
+          ...buildServerBlocks(connections,event.user),
           
         ]
       }
