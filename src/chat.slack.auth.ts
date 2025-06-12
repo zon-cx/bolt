@@ -16,6 +16,7 @@ import {
     CallToolResultSchema,
     ListToolsResultSchema
 } from '@modelcontextprotocol/sdk/types.js';
+import {z} from "zod";
 
 const CALLBACK_URL = `${env.BASE_URL || "https://slack.cfapps.eu12.hana.ondemand.com"}/oauth/callback`; // Match Inspector/test
 
@@ -55,10 +56,10 @@ export const authCallback = (getClient: (userId: string) => SlackInteractiveOAut
             return res.end("Wrong request");
         }
 
-        const auth = getClient(userId);
-        if (!auth) {
-            return res.end(`MCP session not found ${auth ? "missing redirect callback" : "missing oauth provider"}`);
-        }
+        // const auth = getClient(userId);
+        // if (!auth) {
+        //     return res.end(`MCP session not found ${auth ? "missing redirect callback" : "missing oauth provider"}`);
+        // }
       
         console.log("Handling auth callback for user " + userId + " and serverUrl " + serverUrl);
         authState.getMap(sessionId).set("code", authCode);
@@ -210,10 +211,10 @@ export class SlackInteractiveOAuthClient {
         }
     }
 
-    async callTool(toolName: string, toolArgs: Record<string, unknown>): Promise<void> {
+    async callTool(toolName: string, toolArgs: Record<string, unknown>): Promise<z.infer<typeof CallToolResultSchema>> {
         if (!this.client) {
             await this.say(':x: Not connected to server');
-            return;
+            return Promise.reject(new Error('Not connected to server'));
         }
         try {
             const request: CallToolRequest = {
@@ -235,8 +236,10 @@ export class SlackInteractiveOAuthClient {
             } else {
                 await this.say(JSON.stringify(result));
             }
+            return result;
         } catch (error) {
             await this.say(`:x: Failed to call tool '${toolName}': ${error}`);
+           throw error;
         }
     }
 }

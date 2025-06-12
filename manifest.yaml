@@ -16,7 +16,7 @@ applications:
       LOG_REMOTE_USER: true
       LOG_REFERER: true
       PORT: 8080
-      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
       MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com'
       BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com'
@@ -36,7 +36,7 @@ applications:
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
       LOG_REFERER: true
-      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com'
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
       BASE_URL: 'https://assistant.cfapps.eu12.hana.ondemand.com'
@@ -57,7 +57,7 @@ applications:
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
       LOG_REFERER: true
-      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       BASE_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
@@ -77,7 +77,7 @@ applications:
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
       LOG_REFERER: true
-      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       BASE_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
@@ -97,7 +97,7 @@ applications:
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
       LOG_REFERER: true
-      YJS_URL: 'https://hp.cfapps.us10-001.hana.ondemand.com'
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       BASE_URL: 'https://whoami.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack

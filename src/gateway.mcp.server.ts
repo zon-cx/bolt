@@ -14,6 +14,9 @@ import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middlew
 import { ProxyOAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { InMemoryEventStore } from '@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js';
+
+import {z} from "zod";
 const app = express();
 app.use(express.json());
 
@@ -87,9 +90,7 @@ export const requireAuth = requireBearerAuth({
 });
 
 
-// Create the MCP agent (aggregates multiple MCP clients)
-const agent = getOrCreateMcpAgent("default");
-app.use(async (req, res, next) => {
+ app.use(async (req, res, next) => {
     console.log(`[LOG] ${req.method} ${req.url}`);
     console.log('Headers:', req.headers);
     if (req.body && Object.keys(req.body).length > 0) {
@@ -110,7 +111,7 @@ function getId(extra: RequestHandlerExtra<any,any>): string {
 }
 
 // Helper to create a new MCP server and transport for a session
-async function createSessionTransport(agent: MCPClientManager) {
+async function createSessionTransport() {
   const mcpServer = new Server(
     {
       name: "mcp-gateway-server",
@@ -175,6 +176,8 @@ async function createSessionTransport(agent: MCPClientManager) {
   // }));
 
   const transport = new StreamableHTTPServerTransport({
+    eventStore: new InMemoryEventStore(),
+
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (sessionId) => {
       transports.streamable[sessionId] = transport;
@@ -211,7 +214,7 @@ app.all("/mcp", requireAuth, async (req, res) => {
   await transport.handleRequest(req, res, req.body);
   // No need to use toFetchResponse here since handleRequest works with Node req/res
 });
-
+ 
 
 const port = parseInt(env.MCP_SERVER_PORT || "8080", 10);
 

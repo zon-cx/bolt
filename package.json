@@ -11,6 +11,7 @@
     "web": "tsx --env-file=.env src/chat.web.tsx",
     "simple": "tsx --env-file=.env src/simple.ts",
     "dashboard": "tsx --env-file=.env src/dashboard.server.ts",
+    "manager": "tsx --env-file=.env src/gateway.mcp.manager.ts",
     "gateway": "tsx --env-file=.env src/gateway.mcp.server.ts",
     "gateway:client": "tsx --env-file=.env src/gateway.dashboard.tsx",
     "build:mta": "mbt build -p=cf",

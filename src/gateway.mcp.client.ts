@@ -25,7 +25,7 @@ import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { jsonSchema, tool, ToolExecutionOptions } from "ai";
 
 export class MCPClientConnection {
-  client: Client;
+  public client: Client;
   public connectionState: Atom<
     | "authenticating"
     | "connecting"
