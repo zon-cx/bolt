@@ -19,7 +19,7 @@ app.use(express.json());
 
 async function createServerManager() {
     const mcpServer = new McpServer({
-        name: "mcp-gateway-server",
+        name: "mcp-manager",
         version: "1.0.0",
     }, {
         capabilities: {
@@ -304,7 +304,7 @@ app.listen(port  , () => {
 });
 
 function getId(extra: RequestHandlerExtra<any,any>): string {
-    const id = extra?.authInfo?.extra?.subject as string || extra?.sessionId || "default";
+    const id = extra?.authInfo?.extra?.subject as string || extra?.authInfo?.clientId || "default";
     console.log("agent id", id, extra?.authInfo?.extra);
     return id;
 }

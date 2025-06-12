@@ -16,14 +16,19 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { SSEClientTransportOptions } from "@modelcontextprotocol/sdk/client/sse.js";
-import { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import { OAuthClientProvider, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { StreamableHTTPServerTransport ,StreamableHTTPServerTransportOptions} from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import  {SSEClientTransport} from "@modelcontextprotocol/sdk/client/sse.js";
 import { env } from "node:process";
 import { createAtom, Atom } from "@xstate/store";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { jsonSchema, tool, ToolExecutionOptions } from "ai";
-
+import * as Y from "yjs";
+import {connectYjs} from "@/store.yjs.ts";
+import {randomUUID} from "node:crypto";
+const authState = connectYjs("@mcp.slack");
+type  TransportFactory = () => StreamableHTTPClientTransport | SSEClientTransport;
 export class MCPClientConnection {
   public client: Client;
   public connectionState: Atom<
@@ -39,18 +44,26 @@ export class MCPClientConnection {
   public resources: Atom<Resource[]>;
   public resourceTemplates: Atom<ResourceTemplate[]>;
   public serverCapabilities: Atom<ServerCapabilities | undefined>;
-  public transport: Transport;
+  public  error: Atom<Error | undefined> = createAtom<Error | undefined>(undefined);
+  public transportFactory: TransportFactory;
+  public transport: ReturnType<TransportFactory>;
+  
   public name: string;
+  private id: string | undefined;
   constructor(
     public url: URL,
     public options: {
+      id?: string;
       info: ConstructorParameters<typeof Client>[0];
-      client?: ConstructorParameters<typeof Client>[1];
-      transport?: Transport;
+      client?: ConstructorParameters<typeof Client>[1] ;
+      transport?:TransportFactory
     },
   ) {
-    const { info, client, transport } = this.options || {};
-    this.transport = transport ?? new StreamableHTTPClientTransport(url);
+    const { info, client, transport, id } = this.options || {};
+    this.transportFactory = transport ?? (()=> new StreamableHTTPClientTransport(url, {
+      sessionId: id,
+    }));
+    this.transport = this.transportFactory();
     this.name = info?.name;
     this.connectionState = createAtom<
       | "authenticating"
@@ -66,50 +79,98 @@ export class MCPClientConnection {
     this.resourceTemplates = createAtom<ResourceTemplate[]>([]);
     this.serverCapabilities = createAtom<ServerCapabilities | undefined>(undefined);
     this.client = new Client(info, client);
-
-  }
+    this.id = options?.id ??
+        randomUUID({
+      disableEntropyCache: true, // Disable entropy cache for better performance in tests
+    })
+     
+      // authState.getMap<string>(this.id).observe(this.authCallback.bind(this)); 
+    }
+    
+    // async authCallback (event: Y.YMapEvent<string>) {
+    //   const { info, client, transport } = this.options || {};
+    //
+    //   console.log(`🔐 Ymap event received:`, Array.from(event.keysChanged.keys()));
+    //   if (event.keysChanged.has('code')) {
+    //     const code = authState.getMap<string>(this.id).get('code');
+    //     if (code) {
+    //       console.log(`🔐 Authorization code received: ${code.substring(0, 10)}...`);
+    //       // authState.getMap<string>(this.id).unobserve(callback);
+    //       this.transport.finishAuth(code);
+    //       // await this.init(new Client(info, client));
+    //     } else {
+    //       console.error('❌ No authorization code found in session state');
+    //     }
+    //   }
+    // }
+    
+    async  waitForAuth(transport: ReturnType<TransportFactory>, authState:Y.Map<string>): Promise<void> { 
+      return new Promise<void>((resolve, reject) => {
+            const callback = async (event: Y.YMapEvent<string>) => {
+              console.log(`🔐 Ymap event received:`, Array.from(event.keysChanged.keys()));
+              if (event.keysChanged.has('code')) {
+                const code = authState.get('code');
+                if (code) {
+                  console.log(`🔐 Authorization code received: ${code.substring(0, 10)}...`);
+                  authState.unobserve(callback);
+                  await transport.finishAuth(code);
+                  resolve();
+                }
+              }
+            };
+            authState.observe(callback);
+        });
+    }
 
   /**
    * Initialize a client connection
    */
-  async init() {
-    try {
-   
-      await this.client.connect(this.transport);
-      // biome-ignore lint/suspicious/noExplicitAny: allow for the error check here
-    } catch (e: any) {
-      if (e.toString().includes("Unauthorized")) {
-        // unauthorized, we should wait for the user to authenticate
-        this.connectionState.set("authenticating");
-        return;
+  async init( ) {
+     let client = this.client;
+     const transport = this.transport;
+
+    if (this.connectionState.get() !== "discovering" && this.connectionState.get() !== "ready") {
+      try {
+        await this.client.connect(transport);
+       } catch (error: any) {
+        this.transport = this.transportFactory(); 
+        if (error instanceof UnauthorizedError) {
+           this.connectionState.set("authenticating");
+            await this.waitForAuth(this.transport, authState.getMap<string>(this.id)); 
+            return await this.init();
+           } else {
+           console.error(`❌ Error connecting to MCP server at ${this.url}:`, error); 
+          this.connectionState.set("failed");
+            this.error.set(error);
+        }
       }
-      this.connectionState.set("failed");
-      throw e;
+      
+      console.log(`🔐 ping  ${JSON.stringify(await this.client.ping())} `);
+
+      this.connectionState.set("discovering");
+
+      const serverCapabilities = await this.client.getServerCapabilities();
+      if (!serverCapabilities) {
+        throw new Error("The MCP Server failed to return server capabilities");
+      }
+      this.serverCapabilities.set(serverCapabilities);
+
+      const [instructions, tools, resources, prompts, resourceTemplates] = await Promise.all([
+        client.getInstructions(),
+        this.registerTools(),
+        this.registerResources(),
+        this.registerPrompts(),
+        this.registerResourceTemplates(),
+      ]);
+
+      this.instructions.set(instructions);
+      this.tools.set(tools);
+      this.resources.set(resources);
+      this.prompts.set(prompts);
+      this.resourceTemplates.set(resourceTemplates);
+
+      this.connectionState.set("ready");
     }
-
-    this.connectionState.set("discovering");
-
-    const serverCapabilities = await this.client.getServerCapabilities();
-    if (!serverCapabilities) {
-      throw new Error("The MCP Server failed to return server capabilities");
-    }
-    this.serverCapabilities.set(serverCapabilities);
-
-    const [instructions, tools, resources, prompts, resourceTemplates] = await Promise.all([
-      this.client.getInstructions(),
-      this.registerTools(),
-      this.registerResources(),
-      this.registerPrompts(),
-      this.registerResourceTemplates(),
-    ]);
-
-    this.instructions.set(instructions);
-    this.tools.set(tools);
-    this.resources.set(resources);
-    this.prompts.set(prompts);
-    this.resourceTemplates.set(resourceTemplates);
-
-    this.connectionState.set("ready");
   }
 
   /**

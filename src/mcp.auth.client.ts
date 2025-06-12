@@ -396,7 +396,7 @@ class InteractiveOAuthClient {
  * Main entry point
  */
 async function main(): Promise<void> {
-  const serverUrl = process.env.MCP_SERVER_URL || 'http://localhost:8080/mcp';
+  const serverUrl = process.env.MCP_GATEWAY_URL || 'http://localhost:8080/mcp';
 
   console.log('🚀 Simple MCP OAuth Client');
   console.log(`Connecting to: ${serverUrl}`);

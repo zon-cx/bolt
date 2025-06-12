@@ -1,14 +1,14 @@
-import { InMemoryOAuthClientProvider } from "./mcp.auth.client";
-import type { OAuthClientMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { env } from "node:process";
-import {  ServerResponse } from "node:http";
-import { ParamsIncomingMessage } from "@slack/bolt/dist/receivers/ParamsIncomingMessage";
+import {InMemoryOAuthClientProvider} from "./mcp.auth.client";
+import type {OAuthClientMetadata} from "@modelcontextprotocol/sdk/shared/auth.js";
+import {env} from "node:process";
+import {ServerResponse} from "node:http";
+import {ParamsIncomingMessage} from "@slack/bolt/dist/receivers/ParamsIncomingMessage";
 import {URL, URLSearchParams} from "node:url";
 import {connectYjs} from "@/store.yjs.ts";
 import * as Y from "yjs";
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { OAuthClientProvider, UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {OAuthClientProvider, UnauthorizedError} from '@modelcontextprotocol/sdk/client/auth.js';
 
 import {
     CallToolRequest,
@@ -17,6 +17,7 @@ import {
     ListToolsResultSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import {z} from "zod";
+import {MCPClientConnection} from "@/gateway.mcp.client.ts";
 
 const CALLBACK_URL = `${env.BASE_URL || "https://slack.cfapps.eu12.hana.ondemand.com"}/oauth/callback`; // Match Inspector/test
 
@@ -24,9 +25,9 @@ const CALLBACK_URL = `${env.BASE_URL || "https://slack.cfapps.eu12.hana.ondemand
 const authState = connectYjs("@mcp.slack");
 
 
-export const authCallback = (getClient: (userId: string) => SlackInteractiveOAuthClient | undefined) => async (req: ParamsIncomingMessage, res: ServerResponse) => {
+export const authCallback =async (req: ParamsIncomingMessage, res: ServerResponse) => {
     try {
-        console.log("authCallback",);
+        console.log("authCallback");
         const url = new URLSearchParams(req.url!.split("?")[1]);
         const authCode = url.get("code");
         const encodedState = url.get("state");
@@ -60,7 +61,7 @@ export const authCallback = (getClient: (userId: string) => SlackInteractiveOAut
         // if (!auth) {
         //     return res.end(`MCP session not found ${auth ? "missing redirect callback" : "missing oauth provider"}`);
         // }
-      
+
         console.log("Handling auth callback for user " + userId + " and serverUrl " + serverUrl);
         authState.getMap(sessionId).set("code", authCode);
         res.end("Callback successful!");
@@ -70,11 +71,11 @@ export const authCallback = (getClient: (userId: string) => SlackInteractiveOAut
     }
 };
 
- 
+
 export class SlackInteractiveOAuthClient {
     public client: Client | null = null;
     private oauthProvider: InMemoryOAuthClientProvider | null = null;
-
+    public connection: MCPClientConnection;
     constructor(
         private serverUrl: string,
         private userId: string,
@@ -82,8 +83,62 @@ export class SlackInteractiveOAuthClient {
         private say: (msg: any) => Promise<any>,
         private setStatus?: (status: string) => void,
         private setSuggestedPrompts?: (prompts: any) => void,
-        private setTitle?: (title: string) => void
-    ) {}
+        private setTitle?: (title: string) => void,
+        private authorizationMessage?: (msg: any) => Promise<any>
+    ) {    
+        const oauthProvider=this.getOAuthProvider();
+       const baseUrl = new URL(this.serverUrl);
+        this.connection = new MCPClientConnection(baseUrl, {
+            id: this.sessionID,
+            info: {
+                 name: `slack-oauth-client-${this.userId}`,
+                version: '1.0.0',
+            },
+            client: {
+                
+                capabilities: {},
+            },
+            transport:()=> new StreamableHTTPClientTransport(baseUrl, {
+                authProvider: oauthProvider,
+            })
+        });
+
+        this.connection.connectionState.subscribe(async (state) => {
+            console.log(`Connection state changed to: ${state}`);
+            if (state === 'ready') {
+                this.client = this.connection.client;
+                this.setStatus?.('Connected to MCP server');
+                this.setTitle?.(`MCP Client - ${this.serverUrl}`);
+                this.setSuggestedPrompts?.([]);
+            } else if (state === 'authenticating') {
+                this.setStatus?.('Authenticating with MCP server...');
+                // const code = await new Promise<string>((resolve, reject) => {
+                //         const callback = (event: Y.YMapEvent<string>) => {
+                //             console.log(`🔐 Ymap event received:`, Array.from(event.keysChanged.keys()));
+                //             if (event.keysChanged.has('code')) {
+                //                 const code = authState.getMap<string>(this.sessionID).get('code');
+                //                 if (code) {
+                //                     console.log(`🔐 Authorization code received: ${code.substring(0, 10)}...`);
+                //                     authState.getMap<string>(this.id).unobserve(callback);
+                //                     resolve(code);
+                //                 } else {
+                //                     console.error('❌ No authorization code found in session state');
+                //                     reject(new Error('No authorization code found'));
+                //                 }
+                //             }
+                //         };
+                //         authState.getMap<string>(this.sessionID).observe(callback);
+                //     }
+                // );
+                // await this.connection.transport.finishAuth(code);
+                // await this.connection.init()
+            } else if (state === 'failed') {
+                this.setStatus?.('Failed to connect to MCP server');
+            }
+        })
+        
+
+    }
 
     private getOAuthProvider(): InMemoryOAuthClientProvider {
         const clientMetadata: OAuthClientMetadata = {
@@ -96,32 +151,41 @@ export class SlackInteractiveOAuthClient {
             //   client_uri: 'https://github.com/modelcontextprotocol/inspector',
         };
         // Slack-specific redirect handler: send a Slack message with an authorize button
-        const onRedirect = (authorizationUrl: URL) => {
-            const state = Buffer.from(JSON.stringify({userId: this.userId, serverUrl: this.serverUrl, sessionId:this.sessionID})).toString('base64');
+        const onRedirect =async (authorizationUrl: URL) => {
+            const state = Buffer.from(JSON.stringify({
+                userId: this.userId,
+                serverUrl: this.serverUrl,
+                sessionId: this.sessionID
+            })).toString('base64');
             authorizationUrl.searchParams.set('state', state);
             console.log("Redirecting to " + authorizationUrl.toString());
 
-            this.say({
-                blocks: [
+            await this.authorizationMessage?.( [
+                    {type: "section", text: {type: "mrkdwn", text: "Welcome to MCP Chat :wave:"}},
+                    {type: "divider"},
                     {
-                        type: 'section',
-                        text: { type: 'mrkdwn', text: `*MCP Server* requires authorization ⚠️` },
+                        type: "section",
+                        text: {
+                            type: "mrkdwn",
+                            text: "To get started, connect to an MCP server using the button below.",
+                        },
                     },
-                    {
-                        type: 'actions',
-                        elements: [
-                            {
-                                type: 'button',
-                                text: { type: 'plain_text', text: 'Authorize' },
-                                url: authorizationUrl.toString(),
-                                action_id: 'redirect',
-                                value:  'authorize',
+                    {type: "divider"}, {
+                        type: "actions",
+                        elements: [{
+                            type: "button",
+                            text: {
+                                type: "plain_text",
+                                text: "Login with OAuth :lock:",
+                                emoji: true,
                             },
-                        ],
-                    },
+                            url: authorizationUrl.toString(),
+                            action_id: 'redirect',
+                            style: "primary",
+                        }],
+                    }
                 ],
-                text: 'MCP Server requires authorization ⚠️',
-            });
+            );
             if (this.setStatus) this.setStatus('Please authorize access to the MCP server.');
         };
         return new InMemoryOAuthClientProvider(CALLBACK_URL, clientMetadata, onRedirect);
@@ -130,16 +194,17 @@ export class SlackInteractiveOAuthClient {
     private async attemptConnection(): Promise<void> {
         if (!this.oauthProvider) throw new Error('OAuth provider not initialized');
         const baseUrl = new URL(this.serverUrl);
+        
         const transport = new StreamableHTTPClientTransport(baseUrl, {
             authProvider: this.oauthProvider,
         });
         try {
             await this.client!.connect(transport);
             console.log('✅ Connected successfully to MCP server:', this.serverUrl);
+            if (this.setStatus) this.setStatus('connected');
             await this.say(':white_check_mark: Connected to MCP server!');
         } catch (error) {
             if (error instanceof UnauthorizedError) {
-                await this.say(':lock: Authorization required. Please click the button above to authorize.');
                 // Wait for the callback to resolve the code 
                 const code = await new Promise<string>((resolve, reject) => {
                         const callback = (event: Y.YMapEvent<string>) => {
@@ -163,7 +228,7 @@ export class SlackInteractiveOAuthClient {
                 console.log('🔐 Authorization complete, reconnecting...');
                 await this.attemptConnection();
             } else {
-                console.error('❌ Connection failed with non-auth error:', error,"serverUrl", this.serverUrl);
+                console.error('❌ Connection failed with non-auth error:', error, "serverUrl", this.serverUrl);
                 await this.say(`:x: Connection failed: ${error}`);
                 throw error;
             }
@@ -171,15 +236,16 @@ export class SlackInteractiveOAuthClient {
     }
 
     async connect(): Promise<Client> {
-        this.oauthProvider = this.getOAuthProvider();
-        this.client = new Client({
-            name: `slack-oauth-client-${this.userId}`,
-            version: '1.0.0',
-        }, { capabilities: {} });
-        await this.say(':arrows_counterclockwise: Connecting to MCP server...');
-        await this.attemptConnection();
-        return this.client;
+            this.oauthProvider = this.getOAuthProvider();
+            this.client = new Client({
+                name: `slack-oauth-client-${this.userId}`,
+                version: '1.0.0',
+            }, {capabilities: {}});
+            await this.say(':arrows_counterclockwise: Connecting to MCP server...');
+            await this.attemptConnection();
+            return this.client;
     }
+    
 
     async listTools(): Promise<void> {
         if (!this.client) {
@@ -195,10 +261,13 @@ export class SlackInteractiveOAuthClient {
             if (result.tools && result.tools.length > 0) {
                 await this.say({
                     blocks: [
-                        { type: 'section', text: { type: 'mrkdwn', text: '*Available tools:*' } },
+                        {type: 'section', text: {type: 'mrkdwn', text: '*Available tools:*'}},
                         ...result.tools.map((tool) => ({
                             type: 'section',
-                            text: { type: 'plain_text', text: `${tool.name}${tool.description ? ' - ' + tool.description : ''}` },
+                            text: {
+                                type: 'plain_text',
+                                text: `${tool.name}${tool.description ? ' - ' + tool.description : ''}`
+                            },
                         })),
                     ],
                     text: 'Available tools',
@@ -239,7 +308,7 @@ export class SlackInteractiveOAuthClient {
             return result;
         } catch (error) {
             await this.say(`:x: Failed to call tool '${toolName}': ${error}`);
-           throw error;
+            throw error;
         }
     }
 }
