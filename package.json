@@ -102,6 +102,11 @@
       "require": "./dist/mcp.server.whoami.cjs",
       "import": "./dist/mcp.server.whoami.mjs",
       "bin": "./dist/mcp.server.whoami.js"
+    },
+    "./manager": {
+      "require": "./dist/gateway.mcp.manager.cjs",
+      "import": "./dist/gateway.mcp.manager.mjs",
+      "bin": "./dist/gateway.mcp.manager.js"
     }
   }
 }

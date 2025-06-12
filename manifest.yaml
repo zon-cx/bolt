@@ -15,10 +15,32 @@ applications:
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
       LOG_REFERER: true
-      PORT: 8080
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
-      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com'
+      MCP_INSPECTOR_URL: 'https://inspector.cfapps.eu12.hana.ondemand.com'
+      MCP_MANAGER_URL: 'https://manager.cfapps.eu12.hana.ondemand.com/mcp'  
+      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com/mcp'
+      BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com'
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack
+  - name: manager
+    command: node ./dist/gateway.mcp.manager.cjs
+    health-check-type: process
+    routes:
+      - route: 'https://manager.cfapps.eu12.hana.ondemand.com'
+    stack: cflinuxfs4
+    memory: 512M
+    instances: 1
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      LOG_SENSITIVE_CONNECTION_DATA: true
+      LOG_REMOTE_USER: true
+      LOG_REFERER: true
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
+      MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
+      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com/mcp'
       BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
@@ -37,7 +59,7 @@ applications:
       LOG_REMOTE_USER: true
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com'
+      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com/mcp'
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
       BASE_URL: 'https://assistant.cfapps.eu12.hana.ondemand.com'
     buildpacks:
