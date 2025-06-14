@@ -1,90 +1,170 @@
 #!/usr/bin/env node
 
-import { createServer } from 'node:http';
-import { createInterface } from 'node:readline';
-import { URL } from 'node:url';
-import { exec } from 'node:child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { OAuthClientInformation, OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
+import { createServer } from "node:http";
+import { createInterface } from "node:readline";
+import { URL } from "node:url";
+import { exec } from "node:child_process";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  OAuthClientInformation,
+  OAuthClientInformationFull,
+  OAuthClientMetadata,
+  OAuthTokens,
+} from "@modelcontextprotocol/sdk/shared/auth.js";
 import {
   CallToolRequest,
   ListToolsRequest,
   CallToolResultSchema,
-  ListToolsResultSchema
-} from '@modelcontextprotocol/sdk/types.js';
-import { OAuthClientProvider, UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
-import {connectYjs} from "@/store.yjs.ts";
-import * as Y from 'yjs';
+  ListToolsResultSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import {
+  OAuthClientProvider,
+  UnauthorizedError,
+} from "@modelcontextprotocol/sdk/client/auth.js";
+import { connectYjs } from "@/store.yjs.ts";
+import * as Y from "yjs";
+import { randomFill, randomFillSync, randomUUID } from "node:crypto";
+import { createAtom } from "@xstate/store";
+import { jwtDecode } from "jwt-decode";
 // Configuration
 const CALLBACK_PORT = 8090; // Use different port than auth server (3001)
 const CALLBACK_URL = `http://localhost:${CALLBACK_PORT}/oauth/callback`;
+
+const authState = connectYjs("@mcp.auth");
+
+async function logRedirect(url: URL) {
+  console.log(`mock redirect to: ${url.toString()}`);
+}
+
+function getCode(length = 4) {
+  let max = Number("1".padEnd(length + 1, "0"));
+  return `${Math.floor(Math.random() * max)}`.padStart(length, "0");
+}
 
 /**
  * In-memory OAuth client provider for demonstration purposes
  * In production, you should persist tokens securely
  */
-export  class InMemoryOAuthClientProvider implements OAuthClientProvider {
-  private _clientInformation?: OAuthClientInformationFull;
-  private _tokens?: OAuthTokens;
-  private _codeVerifier?: string;
+export class InMemoryOAuthClientProvider implements OAuthClientProvider {
+  public authorizationUrl = createAtom<URL | undefined>(undefined);
 
   constructor(
-    private readonly _redirectUrl: string | URL,
-    private readonly _clientMetadata: OAuthClientMetadata,
-    onRedirect?: (url: URL) => void
+    redirectUrl: string | URL,
+    clientMetadata: OAuthClientMetadata,
+    public id: string = getCode(6),
+    private readonly onRedirect: (url: URL) => any | Promise<any> = (
+      url: URL
+    ) => {
+      console.log("on redirect to: ", url);
+      this.authorizationUrl.set(url);
+    }
   ) {
-    this._onRedirect = onRedirect || ((url) => {
-      console.log(`Redirect to: ${url.toString()}`);
-    });
+    authState.getMap(this.id).set("redirectUrl", redirectUrl);
+    authState.getMap(this.id).set("clientMetadata", clientMetadata);
+    authState.getMap(this.id).set("id", id);
   }
 
-  private _onRedirect: (url: URL) => void;
+  static fromState(
+    id: string,
+    onRedirect: (url: URL) => void | Promise<void> = logRedirect
+  ): InMemoryOAuthClientProvider {
+    return new InMemoryOAuthClientProvider(
+      authState.getMap<string>(id).get("redirectUrl")!,
+      authState.getMap<OAuthClientMetadata>(id).get("clientMetadata")!,
+      id,
+      onRedirect
+    );
+  }
+
+  public finishAuth(authCode: string) {
+    authState.getMap<string>(this.id).set("code", authCode);
+  }
+
+  public async save<T>(key: string, value: T) {
+    authState.getMap<T>(this.id).set(key, value);
+  }
+  public async get<T>(key: string) {
+    return authState.getMap<T>(this.id).get(key);
+  }
 
   get redirectUrl(): string | URL {
-    return this._redirectUrl;
+    return authState.getMap<string | URL>(this.id).get("redirectUrl")!;
   }
 
   get clientMetadata(): OAuthClientMetadata {
-    return this._clientMetadata;
+    console.log(
+      "clientMetadata",
+      authState.getMap<OAuthClientMetadata>(this.id).get("clientMetadata")!
+    );
+    return authState
+      .getMap<OAuthClientMetadata>(this.id)
+      .get("clientMetadata")!;
   }
 
   clientInformation(): OAuthClientInformation | undefined {
-    return this._clientInformation;
+    return authState
+      .getMap<OAuthClientInformationFull>(this.id)
+      .get("clientInformation");
   }
 
   saveClientInformation(clientInformation: OAuthClientInformationFull): void {
-    this._clientInformation = clientInformation;
+    authState.getMap(this.id).set("clientInformation", clientInformation);
   }
 
   tokens(): OAuthTokens | undefined {
-    return this._tokens;
+    return authState.getMap<OAuthTokens>(this.id).get("tokens");
   }
 
   saveTokens(tokens: OAuthTokens): void {
-    this._tokens = tokens;
+    authState.getMap<OAuthTokens>(this.id).set("tokens", tokens);
   }
 
-  public resolveRedirect: ((code:string) => void) | null = null;
+  state(): string | Promise<string> {
+    return this.id;
+  }
+
+  public async info(): Promise<
+    { id: string; name: string; email: string } | undefined
+  > {
+    const tokens = this.tokens();
+   
+    if (tokens?.access_token ) {
+      const iss =  jwtDecode(tokens?.access_token).iss;
+      const userInfoUrl = new URL(`${iss}/userinfo`);
+      console.log("userInfoUrl", userInfoUrl.toString());
+      const userInfo = await fetch(
+        userInfoUrl.toString(),
+        {
+          headers: {
+            Authorization: `Bearer ${tokens?.access_token}`,
+          },
+        }
+      );
+      const userInfoJson = await userInfo.json();
+      console.log("userInfo", userInfoJson);
+      return {
+        id: userInfoJson.sub,
+        name: userInfoJson.name || userInfoJson.nickname || userInfoJson.given_name,
+        email: userInfoJson.email,
+      };
+    }
+  }
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
-    this._onRedirect(authorizationUrl);
-  
-    
+    await this.onRedirect(authorizationUrl);
   }
 
   saveCodeVerifier(codeVerifier: string): void {
-    this._codeVerifier = codeVerifier;
+    authState.getMap<string>(this.id).set("codeVerifier", codeVerifier);
   }
 
   codeVerifier(): string {
-    if (!this._codeVerifier) {
-      throw new Error('No code verifier saved');
-    }
-    return this._codeVerifier;
+    if (!authState.getMap<string>(this.id).get("codeVerifier"))
+      throw new Error("No code verifier saved");
+    return authState.getMap<string>(this.id).get("codeVerifier")!;
   }
 }
-
 
 /**
  * Interactive MCP client with OAuth authentication
@@ -97,7 +177,7 @@ class InteractiveOAuthClient {
     output: process.stdout,
   });
 
-  constructor(private serverUrl: string) { }
+  constructor(private serverUrl: string) {}
 
   /**
    * Prompts user for input via readline
@@ -134,20 +214,22 @@ class InteractiveOAuthClient {
     return new Promise<string>((resolve, reject) => {
       const server = createServer((req, res) => {
         // Ignore favicon requests
-        if (req.url === '/favicon.ico') {
+        if (req.url === "/favicon.ico") {
           res.writeHead(404);
           res.end();
           return;
         }
 
         console.log(`📥 Received callback: ${req.url}`);
-        const parsedUrl = new URL(req.url || '', 'http://localhost');
-        const code = parsedUrl.searchParams.get('code');
-        const error = parsedUrl.searchParams.get('error');
+        const parsedUrl = new URL(req.url || "", "http://localhost");
+        const code = parsedUrl.searchParams.get("code");
+        const error = parsedUrl.searchParams.get("error");
 
         if (code) {
-          console.log(`✅ Authorization code received: ${code?.substring(0, 10)}...`);
-          res.writeHead(200, { 'Content-Type': 'text/html' });
+          console.log(
+            `✅ Authorization code received: ${code?.substring(0, 10)}...`
+          );
+          res.writeHead(200, { "Content-Type": "text/html" });
           res.end(`
             <html>
               <body>
@@ -162,7 +244,7 @@ class InteractiveOAuthClient {
           setTimeout(() => server.close(), 3000);
         } else if (error) {
           console.log(`❌ Authorization error: ${error}`);
-          res.writeHead(400, { 'Content-Type': 'text/html' });
+          res.writeHead(400, { "Content-Type": "text/html" });
           res.end(`
             <html>
               <body>
@@ -175,40 +257,51 @@ class InteractiveOAuthClient {
         } else {
           console.log(`❌ No authorization code or error in callback`);
           res.writeHead(400);
-          res.end('Bad request');
-          reject(new Error('No authorization code provided'));
+          res.end("Bad request");
+          reject(new Error("No authorization code provided"));
         }
       });
 
       server.listen(CALLBACK_PORT, () => {
-        console.log(`OAuth callback server started on http://localhost:${CALLBACK_PORT}`);
+        console.log(
+          `OAuth callback server started on http://localhost:${CALLBACK_PORT}`
+        );
       });
     });
   }
 
-  private async attemptConnection(oauthProvider: InMemoryOAuthClientProvider): Promise<void> {
-    console.log('🚢 Creating transport with OAuth provider...');
+  private async attemptConnection(
+    oauthProvider: InMemoryOAuthClientProvider
+  ): Promise<void> {
+    console.log("🚢 Creating transport with OAuth provider...");
     const baseUrl = new URL(this.serverUrl);
     const transport = new StreamableHTTPClientTransport(baseUrl, {
-      authProvider: oauthProvider
+      authProvider: oauthProvider,
     });
-    console.log('🚢 Transport created',baseUrl.href);
+    console.log("🚢 Transport created", baseUrl.href);
 
     try {
-      console.log('🔌 Attempting connection (this will trigger OAuth redirect)...');
+      console.log(
+        "🔌 Attempting connection (this will trigger OAuth redirect)..."
+      );
       await this.client!.connect(transport);
-      console.log('✅ Connected successfully');
+      console.log("✅ Connected successfully");
     } catch (error) {
       if (error instanceof UnauthorizedError) {
-        console.log('🔐 OAuth required - waiting for authorization...');
+        console.log("🔐 OAuth required - waiting for authorization...");
         const callbackPromise = this.waitForOAuthCallback();
         const authCode = await callbackPromise;
         await transport.finishAuth(authCode);
-        console.log('🔐 Authorization code received:', authCode);
-        console.log('🔌 Reconnecting with authenticated transport...');
+        console.log("🔐 Authorization code received:", authCode);
+        console.log("🔌 Reconnecting with authenticated transport...");
         await this.attemptConnection(oauthProvider);
       } else {
-        console.error('❌ Connection failed with non-auth error:', error,"serverUrl", this.serverUrl);
+        console.error(
+          "❌ Connection failed with non-auth error:",
+          error,
+          "serverUrl",
+          this.serverUrl
+        );
         throw error;
       }
     }
@@ -221,15 +314,15 @@ class InteractiveOAuthClient {
     console.log(`🔗 Attempting to connect to ${this.serverUrl}...`);
 
     const clientMetadata: OAuthClientMetadata = {
-      client_name: 'Simple OAuth MCP Client',
+      client_name: "Simple OAuth MCP Client",
       redirect_uris: [CALLBACK_URL],
-      grant_types: ['authorization_code', 'refresh_token'],
-      response_types: ['code'],
-      token_endpoint_auth_method: 'client_secret_post',
-      scope: 'mcp:tools'
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "client_secret_post",
+      scope: "mcp:tools",
     };
 
-    console.log('🔐 Creating OAuth provider...');
+    console.log("🔐 Creating OAuth provider...");
     const oauthProvider = new InMemoryOAuthClientProvider(
       CALLBACK_URL,
       clientMetadata,
@@ -239,16 +332,19 @@ class InteractiveOAuthClient {
         this.openBrowser(redirectUrl.toString());
       }
     );
-    console.log('🔐 OAuth provider created');
+    console.log("🔐 OAuth provider created");
 
-    console.log('👤 Creating MCP client...');
-    this.client = new Client({
-      name: 'simple-oauth-client',
-      version: '1.0.0',
-    }, { capabilities: {} });
-    console.log('👤 Client created');
+    console.log("👤 Creating MCP client...");
+    this.client = new Client(
+      {
+        name: "simple-oauth-client",
+        version: "1.0.0",
+      },
+      { capabilities: {} }
+    );
+    console.log("👤 Client created");
 
-    console.log('🔐 Starting OAuth flow...');
+    console.log("🔐 Starting OAuth flow...");
 
     await this.attemptConnection(oauthProvider);
 
@@ -260,56 +356,58 @@ class InteractiveOAuthClient {
    * Main interactive loop for user commands
    */
   async interactiveLoop(): Promise<void> {
-    console.log('\n🎯 Interactive MCP Client with OAuth');
-    console.log('Commands:');
-    console.log('  list - List available tools');
-    console.log('  call <tool_name> [args] - Call a tool');
-    console.log('  quit - Exit the client');
+    console.log("\n🎯 Interactive MCP Client with OAuth");
+    console.log("Commands:");
+    console.log("  list - List available tools");
+    console.log("  call <tool_name> [args] - Call a tool");
+    console.log("  quit - Exit the client");
     console.log();
 
     while (true) {
       try {
-        const command = await this.question('mcp> ');
+        const command = await this.question("mcp> ");
 
         if (!command.trim()) {
           continue;
         }
 
-        if (command === 'quit') {
+        if (command === "quit") {
           break;
-        } else if (command === 'list') {
+        } else if (command === "list") {
           await this.listTools();
-        } else if (command.startsWith('call ')) {
+        } else if (command.startsWith("call ")) {
           await this.handleCallTool(command);
         } else {
-          console.log('❌ Unknown command. Try \'list\', \'call <tool_name>\', or \'quit\'');
+          console.log(
+            "❌ Unknown command. Try 'list', 'call <tool_name>', or 'quit'"
+          );
         }
       } catch (error) {
-        if (error instanceof Error && error.message === 'SIGINT') {
-          console.log('\n\n👋 Goodbye!');
+        if (error instanceof Error && error.message === "SIGINT") {
+          console.log("\n\n👋 Goodbye!");
           break;
         }
-        console.error('❌ Error:', error);
+        console.error("❌ Error:", error);
       }
     }
   }
 
   private async listTools(): Promise<void> {
     if (!this.client) {
-      console.log('❌ Not connected to server');
+      console.log("❌ Not connected to server");
       return;
     }
 
     try {
       const request: ListToolsRequest = {
-        method: 'tools/list',
+        method: "tools/list",
         params: {},
       };
 
       const result = await this.client.request(request, ListToolsResultSchema);
 
       if (result.tools && result.tools.length > 0) {
-        console.log('\n📋 Available tools:');
+        console.log("\n📋 Available tools:");
         result.tools.forEach((tool, index) => {
           console.log(`${index + 1}. ${tool.name}`);
           if (tool.description) {
@@ -318,10 +416,10 @@ class InteractiveOAuthClient {
           console.log();
         });
       } else {
-        console.log('No tools available');
+        console.log("No tools available");
       }
     } catch (error) {
-      console.error('❌ Failed to list tools:', error);
+      console.error("❌ Failed to list tools:", error);
     }
   }
 
@@ -330,18 +428,18 @@ class InteractiveOAuthClient {
     const toolName = parts[1];
 
     if (!toolName) {
-      console.log('❌ Please specify a tool name');
+      console.log("❌ Please specify a tool name");
       return;
     }
 
     // Parse arguments (simple JSON-like format)
     let toolArgs: Record<string, unknown> = {};
     if (parts.length > 2) {
-      const argsString = parts.slice(2).join(' ');
+      const argsString = parts.slice(2).join(" ");
       try {
         toolArgs = JSON.parse(argsString);
       } catch {
-        console.log('❌ Invalid arguments format (expected JSON)');
+        console.log("❌ Invalid arguments format (expected JSON)");
         return;
       }
     }
@@ -349,15 +447,18 @@ class InteractiveOAuthClient {
     await this.callTool(toolName, toolArgs);
   }
 
-  private async callTool(toolName: string, toolArgs: Record<string, unknown>): Promise<void> {
+  private async callTool(
+    toolName: string,
+    toolArgs: Record<string, unknown>
+  ): Promise<void> {
     if (!this.client) {
-      console.log('❌ Not connected to server');
+      console.log("❌ Not connected to server");
       return;
     }
 
     try {
       const request: CallToolRequest = {
-        method: 'tools/call',
+        method: "tools/call",
         params: {
           name: toolName,
           arguments: toolArgs,
@@ -369,7 +470,7 @@ class InteractiveOAuthClient {
       console.log(`\n🔧 Tool '${toolName}' result:`);
       if (result.content) {
         result.content.forEach((content) => {
-          if (content.type === 'text') {
+          if (content.type === "text") {
             console.log(content.text);
           } else {
             console.log(content);
@@ -396,17 +497,17 @@ class InteractiveOAuthClient {
  * Main entry point
  */
 async function main(): Promise<void> {
-  const serverUrl = process.env.MCP_GATEWAY_URL || 'http://localhost:8080/mcp';
+  const serverUrl = process.env.MCP_GATEWAY_URL || "http://localhost:8080/mcp";
 
-  console.log('🚀 Simple MCP OAuth Client');
+  console.log("🚀 Simple MCP OAuth Client");
   console.log(`Connecting to: ${serverUrl}`);
   console.log();
 
   const client = new InteractiveOAuthClient(serverUrl);
 
   // Handle graceful shutdown
-  process.on('SIGINT', () => {
-    console.log('\n\n👋 Goodbye!');
+  process.on("SIGINT", () => {
+    console.log("\n\n👋 Goodbye!");
     client.close();
     process.exit(0);
   });
@@ -414,7 +515,7 @@ async function main(): Promise<void> {
   try {
     await client.connect();
   } catch (error) {
-    console.error('Failed to start client:', error);
+    console.error("Failed to start client:", error);
     process.exit(1);
   } finally {
     client.close();

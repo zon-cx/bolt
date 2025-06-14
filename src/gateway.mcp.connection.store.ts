@@ -27,7 +27,7 @@ const agentServerStore = (agentId: string) => {
 const agentsStore = doc.getMap<agentConfig>("agents");
 
 export function createMcpAgent(id: string, mcpServer?:McpServer) {
-  const agent = new MCPClientManager("assistant", "1.0.0", agentServerStore(id), id, id);
+  const agent = new MCPClientManager(id, "1.0.0", agentServerStore(id));
   mcpAgents[id] = agent;
 
   // Store agent metadata

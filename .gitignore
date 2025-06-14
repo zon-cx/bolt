@@ -11,3 +11,4 @@ env
 /dist/
 /node-http/
 /ref/
+/keys/

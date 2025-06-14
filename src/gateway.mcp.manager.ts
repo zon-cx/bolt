@@ -304,7 +304,8 @@ app.listen(port  , () => {
 });
 
 function getId(extra: RequestHandlerExtra<any,any>): string {
-    const id = extra?.authInfo?.extra?.subject as string || extra?.authInfo?.clientId || "default";
-    console.log("agent id", id, extra?.authInfo?.extra);
-    return id;
+    console.log("extra", extra);
+    const id = extra?.authInfo?.subject as string ||extra?.authInfo?.extra?.subject as string || "default";
+    console.log("agent id", id, extra?.authInfo)
+     return id;
 }

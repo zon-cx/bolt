@@ -104,14 +104,14 @@ export const requireAuth = requireBearerAuth({
     console.log(`[LOG] [DONE] ${req.method} ${req.url} ${res.statusCode}`);
   });
 
-function getId(extra: RequestHandlerExtra<any,any>): string {
+function getAuthId(extra: RequestHandlerExtra<any,any>): string {
   const id = extra?.authInfo?.extra?.subject as string || extra.sessionId || "default";
   console.log("agent id", id, extra?.authInfo?.extra);
   return id;
 }
 
 // Helper to create a new MCP server and transport for a session
-async function createSessionTransport() {
+async function createSessionTransport(getId = getAuthId) {
   const mcpServer = new Server(
     {
       name: "mcp-gateway-server",
@@ -201,6 +201,22 @@ async function createSessionTransport() {
 
 
 // POST handler for client-to-server communication
+
+
+app.all("/:id/mcp", requireAuth, async (req, res) => {
+  const id = req.params.id;
+  const sessionId = req.header("mcp-session-id") as string | undefined;
+  let transport: StreamableHTTPServerTransport;
+  
+  if (sessionId && transports.streamable[sessionId]) {
+    transport = transports.streamable[sessionId];
+  } else { 
+    transport = await createSessionTransport(()=>id);
+  }
+  await transport.handleRequest(req, res, req.body);
+});
+
+
 app.all("/mcp", requireAuth, async (req, res) => {
   const sessionId = req.header("mcp-session-id") as string | undefined;
   let transport: StreamableHTTPServerTransport;
@@ -212,9 +228,9 @@ app.all("/mcp", requireAuth, async (req, res) => {
     transport = await createSessionTransport( );
   }
   await transport.handleRequest(req, res, req.body);
-  // No need to use toFetchResponse here since handleRequest works with Node req/res
 });
- 
+
+
 
 const port = parseInt(env.MCP_SERVER_PORT || "8080", 10);
 

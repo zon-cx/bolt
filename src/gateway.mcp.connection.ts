@@ -20,7 +20,7 @@ import type {
 import {Atom, createAtom} from "@xstate/store";
 import {jsonSchema, type ToolSet} from "ai";
 import * as Y from "yjs";
-import {MCPClientConnection} from "./gateway.mcp.client.ts";
+import {MCPClientConnection, TransportFactory} from "./gateway.mcp.client.ts";
 import {serverConfig} from "./gateway.mcp.connection.store.ts";
 import {yMapIterate} from "@cxai/stream";
 
@@ -40,15 +40,11 @@ export class MCPClientManager {
      * @param _name Name of the MCP client
      * @param _version Version of the MCP Client
      * @param store
-     * @param agentId
-     * @param agentName
      */
     constructor(
         public _name: string,
         public _version: string,
         public store: Y.Map<serverConfig>,
-        public agentId: string,
-        public agentName: string = "Default Agent",
     ) {
         for (const [key, value] of store.entries()) {
             if (!this.mcpConnections[key]) {
@@ -113,7 +109,7 @@ export class MCPClientManager {
     async connect(
         url: string,
         options: {
-            transport?: Transport;
+            transport?: TransportFactory;
             client?: ConstructorParameters<typeof Client>[1];
             id?: string;
         } = {},

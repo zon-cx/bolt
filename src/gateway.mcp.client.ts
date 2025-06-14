@@ -28,7 +28,7 @@ import * as Y from "yjs";
 import {connectYjs} from "@/store.yjs.ts";
 import {randomUUID} from "node:crypto";
 const authState = connectYjs("@mcp.slack");
-type  TransportFactory = () => StreamableHTTPClientTransport | SSEClientTransport;
+export type  TransportFactory = () => StreamableHTTPClientTransport | SSEClientTransport;
 export class MCPClientConnection {
   public client: Client;
   public connectionState: Atom<
@@ -49,7 +49,7 @@ export class MCPClientConnection {
   public transport: ReturnType<TransportFactory>;
   
   public name: string;
-  private id: string | undefined;
+  public id: string | undefined;
   constructor(
     public url: URL,
     public options: {
@@ -136,12 +136,16 @@ export class MCPClientConnection {
         this.transport = this.transportFactory(); 
         if (error instanceof UnauthorizedError) {
            this.connectionState.set("authenticating");
-            await this.waitForAuth(this.transport, authState.getMap<string>(this.id)); 
-            return await this.init();
+           console.log("authenticating", authState.getMap<string>(this.id));
+            return;
+            // await this.waitForAuth(this.transport, authState.getMap<string>(this.id)); 
+            // return await this.init();
            } else {
-           console.error(`❌ Error connecting to MCP server at ${this.url}:`, error); 
-          this.connectionState.set("failed");
+
+           console.error(`❌ Error connecting to MCP server at ${this.url}:`, error, "\n", error.stack); 
+           this.connectionState.set("failed");
             this.error.set(error);
+            return;
         }
       }
       
