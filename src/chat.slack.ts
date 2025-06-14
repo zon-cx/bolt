@@ -453,20 +453,24 @@ app.event("app_home_opened", async ({ event, client, logger }) => {
     });
   } catch (error) {
     logger.error("Error publishing home view:", error);
-    await client.views.publish({
-      user_id: event.user,
-      view: {
-        type: "home",
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `Failed to load MCP connections: ${error}`,
-            },
+    await client.chat.postMessage({
+      channel: event.user,
+       blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `Failed to load MCP connections: ${error}`,
           },
-        ],
-      },
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "```" + error.stack + "```",
+          },
+        },
+      ],
     });
   }
 });
