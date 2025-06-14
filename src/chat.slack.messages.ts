@@ -69,7 +69,7 @@ const messageBuilder = {
     authorizeMessage: (
         serverName: string,
         url: string,
-        value: string,
+        value?: string,
         text: string = "Authorize",
     ): {
         blocks: (KnownBlock | Block)[];
@@ -116,6 +116,36 @@ const messageBuilder = {
             blocks: [messageBuilder.divider(), messageBuilder.textSection("These are the tools available to me:")],
             text: "These are the tools available to me:",
         };
+    },
+
+    loginMessage: (
+        url: string,
+    ): (KnownBlock | Block)[] => {
+        return [
+            {type: "section", text: {type: "mrkdwn", text: "Welcome to MCP Chat :wave:"}},
+            {type: "divider"},
+            {
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: "To get started, connect to an MCP server using the button below.",
+                },
+            },
+            {type: "divider"}, {
+                type: "actions",
+                elements: [{
+                    type: "button",
+                    text: {
+                        type: "plain_text",
+                        text: "Login with OAuth :lock:",
+                        emoji: true,
+                    },
+                    url: url.toString(),
+                    action_id: 'redirect',
+                    style: "primary",
+                }],
+            }
+        ];
     },
 
     checkingServerToolMessage: (

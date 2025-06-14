@@ -2,7 +2,7 @@
 
 import { createServer } from "node:http";
 import { createInterface } from "node:readline";
-import { URL } from "node:url";
+import { resolve, URL } from "node:url";
 import { exec } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -77,6 +77,9 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
     );
   }
 
+  public static finishAuth(id: string, authCode: string) {
+    authState.getMap<string>(id).set("code", authCode);
+  }
   public finishAuth(authCode: string) {
     authState.getMap<string>(this.id).set("code", authCode);
   }
@@ -125,7 +128,7 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
   }
 
   public async info(): Promise<
-    { id: string; name: string; email: string } | undefined
+    { id?: string; name?: string; email?: string } | undefined
   > {
     const tokens = this.tokens();
    
@@ -163,6 +166,37 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
     if (!authState.getMap<string>(this.id).get("codeVerifier"))
       throw new Error("No code verifier saved");
     return authState.getMap<string>(this.id).get("codeVerifier")!;
+  }
+ 
+   
+  public async waitForCode(): Promise<string> {
+    const state= authState.getMap<string>(this.id);
+    return await new Promise((resolve) => {
+      checkCode();
+      function checkCode(){
+        if(state.get("code")){
+          const code = state.get("code")!;
+          state.delete("code");
+          state.unobserve(checkCode);
+          resolve(code);
+        }
+      }
+      state.observe(checkCode);
+    });
+  }
+
+  public async tokensAsync(): Promise<OAuthTokens> {
+    const state= authState.getMap<OAuthTokens>(this.id); 
+      return await new Promise((resolve) => {
+        function checkTokens(){
+          if(state.get("tokens")){
+            resolve(state.get("tokens")!);
+            state.unobserve(checkTokens);
+          }
+        }
+        checkTokens();
+        state.observe(checkTokens);
+      });
   }
 }
 

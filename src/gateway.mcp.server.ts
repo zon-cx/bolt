@@ -65,7 +65,7 @@ const proxyProvider = new ProxyOAuthServerProvider({
       issuer: GIGYA_ISSUER,
       subject: String(userInfo.sub), // 'sub' is a standard claim for the subject (user's ID)
       scopes: ["openid", "profile", "email"],
-      claims: userInfo,
+      extra: userInfo,
       token,
       clientId: "FYEcmQ4aAAZ-i69s1UZSxJ8x", // Client ID is not used in this example, but can be set if needed
     };
@@ -86,7 +86,7 @@ app.use(mcpAuthRouter({
 }))
 export const requireAuth = requireBearerAuth({
   verifier: proxyProvider,
-  requiredScopes: ["openid", "profile", "email"],
+  requiredScopes: ["openid", "profile", "email" ,"agent"],
 });
 
 
@@ -105,7 +105,7 @@ export const requireAuth = requireBearerAuth({
   });
 
 function getAuthId(extra: RequestHandlerExtra<any,any>): string {
-  const id = extra?.authInfo?.extra?.subject as string || extra.sessionId || "default";
+  const id = extra?.authInfo?.extra?.sub as string  || "default";
   console.log("agent id", id, extra?.authInfo?.extra);
   return id;
 }
@@ -203,7 +203,7 @@ async function createSessionTransport(getId = getAuthId) {
 // POST handler for client-to-server communication
 
 
-app.all("/:id/mcp", requireAuth, async (req, res) => {
+app.all("/mcp/:id", requireAuth, async (req, res) => {
   const id = req.params.id;
   const sessionId = req.header("mcp-session-id") as string | undefined;
   let transport: StreamableHTTPServerTransport;

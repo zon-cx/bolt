@@ -24,46 +24,48 @@ const CALLBACK_URL = `${env.BASE_URL || "https://slack.cfapps.eu12.hana.ondemand
 
 const authState = connectYjs("@mcp.slack");
 
+export const connections = new Map<string, MCPClientConnection>();
 
 export const authCallback =async (req: ParamsIncomingMessage, res: ServerResponse) => {
     try {
-        console.log("authCallback");
         const url = new URLSearchParams(req.url!.split("?")[1]);
-        const authCode = url.get("code");
-        const encodedState = url.get("state");
-
-        if (!authCode || !encodedState) {
-            return res.end("Wrong request");
-        }
-
-        if (typeof authCode !== "string") {
-            return res.end("Invalid authorization code");
-        }
-
-        let stateData;
-        try {
-            const decodedState = Buffer.from(encodedState as string, "base64").toString("utf-8");
-            stateData = JSON.parse(decodedState);
-        } catch (error) {
-            console.error("Error decoding state parameter:", error);
-            return res.end("Invalid state parameter");
-        }
-
-        const userId = stateData.userId;
-        const serverUrl = stateData.serverUrl;
-        const sessionId = stateData.sessionId || "default";
-
-        if (!userId || !serverUrl) {
-            return res.end("Wrong request");
-        }
+        const authCode = url.get("code")!;
+        const state = url.get("state")!;
+        console.log("authCallback", state, authCode);
+        InMemoryOAuthClientProvider.finishAuth(state, authCode);
+ 
+        // const oauthProvider = InMemoryOAuthClientProvider.fromState(state);
+        // const transport = new StreamableHTTPClientTransport(
+        //   new URL(env.MCP_MANAGER_URL!),
+        //   {
+        //     authProvider: oauthProvider,
+        //   }
+        // );
+        // await transport.finishAuth(authCode); 
+        // const info = await oauthProvider.info();
+        // const { id, name } = info!;
+        // const connection = new MCPClientConnection(new URL(env.MCP_MANAGER_URL!), {
+        //     id: id,
+        //     info: {
+        //       name: name,
+        //       version: "1.0.0",
+        //     },
+        //     client: {
+        //       capabilities: {},
+        //     },
+        //     transport: () => transport,
+        //   });
+        //   await connection.init();
+        //   connections.set(id!, connection);
+          
 
         // const auth = getClient(userId);
         // if (!auth) {
         //     return res.end(`MCP session not found ${auth ? "missing redirect callback" : "missing oauth provider"}`);
         // }
 
-        console.log("Handling auth callback for user " + userId + " and serverUrl " + serverUrl);
-        authState.getMap(sessionId).set("code", authCode);
+        // console.log("Handling auth callback for user " + id + " and serverUrl " + env.MCP_MANAGER_URL);
+        // authState.getMap(id!).set("code", authCode);
         res.end("Callback successful!");
     } catch (error) {
         console.error("Error in callback handler:", error);
@@ -132,13 +134,7 @@ export class SlackInteractiveOAuthClient {
         };
         // Slack-specific redirect handler: send a Slack message with an authorize button
         const onRedirect =async (authorizationUrl: URL) => {
-            const state = Buffer.from(JSON.stringify({
-                userId: this.userId,
-                serverUrl: this.serverUrl,
-                sessionId: this.sessionID
-            })).toString('base64');
-            authorizationUrl.searchParams.set('state', state);
-            console.log("Redirecting to " + authorizationUrl.toString());
+             console.log("Redirecting to " + authorizationUrl.toString());
 
             await this.authorizationMessage?.( [
                     {type: "section", text: {type: "mrkdwn", text: "Welcome to MCP Chat :wave:"}},
@@ -168,21 +164,10 @@ export class SlackInteractiveOAuthClient {
             );
             if (this.setStatus) this.setStatus('Please authorize access to the MCP server.');
         };
-        return new InMemoryOAuthClientProvider(CALLBACK_URL, clientMetadata, onRedirect);
+        return new InMemoryOAuthClientProvider(CALLBACK_URL, clientMetadata, this.userId, onRedirect);
     }
 
- 
-
-    async connect(): Promise<Client> {
-            this.oauthProvider = this.getOAuthProvider();
-            this.client = new Client({
-                name: `slack-oauth-client-${this.userId}`,
-                version: '1.0.0',
-            }, {capabilities: {}});
-            await this.say(':arrows_counterclockwise: Connecting to MCP server...');
-            await this.connection.init();
-            return this.client;
-    }
+  
     
 
     async listTools(): Promise<void> {

@@ -129,24 +129,19 @@ export class MCPClientConnection {
      let client = this.client;
      const transport = this.transport;
 
-    if (this.connectionState.get() !== "discovering" && this.connectionState.get() !== "ready") {
+    if (this.connectionState.get() !== "ready") {
       try {
         await this.client.connect(transport);
        } catch (error: any) {
         this.transport = this.transportFactory(); 
         if (error instanceof UnauthorizedError) {
            this.connectionState.set("authenticating");
-           console.log("authenticating", authState.getMap<string>(this.id));
-            return;
-            // await this.waitForAuth(this.transport, authState.getMap<string>(this.id)); 
-            // return await this.init();
-           } else {
-
-           console.error(`❌ Error connecting to MCP server at ${this.url}:`, error, "\n", error.stack); 
+            } else { 
+            console.error(`❌ Error connecting to MCP server at ${this.url}:`, error, "\n", error.stack); 
            this.connectionState.set("failed");
             this.error.set(error);
-            return;
         }
+        return this.connectionState.get(); 
       }
       
       console.log(`🔐 ping  ${JSON.stringify(await this.client.ping())} `);

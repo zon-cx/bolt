@@ -206,6 +206,8 @@ app.post("/agents/create", async (c) => {
 
 const COOKIE_SECRET = env.COOKIE_SECRET || "secret";
 
+
+
 app.get("/oauth/callback", async function (c) {
   const url = new URL(c.req.url);
   const state = c.req.query("state")!;
@@ -225,8 +227,7 @@ app.get("/oauth/callback", async function (c) {
       email: string;
       nickname: string;
       name: string;
-    };
-
+    }; 
     const connection = new MCPClientConnection(new URL(env.MCP_MANAGER_URL!), {
       id: oauthProvider.id,
       info: {
@@ -267,8 +268,7 @@ app.get("/oauth/callback", async function (c) {
 const connections = new Map<string, MCPClientConnection>();
 
 const agentMiddleware = createMiddleware(async (c, next) => {
-  const agentId =
-    c.req.param("id") || (await getCookie(c, "mcp-agent-id"))?.split(".")[0];
+  const agentId =c.req.param("id") || c.var.agent?.id;
   c.set("agentId", agentId);
 
   console.log("agentId", agentId);
@@ -278,14 +278,14 @@ const agentMiddleware = createMiddleware(async (c, next) => {
       : new MCPClientConnection(new URL(env.MCP_MANAGER_URL!), {
           id: agentId,
           info: {
-            name: "me",
+            name: c.var.agent?.name || "me",
             version: "1.0.0",
           },
           client: {
             capabilities: {},
           },
           transport: () =>
-            new StreamableHTTPClientTransport(new URL(env.MCP_MANAGER_URL!), {
+            new StreamableHTTPClientTransport(agentId ? new URL(`${env.MCP_MANAGER_URL}/${agentId}`) : new URL(env.MCP_MANAGER_URL!), {
               authProvider: c.get("oauthProvider")!,
             }),
         });
@@ -315,7 +315,7 @@ const oauthMiddleware = createMiddleware(async (c, next) => {
       redirect_uris: [redirectUri],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
-      scope: "openid profile email agents",
+      scope: "openid profile email agent",
     },
     oauthId
   );

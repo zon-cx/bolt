@@ -11,13 +11,20 @@ import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middlew
 import express from "express";
 import { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
+import { version } from "node:os";
 
 
 const app = express();
 app.use(express.json());
 
 
-async function createServerManager() {
+async function createServerManager(id?: string) {
+    const getAgentId = (extra?: RequestHandlerExtra<any,any>) => {
+        console.log("getAgentId",id, extra?.authInfo);
+        if(id) return id;
+        const agentId =  extra?.authInfo?.extra?.sub as string  ||extra?.authInfo?.subject
+        return agentId;
+    }
     const mcpServer = new McpServer({
         name: "mcp-manager",
         version: "1.0.0",
@@ -39,7 +46,7 @@ async function createServerManager() {
     });
     
     mcpServer.resource("connections", "urn:mcp:connections",  { mimeType: "text/json" },  async (params, extra) => {
-        const agentId = getId(extra);
+        const agentId = getAgentId(extra);
         const agent = getOrCreateMcpAgent(agentId, mcpServer);
         const connections = await agent.listConnections();
         return {
@@ -65,7 +72,7 @@ async function createServerManager() {
     }, async function (  extra) {
         console.log("Listing MCP servers",   extra);  
         try {
-            const agentId = getId(extra);
+            const agentId = getAgentId(extra);
             const agent = getOrCreateMcpAgent(agentId, mcpServer);
             const connections = await agent.listConnections();
             await extra.sendNotification({
@@ -112,7 +119,7 @@ async function createServerManager() {
         },
         description: "Connect to a new MCP server",
     }, async function (params, extra) {
-        const agentId = getId(extra);
+        const agentId = getAgentId(extra);
         const agent = getOrCreateMcpAgent(agentId, mcpServer);
         const connection = await agent.connect(params.url, {
             id: params.name,
@@ -136,7 +143,7 @@ async function createServerManager() {
             },
             description: "Disconnect from an MCP server",
         }, async function (params, extra) {
-            const agentId = getId(extra);
+            const agentId = getAgentId(extra);
             const agent = getOrCreateMcpAgent(agentId, mcpServer);
             await agent.closeConnection(params.id);
             return {
@@ -149,7 +156,36 @@ async function createServerManager() {
         }
     );
     
-    mcpServer.registerTool("get-connection-info", {
+
+    mcpServer.registerTool("info", {
+        outputSchema: {
+            id: z.string(),
+            url: z.string(),
+            name: z.string().optional(),
+            version: z.string().optional(),
+            connections:z.number()
+        },
+        description: "Get information about the MCP server",
+    }, async function ( extra) { 
+        const agentId = getAgentId(extra);
+        const agent = getOrCreateMcpAgent(agentId, mcpServer);
+        const connections = await agent.listConnections();
+         return {
+            content: [{
+                type: "text",
+                text: `Agent info for ${agentId}  with ${connections.length} connections )`,
+            }],
+            structuredContent: {
+                id: agentId,  
+                connections: connections.length,
+                name: agent._name,
+                url: `${env.MCP_GATEWAY_URL}/${agentId}`,
+                version:agent._version
+             }
+        }
+    });
+
+    mcpServer.registerTool("connection-info", {
         inputSchema:{
             id: z.string()
         },
@@ -160,7 +196,7 @@ async function createServerManager() {
         },
         description: "Get information about the MCP server",
     }, async function (params, extra) {
-        const agentId = getId(extra);
+        const agentId = getAgentId(extra);
         const agent = getOrCreateMcpAgent(agentId, mcpServer);
         const connection =  agent.mcpConnections[params.id] 
         if (!connection) {
@@ -257,9 +293,9 @@ const proxyProvider = new ProxyOAuthServerProvider({
         return {
             issuer: GIGYA_ISSUER,
             subject: String(userInfo.sub), // 'sub' is a standard claim for the subject (user's ID)
-            scopes: ["openid", "profile", "email"],
-            claims: userInfo,
+            scopes: ["openid", "profile", "email" ,"agent"],
             token,
+            extra:userInfo,
             clientId: "FYEcmQ4aAAZ-i69s1UZSxJ8x", // Client ID is not used in this example, but can be set if needed
         };
     },
@@ -281,7 +317,7 @@ app.use(mcpAuthRouter({
 
 export const requireAuth = requireBearerAuth({
     verifier: proxyProvider,
-    requiredScopes: ["openid", "profile", "email"],
+    requiredScopes: ["openid", "profile", "email" ],
 });
 
 app.all("/mcp", requireAuth, async (req, res) => {
@@ -296,6 +332,19 @@ app.all("/mcp", requireAuth, async (req, res) => {
     await transport.handleRequest(req, res, req.body);
 });
 
+app.all("/mcp/:id", requireAuth, async (req, res) => {
+    const sessionId = req.header("mcp-session-id") as string | undefined;
+    const id = req.params.id;
+    let transport: StreamableHTTPServerTransport;
+
+    if (sessionId && transports.streamable[sessionId]) {
+        transport = transports.streamable[sessionId];
+    } else {
+        transport = await createServerManager( id);
+    }
+    await transport.handleRequest(req, res, req.body);
+});
+
 
 const port = parseInt(env.MCP_SERVER_PORT || "8080", 10);
 
@@ -303,9 +352,4 @@ app.listen(port  , () => {
     console.log(`MCP Gateway Server running on http://localhost:${port}`);
 });
 
-function getId(extra: RequestHandlerExtra<any,any>): string {
-    console.log("extra", extra);
-    const id = extra?.authInfo?.subject as string ||extra?.authInfo?.extra?.subject as string || "default";
-    console.log("agent id", id, extra?.authInfo)
-     return id;
-}
+ 
