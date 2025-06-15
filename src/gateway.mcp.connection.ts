@@ -1,432 +1,326 @@
-import {OAuthClientProvider} from "@modelcontextprotocol/sdk/client/auth.js";
-import type {Client} from "@modelcontextprotocol/sdk/client/index.js";
-import type {SSEClientTransportOptions} from "@modelcontextprotocol/sdk/client/sse.js";
-import type {RequestOptions} from "@modelcontextprotocol/sdk/shared/protocol.js";
-import {Transport} from "@modelcontextprotocol/sdk/shared/transport.js";
-import type {
-    CallToolRequestSchema,
-    CallToolResultSchema,
-    CompatibilityCallToolResultSchema,
-    CompleteRequest,
-    GetPromptRequest,
-    Prompt,
-    ReadResourceRequest,
-    Request,
-    Resource,
-    ResourceTemplate,
-    ResultSchema,
-    Tool,
+import {
+  ToolListChangedNotificationSchema,
+  type ClientCapabilities,
+  type Resource,
+  type Tool,
+  type Prompt,
+  ResourceListChangedNotificationSchema,
+  PromptListChangedNotificationSchema,
+  type ListToolsResult,
+  type ListResourcesResult,
+  type ListPromptsResult,
+  type ServerCapabilities,
+  type ResourceTemplate,
+  type ListResourceTemplatesResult,
+  type Notification,
 } from "@modelcontextprotocol/sdk/types.js";
-import {Atom, createAtom} from "@xstate/store";
-import {jsonSchema, type ToolSet} from "ai";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { SSEClientTransportOptions } from "@modelcontextprotocol/sdk/client/sse.js";
+import { OAuthClientProvider, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import { StreamableHTTPServerTransport ,StreamableHTTPServerTransportOptions} from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import  {SSEClientTransport} from "@modelcontextprotocol/sdk/client/sse.js";
+import { env } from "node:process";
+import { createAtom, Atom } from "@xstate/store";
+import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { jsonSchema, tool, ToolExecutionOptions } from "ai";
 import * as Y from "yjs";
-import {MCPClientConnection, TransportFactory} from "./gateway.mcp.client.ts";
-import {serverConfig} from "./gateway.mcp.connection.store.ts";
-import {yMapIterate} from "@cxai/stream";
-
-
-/**
- * Utility class that aggregates multiple MCP clients into one
- */
-export class MCPClientManager {
-    public mcpConnections: Record<string, MCPClientConnection> = {};
-    public aiTools = createAtom<ToolSet>({});
-    public tools = createAtom<NamespacedData["tools"]>([]);
-    public prompts = createAtom<NamespacedData["prompts"]>([]);
-    public resources = createAtom<NamespacedData["resources"]>([]);
-    public resourceTemplates = createAtom<NamespacedData["resourceTemplates"]>([]);
-
-    /**
-     * @param id Name of the MCP client
-     * @param version Version of the MCP Client
-     * @param store
-     */
-    constructor(
-        public id: string,
-        public version: string,
-        public store: Y.Map<serverConfig>,
-    ) {
-        for (const [key, value] of store.entries()) {
-            if (!this.mcpConnections[key]) {
-                console.log("connecting", key, value);
-                const {url} = value;
-                this.connect(url, {
-                    id: key,
-                }).catch(console.error).then(console.log);
-            }
-            console.log("exists connection", key, value);
-        }
-        store.observe((event) => {
-            for (const [key, {action}] of event.changes.keys.entries()) {
-                if (action === "add" || action === "update" && !this.mcpConnections[key]) {
-                    console.log("connecting", key);
-                    const {url} = store.get(key)!;
-                    this.connect(url, {
-                        id: key,
-                    });
+import {connectYjs} from "@/store.yjs.ts";
+import {randomUUID} from "node:crypto";
+const authState = connectYjs("@mcp.slack");
+export type  TransportFactory = () => StreamableHTTPClientTransport | SSEClientTransport;
+export class MCPClientConnection {
+  public client: Client;
+  public connectionState: Atom<
+    | "authenticating"
+    | "connecting"
+    | "ready"
+    | "discovering"
+    | "failed"
+  >;
+  public instructions: Atom<string | undefined>;
+  public tools: Atom<Tool[]>;
+  public prompts: Atom<Prompt[]>;
+  public resources: Atom<Resource[]>;
+  public resourceTemplates: Atom<ResourceTemplate[]>;
+  public serverCapabilities: Atom<ServerCapabilities | undefined>;
+  public  error: Atom<Error | undefined> = createAtom<Error | undefined>(undefined);
+  public transportFactory: TransportFactory;
+  public transport: ReturnType<TransportFactory>;
+  
+  public name: string;
+  public id: string | undefined;
+  constructor(
+    public url: URL,
+    public options: {
+      id?: string;
+      info: ConstructorParameters<typeof Client>[0];
+      client?: ConstructorParameters<typeof Client>[1] ;
+      transport?:TransportFactory
+    },
+  ) {
+    const { info, client, transport, id } = this.options || {};
+    this.transportFactory = transport ?? (()=> new StreamableHTTPClientTransport(url, {
+      sessionId: id,
+    }));
+    this.transport = this.transportFactory();
+    this.name = info?.name;
+    this.connectionState = createAtom<
+      | "authenticating"
+      | "connecting"
+      | "ready"
+      | "discovering"
+      | "failed"
+    >("connecting");
+    this.instructions = createAtom<string | undefined>(undefined);
+    this.tools = createAtom<Tool[]>([]);
+    this.prompts = createAtom<Prompt[]>([]);
+    this.resources = createAtom<Resource[]>([]);
+    this.resourceTemplates = createAtom<ResourceTemplate[]>([]);
+    this.serverCapabilities = createAtom<ServerCapabilities | undefined>(undefined);
+    this.client = new Client(info, client);
+    this.id = options?.id ??
+        randomUUID({
+      disableEntropyCache: true, // Disable entropy cache for better performance in tests
+    })
+     
+      // authState.getMap<string>(this.id).observe(this.authCallback.bind(this)); 
+    }
+    
+    // async authCallback (event: Y.YMapEvent<string>) {
+    //   const { info, client, transport } = this.options || {};
+    //
+    //   console.log(`🔐 Ymap event received:`, Array.from(event.keysChanged.keys()));
+    //   if (event.keysChanged.has('code')) {
+    //     const code = authState.getMap<string>(this.id).get('code');
+    //     if (code) {
+    //       console.log(`🔐 Authorization code received: ${code.substring(0, 10)}...`);
+    //       // authState.getMap<string>(this.id).unobserve(callback);
+    //       this.transport.finishAuth(code);
+    //       // await this.init(new Client(info, client));
+    //     } else {
+    //       console.error('❌ No authorization code found in session state');
+    //     }
+    //   }
+    // }
+    
+    async  waitForAuth(transport: ReturnType<TransportFactory>, authState:Y.Map<string>): Promise<void> { 
+      return new Promise<void>((resolve, reject) => {
+            const callback = async (event: Y.YMapEvent<string>) => {
+              console.log(`🔐 Ymap event received:`, Array.from(event.keysChanged.keys()));
+              if (event.keysChanged.has('code')) {
+                const code = authState.get('code');
+                if (code) {
+                  console.log(`🔐 Authorization code received: ${code.substring(0, 10)}...`);
+                  authState.unobserve(callback);
+                  await transport.finishAuth(code);
+                  resolve();
                 }
-            }
+              }
+            };
+            authState.observe(callback);
         });
-
-        this.connect("https://store-mcp.val.run/mcp", {
-            id: "store"
-        }).catch(console.error)
     }
 
-    async* streamConnections(): AsyncGenerator<serverConfig> {
-        for await (const [key] of yMapIterate(this.store)) {
-            const value = this.store.get(key);
-            if (value) {
+  /**
+   * Initialize a client connection
+   */
+  async init( ) {
+     let client = this.client;
+     const transport = this.transport;
 
-                yield {
-                    id: key,
-                    url: value.url,
-                    name: value.name,
-                    version: value.version,
-                };
-            }
+    if (this.connectionState.get() !== "ready") {
+      try {
+        await this.client.connect(transport);
+       } catch (error: any) {
+        this.transport = this.transportFactory(); 
+        if (error instanceof UnauthorizedError) {
+           this.connectionState.set("authenticating");
+            } else { 
+            console.error(`❌ Error connecting to MCP server at ${this.url}:`, error, "\n", error.stack); 
+           this.connectionState.set("failed");
+            this.error.set(error);
         }
+        return this.connectionState.get(); 
+      }
+      
+      console.log(`🔐 ping  ${JSON.stringify(await this.client.ping())} `);
+
+      this.connectionState.set("discovering");
+
+      const serverCapabilities = await this.client.getServerCapabilities();
+      if (!serverCapabilities) {
+        throw new Error("The MCP Server failed to return server capabilities");
+      }
+      this.serverCapabilities.set(serverCapabilities);
+
+      const [instructions, tools, resources, prompts, resourceTemplates] = await Promise.all([
+        client.getInstructions(),
+        this.registerTools(),
+        this.registerResources(),
+        this.registerPrompts(),
+        this.registerResourceTemplates(),
+      ]);
+
+      this.instructions.set(instructions);
+      this.tools.set(tools);
+      this.resources.set(resources);
+      this.prompts.set(prompts);
+      this.resourceTemplates.set(resourceTemplates);
+
+      this.connectionState.set("ready");
+    }
+  }
+
+  /**
+   * Notification handler registration
+   */
+  async registerTools(): Promise<Tool[]> {
+    const serverCapabilities = this.serverCapabilities.get();
+    if (!serverCapabilities || !serverCapabilities.tools) {
+      return [];
     }
 
-    async listConnections(): Promise<Array<serverConfig &{status:string}>> {
-        const iterator = this.streamConnections();
-        await iterator.next();
-        return Array.from(this.store.entries()).map(([key, value]) => ({
-            id: key,
-            url: value.url,
-            name: value.name,
-            version: value.version,
-            status: this.mcpConnections[key]?.connectionState?.get() ?? "disconnected"
-        }));
+    if (serverCapabilities.tools.listChanged) {
+      this.client.setNotificationHandler(
+        ToolListChangedNotificationSchema,
+        async (_notification) => {
+          const tools = await this.fetchTools();
+          this.tools.set(tools);
+        },
+      );
     }
 
-    /**
-     * Connect to and register an MCP server
-     *
-     * @param url
-     * @param options
-     */
-    async connect(
-        url: string,
-        options: {
-            transport?: TransportFactory;
-            client?: ConstructorParameters<typeof Client>[1];
-            id?: string;
-        } = {},
-    ): Promise<MCPClientConnection & serverConfig> {
-        const id = options.id || url;
+    return this.fetchTools();
+  }
 
-        if (!this.mcpConnections[id]) {
-            console.log("new connection", id, url);
-            this.mcpConnections[id] = new MCPClientConnection(new URL(url), {
-                info: {
-                    name: this.id,
-                    version: this.version,
-                },
-                ...options,
-            });
-           this.store.set(id, {
-                id,
-                url,
-                name: this.id,
-                version: this.version,
-            });
-            this.mcpConnections[id].tools.subscribe(() => {
-                this.tools.set(getNamespacedData(this.mcpConnections, "tools"));
-                this.aiTools.set(this.unstable_getAITools());
-            });
-            this.mcpConnections[id].prompts.subscribe(() =>
-                this.prompts.set(getNamespacedData(this.mcpConnections, "prompts"))
-            );
-            this.mcpConnections[id].resources.subscribe(() =>
-                this.resources.set(getNamespacedData(this.mcpConnections, "resources"))
-            );
-            this.mcpConnections[id].resourceTemplates.subscribe(() =>
-                this.resourceTemplates.set(getNamespacedData(this.mcpConnections, "resourceTemplates"))
-            );
-
-            await this.mcpConnections[id].init();
-            console.log("connected", id, url);
-        }
-
-        return Object.assign(this.mcpConnections[id], this.store.get(id)!);
+  async registerResources(): Promise<Resource[]> {
+    const serverCapabilities = this.serverCapabilities.get();
+    if (!serverCapabilities || !serverCapabilities.resources) {
+      return [];
     }
 
-    /**
-     * @returns namespaced list of tools
-     */
-    listTools(): NamespacedData["tools"] {
-        return this.tools.get();
+    if (serverCapabilities.resources.listChanged) {
+      this.client.setNotificationHandler(
+        ResourceListChangedNotificationSchema,
+        async (_notification) => {
+          const resources = await this.fetchResources();
+          this.resources.set(resources);
+        },
+      );
     }
 
-    /**
-     * @returns a set of tools that you can use with the AI SDK
-     */
-    unstable_getAITools(): ToolSet {
-        return Object.fromEntries(
-            this.tools.get().map((tool) => {
-                return [
-                    tool.name,
-                    {
-                        parameters: jsonSchema(tool.inputSchema),
-                        description: tool.description,
-                        execute: async (args) => {
-                            const result = await this.callTool({
-                                name: tool.name,
-                                arguments: args,
-                            });
-                            if (result.isError) {
-                                // @ts-expect-error TODO we should fix this
-                                throw new Error(result.content[0].text);
-                            }
-                            return result;
-                        },
-                    },
-                ];
-            }),
-        );
+    return this.fetchResources();
+  }
+
+  async registerPrompts(): Promise<Prompt[]> {
+    const serverCapabilities = this.serverCapabilities.get();
+    if (!serverCapabilities || !serverCapabilities.prompts) {
+      return [];
     }
 
-    /**
-     * Closes all connections to MCP servers
-     */
-    async closeAllConnections() {
-        return Promise.all(
-            Object.values(this.mcpConnections).map(async (connection) => {
-                await connection.client.close();
-            }),
-        );
+    if (serverCapabilities.prompts.listChanged) {
+      this.client.setNotificationHandler(
+        PromptListChangedNotificationSchema,
+        async (_notification) => {
+          const prompts = await this.fetchPrompts();
+          this.prompts.set(prompts);
+        },
+      );
     }
 
-    onClose(callback: () => void) {
-        // This is a placeholder for any cleanup logic you might want to add
-        // when the MCPClientManager is closed.
-        // For now, it does nothing.
-        console.log("MCPClientManager onClose event registered");
+    return this.fetchPrompts();
+  }
+
+  async registerResourceTemplates(): Promise<ResourceTemplate[]> {
+    const serverCapabilities = this.serverCapabilities.get();
+    if (!serverCapabilities || !serverCapabilities.resources) {
+      return [];
     }
 
-    /**
-     * Closes a connection to an MCP server
-     * @param id The id of the connection to close
-     */
-    async closeConnection(id: string) {
-        if (!this.mcpConnections[id]) {
-            throw new Error(`Connection with id "${id}" does not exist.`);
-        }
-        await this.mcpConnections[id].client.close();
-        delete this.mcpConnections[id];
-    }
+    return this.fetchResourceTemplates();
+  }
 
-    /**
-     * @returns namespaced list of prompts
-     */
-    listPrompts(): NamespacedData["prompts"] {
-        return this.prompts.get();
-    }
+  async fetchTools() {
+    let toolsAgg: Tool[] = [];
+    let toolsResult: ListToolsResult = { tools: [] };
+    do {
+      toolsResult = await this.client
+        .listTools({
+          cursor: toolsResult.nextCursor,
+        })
+        .catch(capabilityErrorHandler({ tools: [] }, "tools/list"));
+      toolsAgg = toolsAgg.concat(toolsResult.tools);
+    } while (toolsResult.nextCursor);
+    return toolsAgg;
+  }
 
-    /**
-     * @returns namespaced list of tools
-     */
-    listResources(): NamespacedData["resources"] {
-        return this.resources.get();
-    }
+  async fetchResources() {
+    let resourcesAgg: Resource[] = [];
+    let resourcesResult: ListResourcesResult = { resources: [] };
+    do {
+      resourcesResult = await this.client
+        .listResources({
+          cursor: resourcesResult.nextCursor,
+        })
+        .catch(capabilityErrorHandler({ resources: [] }, "resources/list"));
+      resourcesAgg = resourcesAgg.concat(resourcesResult.resources);
+    } while (resourcesResult.nextCursor);
+    return resourcesAgg;
+  }
 
-    /**
-     * @returns namespaced list of resource templates
-     */
-    listResourceTemplates(): NamespacedData["resourceTemplates"] {
-        return this.resourceTemplates.get();
-    }
+  async fetchPrompts() {
+    let promptsAgg: Prompt[] = [];
+    let promptsResult: ListPromptsResult = { prompts: [] };
+    do {
+      promptsResult = await this.client
+        .listPrompts({
+          cursor: promptsResult.nextCursor,
+        })
+        .catch(capabilityErrorHandler({ prompts: [] }, "prompts/list"));
+      promptsAgg = promptsAgg.concat(promptsResult.prompts);
+    } while (promptsResult.nextCursor);
+    return promptsAgg;
+  }
 
-    /**
-     * Namespaced version of
-     */
-    async callTool(
-        {name, ...params}: Zod.infer<typeof CallToolRequestSchema>["params"],
-        resultSchema?: typeof CallToolResultSchema | typeof CompatibilityCallToolResultSchema,
-        options?: RequestOptions,
-    ) {
-        console.log(
-            "call-tool",
-            name,
-            getNamespacedData(this.mcpConnections, "tools").map(({name, serverId, key, source}) => ({
-                key,
-                name,
-                source
-            })))
-
-        const tool = await findSourceAsync(this.tools, name);
-        console.log(
-            "call-tool",
-            name,
-            getNamespacedData(this.mcpConnections, "tools").map(({name, serverId, key, source}) => ({
-                key,
-                name,
-                serverId,
-                source,
-            })),
-            this.tools.get().map(({name, source}) => ({source, name})),
-            "connections",
-            Object.keys(
-                this
-                    .mcpConnections,
-            ),
-            "stote",
-            Array.from(this.store.keys()),
-            tool,
-        );
-
-        if (!tool) {
-            throw new Error(`Tool with name "${name}" does not exist.`);
-        }
-
-        console.log("Tool found", tool);
-
-        return this
-            .mcpConnections[tool.server]
-            .client.callTool(
-                {
-                    ...params,
-                    name: tool.name,
-                },
-                resultSchema,
-                options,
-            );
-    }
-
-    async complete({ref, ...params}: CompleteRequest["params"], options?: RequestOptions): Promise<any> {
-
-        const source = ref.type === "ref/resource" ?
-            await findSourceAsync(this.resources, ref.uri) :
-            await findSourceAsync(this.prompts, ref.name);
-
-        if (!source || !source.server) {
-            throw new Error(`No MCP client found for resource name: ${ref.name}  URI: ${ref.uri}  URI Template: ${ref.uriTemplate}`);
-        }
-        return this.mcpConnections[source.server].client.complete({
-            ...params,
-            ref: {
-                ...ref,
-                ...source
-            },
-        }, options);
-    }
-
-    /**
-     * Namespaced version of readResource
-     */
-    async readResource(
-        params: ReadResourceRequest["params"],
-        options?: RequestOptions,
-    ) {
-        const source = await findSourceAsync(this.resources, params.uri);
-        return await this.mcpConnections[source.server].client.readResource({
-            ...params,
-            ...source,
-        }, options);
-    }
-
-    /**
-     * Namespaced version of getPrompt
-     */
-    async getPrompt(
-        params: GetPromptRequest["params"],
-        options?: RequestOptions,
-    ) {
-        const {server, name} = await findSourceAsync(this.prompts, params.name);
-        return await this.mcpConnections[server].client.getPrompt({
-            ...params,
-            name,
-        }, options);
-    }
-
-
-}
-
-type NamespacedSource = {
-    name: string;
-    source: {
-        name: string;
-        url: string;
-        server: string;
+  async fetchResourceTemplates() {
+    let templatesAgg: ResourceTemplate[] = [];
+    let templatesResult: ListResourceTemplatesResult = {
+      resourceTemplates: [],
     };
-};
+    do {
+      templatesResult = await this.client
+        .listResourceTemplates({
+          cursor: templatesResult.nextCursor,
+        })
+        .catch(
+          capabilityErrorHandler(
+            { resourceTemplates: [] },
+            "resources/templates/list",
+          ),
+        );
+      templatesAgg = templatesAgg.concat(templatesResult.resourceTemplates);
+    } while (templatesResult.nextCursor);
+    return templatesAgg;
+  }
 
-type NamespacedData = {
-    tools: (Tool & NamespacedSource)[];
-    prompts: (Prompt & NamespacedSource)[];
-    resources: (Resource & NamespacedSource)[];
-    resourceTemplates: (ResourceTemplate & NamespacedSource)[];
-};
-
-export function getNamespacedData<T extends keyof NamespacedData>(
-    mcpClients: Record<string, MCPClientConnection>,
-    type: T,
-): NamespacedData[T] {
-    const sets = Object.entries(mcpClients).map(([name, conn]) => {
-        return {name, data: conn[type]};
-    });
-
-    const namespacedData = sets.flatMap(({name: server, data}) => {
-        if (!data || typeof data.get !== "function") {
-            console.warn(`Data for ${type} in client ${server} is not an Atom or doesn't have a get method`);
-            return [];
-        }
-
-        try {
-            return data.get()?.map((resource: any) => {
-                const {name, uri, uriTemplate, ...item} = resource;
-                let resourceUri: string | undefined = undefined;
-                if (typeof uri === "string") {
-                    resourceUri = uri;
-                } else if (typeof uriTemplate === "string") {
-                    resourceUri = uriTemplate;
-                }
-                return {
-                    ...item,
-                    name: `${server}:${name}`,
-                    uri: resourceUri ? `${server}:${resourceUri}` : undefined,
-                    source: {
-                        uri: resourceUri,
-                        name,
-                        server,
-                    },
-                };
-            }) || [];
-        } catch (error) {
-            console.error(`Error getting ${type} data from client ${server}:`, error);
-            return [];
-        }
-    });
-
-    return namespacedData as NamespacedData[T]; // Type assertion needed due to TS limitations with conditional return types
+  async cleanup() {
+    await this.transport.close();
+  }
 }
 
-async function findSourceAsync<T extends NamespacedData[keyof NamespacedData][number] = NamespacedData[keyof NamespacedData][number]>(
-    atom: Atom<T[]>,
-    name: string,
-): Promise<{ name: string; server: string; uri?: string }> {
-    const result = await findAsync(atom, (value) => value && value.name === name || value.uri === name || value.uriTemplate === name);
-    if (!result || !result.source) {
-        throw new Error(`Resource with uri '${name}' not found in any MCP client connection.`);
+function capabilityErrorHandler<T>(empty: T, method: string) {
+  return (e: { code: number }) => {
+    // server is badly behaved and returning invalid capabilities. This commonly occurs for resource templates
+    if (e.code === -32601) {
+      console.error(
+        `The server advertised support for the capability ${
+          method.split("/")[0]
+        }, but returned "Method not found" for '${method}'.`,
+      );
+      return empty;
     }
-    return {
-        name: (result.source as any).name,
-        server: (result.source as any).server,
-        uri: (result.source as any).uri,
-    };
+    throw e;
+  };
 }
 
-async function findAsync<T extends any = any>(atom: Atom<T[]>, predicate: (value: T) => boolean): Promise<T | undefined> {
-    return new Promise((resolve) => {
-        function onAtomChange() {
-            const value = atom.get().find(predicate);
-            if (value) {
-                resolve(value);
-            }
-        }
-
-        onAtomChange();
-        atom.subscribe(onAtomChange);
-    });
-}

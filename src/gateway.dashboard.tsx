@@ -23,7 +23,7 @@ import { env } from "process";
 import { StatusCode } from "hono/utils/http-status";
 import { InMemoryOAuthClientProvider } from "./mcp.auth.client.ts";
 import { OAuthClientMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { MCPClientConnection } from "./gateway.mcp.client.ts";
+import { MCPClientConnection } from "./gateway.mcp.connection.ts";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { connectYjs } from "./store.yjs.ts";
 import { randomUUID } from "crypto";

@@ -1,7 +1,7 @@
 import {Atom, Subscription} from "@xstate/store";
-import { MCPClientManager } from "./gateway.mcp.connection";
+import { MCPClientManager } from "./gateway.mcp.connection.manager.ts";
 import { connectYjs } from "./store.yjs";
-import { MCPClientConnection } from "./gateway.mcp.client";
+import { MCPClientConnection } from "./gateway.mcp.connection.ts";
 import McpServer from "../ref/mcp.*/mcp.server.tsx";
 
 export const mcpAgents: Record<string, MCPClientManager> = {};

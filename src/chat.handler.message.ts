@@ -2,10 +2,10 @@ import { fromEventAsyncGenerator } from "@cxai/stream";
 import { generateText } from "ai";
 import { azure } from "@ai-sdk/azure";
 import { Chat  } from "./chat";
-import { MCPClientManager } from "./gateway.mcp.connection";
+import { MCPClientManager } from "./gateway.mcp.connection.manager";
 import { Session ,Tools} from "./chat.handler.thread";
-import { MCPClientConnection } from "./gateway.mcp.client";
-import { aiTools } from "./chat.mcp.client";
+import { MCPClientConnection } from "./gateway.mcp.connection";
+import { aiTools } from "./chat.handler.tools";
 import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
 
 /**

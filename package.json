@@ -2,13 +2,13 @@
   "name": "assistant",
   "version": "0.0.2",
   "description": "",
-  "main": "./dist/chat.slack.js",
-  "bin": "./dist/chat.slack.js",
+  "main": "./dist/chat.app.slack.js",
+  "bin": "./dist/chat.app.slack.js",
   "packageManager": "yarn@1.22.22",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx   --env-file=.env src/chat.slack.ts",
-    "web": "tsx --env-file=.env src/chat.web.tsx",
+    "dev": "tsx   --env-file=.env src/chat.app.slack.ts",
+    "web": "tsx --env-file=.env src/chat.app.web.tsx",
     "simple": "tsx --env-file=.env src/simple.ts",
     "dashboard": "tsx --env-file=.env src/gateway.dashboard.tsx",
     "manager": "PORT=8090 tsx --env-file=.env src/gateway.mcp.manager.ts",
@@ -20,8 +20,8 @@
     "build:pkgroll": "npx pkgroll  --clear-dist --dist ./dist --shims  --treeshake   --target=node22.16.0 -y",
     "push-env": "./push-env.sh",
     "build:copypackage": "cp package.json ./dist/ && cp package-lock.json ./dist/ || true",
-    "build:tsup": "pnpx tsup ./src/chat.slack.ts --outDir ./dist --target=esnext --format esm --treeshake --shims --publicDir ",
-    "start": "node ./dist/chat.slack.cjs",
+    "build:tsup": "pnpx tsup ./src/chat.app.slack.ts --outDir ./dist --target=esnext --format esm --treeshake --shims --publicDir ",
+    "start": "node ./dist/chat.app.slack.cjs",
     "start:gateway": "node ./dist/gateway.mcp.server.cjs",
     "start:gateway:client": "node ./dist/gateway.dashboard.cjs",
     "node-with-import": "node --import ./start.js /.main.mjs",
@@ -81,14 +81,14 @@
   },
   "exports": {
     ".": {
-      "require": "./dist/chat.slack.cjs",
-      "import": "./dist/chat.slack.mjs",
-      "bin": "./dist/chat.slack.js"
+      "require": "./dist/chat.app.slack.cjs",
+      "import": "./dist/chat.app.slack.mjs",
+      "bin": "./dist/chat.app.slack.js"
     },
     "./web": {
-      "require": "./dist/chat.web.cjs",
-      "import": "./dist/chat.web.mjs",
-      "bin": "./dist/chat.web.js"
+      "require": "./dist/chat.app.web.cjs",
+      "import": "./dist/chat.app.web.mjs",
+      "bin": "./dist/chat.app.web.js"
     },
     "./gateway": {
       "require": "./dist/gateway.mcp.server.cjs",
@@ -101,9 +101,9 @@
       "bin": "./dist/gateway.dashboard.js"
     },
     "./whoami": {
-      "require": "./dist/mcp.server.whoami.cjs",
-      "import": "./dist/mcp.server.whoami.mjs",
-      "bin": "./dist/mcp.server.whoami.js"
+      "require": "./dist/mcp.auth.server.whoami.cjs",
+      "import": "./dist/mcp.auth.server.whoami.mjs",
+      "bin": "./dist/mcp.auth.server.whoami.js"
     },
     "./manager": {
       "require": "./dist/gateway.mcp.manager.cjs",

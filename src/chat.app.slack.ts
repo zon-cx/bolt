@@ -1,12 +1,12 @@
 import { env } from "node:process";
 import slack from "@slack/bolt";
 import { ActorRef, waitFor } from "xstate";
-import { fromMcpSession, Tools } from "./chat.handler.thread";
-import yjsActor from "./chat.store";
+import { fromMcpSession, Tools } from "./chat.handler.thread.ts";
+import yjsActor from "./chat.store.ts";
 import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
-import messages from "./chat.slack.messages";
-import { type Chat } from "./chat";
-import { type serverConfig } from "./gateway.mcp.connection.store";
+import messages from "./chat.app.slack.messages";
+import { type Chat } from "./chat.ts";
+import { type serverConfig } from "./gateway.mcp.connection.store.ts";
 import { trace } from "@opentelemetry/api";
 import { InMemoryOAuthClientProvider } from "./mcp.auth.client.ts";
 import { MCPClientConnection } from "./gateway.mcp.connection.ts";

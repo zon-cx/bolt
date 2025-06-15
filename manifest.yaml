@@ -1,7 +1,7 @@
 id: assistant
 applications:
   - name: slack
-    command: node ./dist/chat.slack.cjs
+    command: node ./dist/chat.app.slack.cjs
     health-check-type: process
     routes:
       - route: 'https://slack.cfapps.eu12.hana.ondemand.com'
@@ -45,7 +45,7 @@ applications:
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
   - name: web
-    command: node ./dist/chat.web.cjs
+    command: node ./dist/chat.app.web.cjs
     routes:
       - route: 'https://assistant.cfapps.eu12.hana.ondemand.com'
     stack: cflinuxfs4
@@ -107,7 +107,7 @@ applications:
     routes:
       - route: 'https://whoami.cfapps.eu12.hana.ondemand.com'
 
-    command: node ./dist/mcp.server.whoami.cjs
+    command: node ./dist/mcp.auth.server.whoami.cjs
     stack: cflinuxfs4
     memory: 524M
     instances: 1
