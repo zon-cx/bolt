@@ -15,19 +15,12 @@ import {
   type Notification,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import type { SSEClientTransportOptions } from "@modelcontextprotocol/sdk/client/sse.js";
-import { OAuthClientProvider, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
-import { StreamableHTTPServerTransport ,StreamableHTTPServerTransportOptions} from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import  {SSEClientTransport} from "@modelcontextprotocol/sdk/client/sse.js";
-import { env } from "node:process";
 import { createAtom, Atom } from "@xstate/store";
-import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { jsonSchema, tool, ToolExecutionOptions } from "ai";
 import * as Y from "yjs";
-import {connectYjs} from "@/store.yjs.ts";
 import {randomUUID} from "node:crypto";
-const authState = connectYjs("@mcp.slack");
 export type  TransportFactory = () => StreamableHTTPClientTransport | SSEClientTransport;
 export class MCPClientConnection {
   public client: Client;

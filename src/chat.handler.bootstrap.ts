@@ -5,8 +5,6 @@ import {  ActorLogic, waitFor } from "xstate";
 import { Chat } from "./chat";
 import { Session } from "./chat.handler.thread";
 import { Tools } from "./chat.handler.thread";
-import { MCPClientManager } from "./gateway.mcp.connection.manager";
-import { MCPClientConnection } from "./gateway.mcp.connection";
 import { aiTools } from "./chat.handler.tools";
  import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
 

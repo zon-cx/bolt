@@ -4,12 +4,7 @@ import {McpServer} from "@modelcontextprotocol/sdk/server/mcp.js"
 import { Server  } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema, CompatibilityCallToolResultSchema, CompleteRequestSchema, Prompt, ResourceTemplateSchema } from "@modelcontextprotocol/sdk/types.js";
-import { getOrCreateMcpAgent } from "./gateway.mcp.connection.store";
 import { env } from "node:process";
-import { Subscription } from "@xstate/store";
-import { toFetchResponse, toReqRes } from "fetch-to-node";
-import { MCPClientManager } from "./gateway.mcp.connection.manager";
 // import {gigyaOAuthProvider, gigyaOAuthRouter, requireAuth} from "./gateway.mcp.auth";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { ProxyOAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js";

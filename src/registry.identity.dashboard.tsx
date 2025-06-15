@@ -4,37 +4,26 @@
  * MCP Server Implementation
  * Exposes an MCP server that proxies requests to connected MCP clients
  */
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { createAtom, type Atom } from "@xstate/store";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { Hono } from "hono";
 import { html } from "hono/html";
-import { jsxRenderer } from "hono/jsx-renderer";
-import { stream, streamSSE, streamText } from "hono/streaming";
-import { nanoid } from "nanoid";
+import { streamText } from "hono/streaming";
 import {
-  createMcpAgent,
-  getOrCreateMcpAgent,
-  listAgents,
-} from "./gateway.mcp.connection.store.ts";
+  mcpAgentManager,
+   serverConfig,
+} from "./registry.identity.store.ts";
 import { serve } from "@hono/node-server";
 import { createServer } from "node:https";
 
 import { env } from "process";
-import { StatusCode } from "hono/utils/http-status";
-import { InMemoryOAuthClientProvider } from "./mcp.auth.client.ts";
-import { OAuthClientMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { MCPClientConnection } from "./gateway.mcp.connection.ts";
+import { InMemoryOAuthClientProvider } from "./mcp.client.auth.ts";
+import { MCPClientConnection } from "./mcp.client.ts";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { connectYjs } from "./store.yjs.ts";
-import { randomUUID } from "crypto";
 import { jwtDecode } from "jwt-decode";
 import { createMiddleware } from "hono/factory";
 import {
   getCookie,
-  getSignedCookie,
   setCookie,
-  setSignedCookie,
-  deleteCookie,
 } from "hono/cookie";
 import { readFileSync } from "fs";
 
@@ -68,6 +57,87 @@ app.onError((err, c) => {
     },
     500
   );
+});
+
+const connections = new Map<string, MCPClientConnection>();
+
+const agentMiddleware = createMiddleware(async (c, next) => {
+  const agentId =c.req.param("id") || c.var.auth?.id;
+  c.set("agentId", agentId);
+
+  console.log("agentId", agentId);
+  const url = agentId ? `${env.MCP_REGISTRY_URL}/${agentId}` : env.MCP_REGISTRY_URL!;
+  const connection =
+  agentId && connections.get(agentId)?.connectionState.get() === "ready"
+      ? connections.get(agentId)!
+      : new MCPClientConnection(new URL(url), {
+          id: agentId,
+          info: {
+            name: c.var.auth?.name || "me",
+            version: "1.0.0",
+          },
+          client: {
+            capabilities: {},
+          },
+          transport: () =>
+            new StreamableHTTPClientTransport(new URL(url), {
+              authProvider: c.get("oauthProvider")!,
+            }),
+        });
+  await connection.init();
+  if (connection.connectionState.get() == "authenticating") {
+    return c.redirect(
+      c.get("oauthProvider").authorizationUrl?.get()!.toString(),
+      302
+    );
+  }
+
+  agentId && connections.set(agentId, connection);
+  c.set("connection", connection);
+  const info = await connection.client.callTool({
+    name: "info",
+    arguments: {},
+  });
+  console.log("agent info", info);
+  c.set("agent", info.structuredContent);
+  await next();
+});
+
+const oauthMiddleware = createMiddleware(async (c, next) => {
+  const oauthId = await getCookie(c, "oauth-id");
+  const url=new URL(c.req.url)
+  console.log("oauth-id", oauthId,url);
+  const redirectUri = `https://${url.host}/oauth/callback`;
+  console.log("redirect-url", redirectUri);
+
+  const oauthProvider = new InMemoryOAuthClientProvider(
+    redirectUri,
+    {
+      client_name: "Dashboard MCP Client",
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      scope: "openid profile email agent",
+    },
+    oauthId
+  );
+
+  oauthProvider.save("original-url", c.req.url);
+  c.set("oauthProvider", oauthProvider);
+
+  await setCookie(c, "oauth-id", oauthProvider.id, {
+    httpOnly: true,
+    secure: c.req.url.startsWith("https://"),
+    sameSite: "none",
+    domain: `.${new URL(c.req.url).hostname}`,
+    maxAge: 60 * 60 * 24 * 30,
+  });
+
+  const info = await oauthProvider.info();
+  console.log("auth info", info);
+  c.set("auth",info);
+
+  await next();
 });
 
 // Login page
@@ -125,9 +195,66 @@ app.get("/login", async (c) => {
   );
 });
 
+app.get("/oauth/callback", async function (c) {
+  const url = new URL(c.req.url);
+  const state = c.req.query("state")!;
+  const authCode = c.req.query("code")!;
+  const oauthProvider = InMemoryOAuthClientProvider.fromState(state);
+  const transport = new StreamableHTTPClientTransport(
+    new URL(env.MCP_REGISTRY_URL!),
+    {
+      authProvider: oauthProvider,
+    }
+  );
+  await transport.finishAuth(authCode);
+  if (oauthProvider.tokens()) {
+    const { access_token } = oauthProvider.tokens()!;
+    const { sub, email, nickname, name } = jwtDecode(access_token) as {
+      sub: string;
+      email: string;
+      nickname: string;
+      name: string;
+    }; 
+    const connection = new MCPClientConnection(new URL(env.MCP_REGISTRY_URL!), {
+      id: oauthProvider.id,
+      info: {
+        name: nickname || name || sub!,
+        version: "1.0.0",
+      },
+      client: {
+        capabilities: {},
+      },
+      transport: () => transport,
+    });
+    await connection.init();
+    connections.set(sub!, connection);
+
+    await setCookie(c, "mcp-agent-id", sub!, {
+      httpOnly: true,
+      secure: c.req.url.startsWith("https://"),
+      sameSite: "none",
+      domain: `.${new URL(c.req.url).hostname}`,
+      maxAge: 60 * 60 * 24 * 30,
+    });
+
+    await setCookie(c, "oauth-id", oauthProvider.id, {
+      httpOnly: true,
+      secure: c.req.url.startsWith("https://"),
+      sameSite: "none",
+      domain: `.${new URL(c.req.url).hostname}`,
+      maxAge: 60 * 60 * 24 * 30,
+    });
+
+    const targetUrl =
+      (await oauthProvider.get("original-url")) || `/agents/${sub}`;
+    console.log("redirecting to", `${targetUrl}`);
+    return c.redirect(`${targetUrl}`, 302);
+  }
+});
+
 // Agent management endpoints
 app.get("/agents", async (c) => {
-  const agents = listAgents();
+  const agents =await mcpAgentManager.listAgents();
   return c.html(
     <html>
       <head>
@@ -183,172 +310,24 @@ app.get("/agents", async (c) => {
   );
 });
 
-app.post("/agents/create", async (c) => {
-  const formData = await c.req.formData();
-  const name = formData.get("name")?.toString() || "New Agent";
-
-  const server = await createMcpAgent(name);
-
-  const agents = listAgents();
-  return c.html(
-    <div id="agents-list">
-      <h2 class="text-xl font-semibold mb-2">Existing Agents</h2>
-      <ul class="divide-y">
-        {agents.map((agent) => (
-          <li class="py-2">
-            <a
-              href={`/agents/${agent.id}`}
-              class="text-blue-500 hover:underline"
-            >
-              {agent.name} ({agent.id})
-            </a>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-});
-
-const COOKIE_SECRET = env.COOKIE_SECRET || "secret";
-
-
-
-app.get("/oauth/callback", async function (c) {
-  const url = new URL(c.req.url);
-  const state = c.req.query("state")!;
-  const authCode = c.req.query("code")!;
-  const oauthProvider = InMemoryOAuthClientProvider.fromState(state);
-  const transport = new StreamableHTTPClientTransport(
-    new URL(env.MCP_MANAGER_URL!),
-    {
-      authProvider: oauthProvider,
-    }
-  );
-  await transport.finishAuth(authCode);
-  if (oauthProvider.tokens()) {
-    const { access_token } = oauthProvider.tokens()!;
-    const { sub, email, nickname, name } = jwtDecode(access_token) as {
-      sub: string;
-      email: string;
-      nickname: string;
-      name: string;
-    }; 
-    const connection = new MCPClientConnection(new URL(env.MCP_MANAGER_URL!), {
-      id: oauthProvider.id,
-      info: {
-        name: nickname || name || sub!,
-        version: "1.0.0",
-      },
-      client: {
-        capabilities: {},
-      },
-      transport: () => transport,
-    });
-    await connection.init();
-    connections.set(sub!, connection);
-
-    await setCookie(c, "mcp-agent-id", sub!, {
-      httpOnly: true,
-      secure: c.req.url.startsWith("https://"),
-      sameSite: "none",
-      domain: `.${new URL(c.req.url).hostname}`,
-      maxAge: 60 * 60 * 24 * 30,
-    });
-
-    await setCookie(c, "oauth-id", oauthProvider.id, {
-      httpOnly: true,
-      secure: c.req.url.startsWith("https://"),
-      sameSite: "none",
-      domain: `.${new URL(c.req.url).hostname}`,
-      maxAge: 60 * 60 * 24 * 30,
-    });
-
-    const targetUrl =
-      (await oauthProvider.get("original-url")) || `/agents/${sub}`;
-    console.log("redirecting to", `${targetUrl}`);
-    return c.redirect(`${targetUrl}`, 302);
-  }
-});
-
-const connections = new Map<string, MCPClientConnection>();
-
-const agentMiddleware = createMiddleware(async (c, next) => {
-  const agentId =c.req.param("id") || c.var.auth?.id;
-  c.set("agentId", agentId);
-
-  console.log("agentId", agentId);
-  const url = agentId ? `${env.MCP_MANAGER_URL}/${agentId}` : env.MCP_MANAGER_URL!;
-  const connection =
-  agentId && connections.get(agentId)?.connectionState.get() === "ready"
-      ? connections.get(agentId)!
-      : new MCPClientConnection(new URL(url), {
-          id: agentId,
-          info: {
-            name: c.var.auth?.name || "me",
-            version: "1.0.0",
-          },
-          client: {
-            capabilities: {},
-          },
-          transport: () =>
-            new StreamableHTTPClientTransport(new URL(url), {
-              authProvider: c.get("oauthProvider")!,
-            }),
-        });
-  await connection.init();
-  if (connection.connectionState.get() == "authenticating") {
-    return c.redirect(
-      c.get("oauthProvider").authorizationUrl?.get()!.toString(),
-      302
-    );
-  }
-
-  agentId && connections.set(agentId, connection);
-  c.set("connection", connection);
-  const info = await connection.client.callTool({
-    name: "info",
-    arguments: {},
-  });
-  console.log("agent info", info);
-  c.set("agent", info.structuredContent);
-  await next();
-});
-
-const oauthMiddleware = createMiddleware(async (c, next) => {
-  const oauthId = await getCookie(c, "oauth-id");
-  const redirectUri = new URL(c.req.url).origin + "/oauth/callback";
-  console.log("redirect-url", redirectUri);
-
-  const oauthProvider = new InMemoryOAuthClientProvider(
-    redirectUri,
-    {
-      client_name: "Dashboard MCP Client",
-      redirect_uris: [redirectUri],
-      grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"],
-      scope: "openid profile email agent",
+app.post("/agents/create",  async (c) => {
+  const connection = new MCPClientConnection(new URL(env.MCP_MANAGER_URL!), {
+    id: "new",
+    info: {
+      name: "New Agent",
+      version: "1.0.0",
     },
-    oauthId
-  );
-
-  oauthProvider.save("original-url", c.req.url);
-  c.set("oauthProvider", oauthProvider);
-
-  await setCookie(c, "oauth-id", oauthProvider.id, {
-    httpOnly: true,
-    secure: c.req.url.startsWith("https://"),
-    sameSite: "none",
-    domain: `.${new URL(c.req.url).hostname}`,
-    maxAge: 60 * 60 * 24 * 30,
   });
-
-  const info = await oauthProvider.info();
-  console.log("auth info", info);
-  c.set("auth",info);
-
-  await next();
+  await connection.init();
+  await connection.client.callTool({
+    name: "create-agent",
+    arguments: {
+      name: "New Agent",
+    },
+  });
+  c.redirect("/agents")
 });
-
+   
 app.get("/agents/me", oauthMiddleware, agentMiddleware, async (c) => {
   return c.redirect(c.var.agent?.id ? `/agents/${c.var.agent.id}` : "/login");
 });
@@ -365,16 +344,15 @@ app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
       </html>
     );
   }
-  const listConnections = await connection.client.callTool({
+  const {isError, content, structuredContent:{connections}} = await connection.client.callTool({
     name: "list-connections",
     arguments: {},
-  });
-  const servers = listConnections.structuredContent?.connections;
-
-  if (!listConnections || listConnections.isError) {
+  }) as CallToolResult & {structuredContent:{connections:serverConfig[]}}
+ 
+  if (!connections || isError) {
     throw new Error(
       `Failed to list connections: ${
-        listConnections?.content.map((e) => e.text) || "Unknown error"
+        content?.map((e) => e.text) || "Unknown error"
       }`
     );
   }
@@ -439,11 +417,11 @@ app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
 
           <div id="servers-list">
             <h2 class="text-xl font-semibold mb-2">Connected Servers</h2>
-            {servers.length === 0 ? (
+            {connections.length === 0 ? (
               <p class="text-gray-500">No servers connected</p>
             ) : (
               <ul class="divide-y">
-                {servers.map((server) => (
+                {connections.map((server) => (
                   <li class="py-2 flex justify-between items-center">
                     <div>
                       <div class="font-medium">{server.id}</div>
@@ -494,7 +472,7 @@ app.post("/agents/:id/connect", oauthMiddleware, agentMiddleware, async (c) => {
       name: id,
       id,
     },
-  });
+  }) ;
   if (response.isError) {
     return c.render(
       <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
@@ -505,20 +483,19 @@ app.post("/agents/:id/connect", oauthMiddleware, agentMiddleware, async (c) => {
       </div>
     );
   }
-  const listConnections = await connection.client.callTool({
+  const {structuredContent:{connections}} = await connection.client.callTool({
     name: "list-connections",
     arguments: {},
-  });
-  const servers = listConnections.structuredContent?.connections;
-
+  }) as CallToolResult & {structuredContent:{connections:serverConfig[]}}
+ 
   return c.html(
     <div id="servers-list">
       <h2 class="text-xl font-semibold mb-2">Connected Servers</h2>
-      {servers.length === 0 ? (
+      {connections.length === 0 ? (
         <p class="text-gray-500">No servers connected</p>
       ) : (
         <ul class="divide-y">
-          {servers.map((server) => (
+          {connections.map((server) => (
             <li class="py-2 flex justify-between items-center">
               <div>
                 <div class="font-medium">{server.id}</div>
@@ -541,25 +518,31 @@ app.post("/agents/:id/connect", oauthMiddleware, agentMiddleware, async (c) => {
 });
 
 // Disconnect from an MCP server
-app.delete("/agents/:id/server/:server", async (c) => {
+app.delete("/agents/:id/server/:server",  oauthMiddleware, agentMiddleware, async (c) => {
   const agentId = c.req.param("id");
   const serverId = c.req.param("server");
-  const agent = getOrCreateMcpAgent(agentId);
+  const agent = c.var.connection;
 
   try {
-    await agent.closeConnection(serverId);
-
-    // Get updated list of servers
-    const servers = Object.keys(agent.mcpConnections).map((id) => {
-      const connection = agent.mcpConnections[id];
-      return {
-        id,
-        url: connection.url.toString(),
-        name: agent.id,
-        version: agent.version,
-      };
+    const result = await agent.client.callTool({
+      name: "disconnect",
+      arguments: {
+        id: serverId,
+      },
     });
-
+    if(result.isError){
+      return c.html(
+        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+          <p>Failed to disconnect from MCP server: {String(result.content?.map((e) => e.text).join(`\n`))}</p>
+        </div>
+      );
+    }
+    // Get updated list of servers
+    const {structuredContent: {connections: servers}} = await agent.client.callTool({
+      name: "list-connections",
+      arguments: {},
+    }) as  CallToolResult & {structuredContent:{connections:(serverConfig & {status:string})[]}}
+ 
     return c.html(
       <div id="servers-list">
         <h2 class="text-xl font-semibold mb-2">Connected Servers</h2>
@@ -598,10 +581,9 @@ app.delete("/agents/:id/server/:server", async (c) => {
 });
 
 // List tools for an agent
-app.get("/agents/:id/tools", async (c) =>
+app.get("/agents/:id/tools", oauthMiddleware, agentMiddleware, async (c) =>
   streamText(c, async (stream) => {
-    const agentId = c.req.param("id");
-    const agent = getOrCreateMcpAgent(agentId);
+    const agent = c.var.connection;
     // // Wait 1 second.
     // await stream.sleep(1000);
     const returned = {} as Record<string, boolean>;
@@ -609,10 +591,10 @@ app.get("/agents/:id/tools", async (c) =>
     await stream.writeln(await html`<ul class="divide-y"></ul>`);
 
     agent.tools.subscribe(() => {
-      streamTools(agent.listTools());
+      streamTools(agent.tools.get());
     });
 
-    await streamTools(agent.listTools());
+    await streamTools(agent.tools.get());
 
     if (agent.tools.get().length === 0) {
       await stream.writeln(
@@ -699,11 +681,9 @@ const https = process.env.KEY_PATH && process.env.CERT_PATH ? {
     cert: readFileSync(env.CERT_PATH!),
   },
 } : {};
-// Export the fetch handler for HTTP vals
-export default async function handler(req: Request) {
-  console.log(`Received request: ${req.method} ${new URL(req.url).pathname}`);
-  return app.fetch(req);
-}
+
+ 
+ 
 serve(
   {
     fetch: app.fetch,
@@ -716,3 +696,5 @@ serve(
     console.log(`Server is running on https://local.pyzlo.in:${server.port}`);
   }
 );
+
+

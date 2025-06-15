@@ -27,7 +27,7 @@ import * as Y from "yjs";
 import { randomFill, randomFillSync, randomUUID } from "node:crypto";
 import { createAtom } from "@xstate/store";
 import { jwtDecode } from "jwt-decode";
-import { InMemoryOAuthClientProvider } from "./mcp.auth.client";
+import { InMemoryOAuthClientProvider } from "./mcp.client.auth";
 // Configuration
 const CALLBACK_PORT = 8090; // Use different port than auth server (3001)
 const CALLBACK_URL = `http://localhost:${CALLBACK_PORT}/oauth/callback`;
