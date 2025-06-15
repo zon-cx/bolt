@@ -5,20 +5,13 @@ import { fromMcpSession, Tools } from "./chat.handler.thread";
 import yjsActor from "./chat.store";
 import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
 import messages from "./chat.slack.messages";
-import { Chat } from "./chat";
-import { serverConfig } from "./gateway.mcp.connection.store";
+import { type Chat } from "./chat";
+import { type serverConfig } from "./gateway.mcp.connection.store";
 import { trace } from "@opentelemetry/api";
-import {
-  authCallback,
-} from "./chat.slack.auth";
-import { slackClient } from "../ref/src/slack/slackClient.ts";
-import { WebClient } from "@slack/web-api";
-import { AppHomeOpenedEvent } from "@slack/types";
-import { z } from "zod";
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { InMemoryOAuthClientProvider } from "./mcp.auth.client.ts";
 import { MCPClientConnection } from "./gateway.mcp.client.ts";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 const { App, LogLevel } = slack;
 const { Assistant } = slack;
@@ -251,7 +244,7 @@ const assistant = new Assistant({
 });
 const port = parseInt(env.PORT || "8080");
 
-
+ 
 const app = new App({
   token: env.SLACK_BOT_TOKEN,
   signingSecret: env.SLACK_SIGNING_SECRET,
@@ -274,7 +267,22 @@ const app = new App({
     {
       path: "/oauth/callback",
       method: "GET",
-      handler: authCallback,
+      handler: async  function (req, res) { 
+        console.log("authCallback", req.url);
+        const url = new URLSearchParams(req.url!.split("?")[1]);
+        const authCode = url.get("code")!;
+        const state = url.get("state")!;
+        console.log("authCallback", state, authCode);
+        const authState = InMemoryOAuthClientProvider.finishAuth(state, authCode); 
+         if(authState.has("permalink")){
+            console.log("authState.get(permalink)", authState.get("permalink"));
+            res.setHeader("Location", authState.get("permalink")!);
+         }else{
+            res.setHeader("Location", `https://slack.com/app_redirect?app=${env.SLACK_BOT_APP_ID}`);
+         }
+         res.statusCode = 302;
+         res.end();
+      },
     },
   ],
 });
@@ -311,7 +319,7 @@ app.action("connect", async ({ ack, client, logger, body, action }) => {
         url,
         name,
       },
-    });
+    }) as CallToolResult & { content:{text:string}[]}
 
     if (!result || result.isError) {
       throw new Error(
@@ -320,33 +328,13 @@ app.action("connect", async ({ ack, client, logger, body, action }) => {
         }`
       );
     }
+    await publishHome({
+      connection,
+      client,
+      user: body.user.id,
+    }); 
 
-    // Get updated connections
-    const listConnections = await connection.client.callTool({
-      name: "list-connections"
-    });
-
-    if (!listConnections || listConnections.isError) {
-      throw new Error(
-        `Failed to list connections: ${
-          listConnections?.content.map((e) => e.text) || "Unknown error"
-        }`
-      );
-    }
-
-    // Update the home view
-    await client.views.update({
-      view_id: view.id,
-      hash: view.hash,
-      view: {
-        type: "home",
-        blocks: buildServerBlocks(
-          (listConnections.structuredContent?.connections as any) || [],
-          result.structuredContent as {id:string, name:string, version:string; url:string, connections:number},
-          body.user.id
-        ),
-      },
-    });
+   
   } catch (error) {
     logger.error(error);
   }
@@ -378,7 +366,7 @@ app.action("disconnect", async ({ ack, body, logger, action, client }) => {
       arguments: {
         id: serverId,
       },
-    });
+    }) as CallToolResult & { content:{text:string}[]}
 
     if (!result || result.isError) {
       throw new Error(
@@ -387,40 +375,14 @@ app.action("disconnect", async ({ ack, body, logger, action, client }) => {
         }`
       );
     }
-
-    // Get updated connections
-    const listConnections = await slackClient.connection.client.callTool({
-      name: "list-connections",
-      arguments: {},
-    });
-    if (!listConnections || listConnections.isError) {
-      throw new Error(
-        `Failed to list connections: ${
-          listConnections?.content.map((e) => e.text) || "Unknown error"
-        }`
-      );
-    }
-
-    // Update the home view
-    await client.views.publish({
-      user_id: body.user.id,
-      view: {
-        type: "home",
-        blocks: buildServerBlocks(
-          (listConnections.structuredContent?.connections as any) || [],
-          result.structuredContent as {id:string, name:string, version:string; url:string, connections:number},
-          body.user.id
-        ),
-      },
-    });
+    await publishHome({
+      connection,
+      client,
+      user: body.user.id,
+    }); 
   } catch (error) {
     logger.error(error);
-    // await updateHomeViewWithMessage(
-    //   client,
-    //   body.user.id,
-    //   `Failed to disconnect: ${error}`,
-    //   true
-    // );
+   
   }
 });
 
@@ -587,222 +549,153 @@ async function publishHome({
   user: string;
 }) {
   if (connection.connectionState.get() === "ready") {
-    const info = await connection.client.callTool({
+    const {structuredContent:info, content:infoContent} = await connection.client.callTool({
       name: "info",
       arguments: {},
-    });
+    }) as CallToolResult & {structuredContent:{id:string, name:string, version:string, url:string, connections:number} }
     console.log("info", info);
-    console.log("slackClient", slackClient);
 
     // Get connections
-    const listConnections = await connection.client.callTool({
+    const {isError, content, structuredContent:{connections}} = await connection.client.callTool({
       name: "list-connections",
       arguments: {},
-    });
+    }) as CallToolResult & {structuredContent:{connections: (serverConfig & {status:string})[] }, content:{text:string}[]}
+
     console.log(
       "listConnections",
-      listConnections.isError
-        ? listConnections.content.map((e) => e.text)
-        : listConnections.structuredContent?.connections
+      isError
+        ? content.map((e:any) => e.text)
+        : connections
     );
-    if (!listConnections || listConnections.isError) {
+    if (isError) {
       throw new Error(
         `Failed to list connections: ${
-          listConnections?.content.map((e) => e.text) || "Unknown error"
+          content.map((e:any) => e.text) || "Unknown error"
         }`
       );
     }
 
-    // Call views.publish with the built-in client
-    const result = await client.views.publish({
+   await client.views.publish({
       user_id: user,
       view: {
         type: "home",
         blocks: buildServerBlocks(
-          (listConnections.structuredContent?.connections as any) || [],
-          info.structuredContent as {
-            id: string;
-            name: string;
-            version: string;
-            url: string;
-            connections: number;
-          },
+          connections,
+          info,
           user
         ),
       },
     });
   }
-}
 
-function getHomeSlackClient(event: { user: string }, client: WebClient) {
-  const msgs: any[] = [];
-  // const channel=client.conversations.open({
-  //   users: event.user,
-  //   return_im: true,
-
-  // })
-  let channel = event.user;
-  let ts = undefined as string | undefined;
-
-  // if(!channel.ok) throw new Error("Failed to open channel");
-  return (
-    slackMcpClients.get(event.user) ||
-    slackMcpClients
-      .set(
-        event.user,
-        new SlackInteractiveOAuthClient(
-          env.MCP_MANAGER_URL!,
-          event.user,
-          event.user,
-          async (msg) => {
-            console.log("msg", msg);
-            const result = await client.chat.postMessage({
-              channel: channel,
-              blocks:
-                typeof msg === "string"
-                  ? [
-                      {
-                        type: "section",
-                        text: {
-                          type: "mrkdwn",
-                          text: msg,
-                        },
-                      },
-                    ]
-                  : msg.blocks,
-            });
-            if (!result.ok) console.error("Failed to post message", result);
-            channel = result?.channel || channel;
-            ts = result?.ts || ts;
-            return result;
-          },
-          async (status) => {
-            console.log("status", status);
-          },
-          async (prompts) => {
-            console.log("prompts", prompts);
-          },
-          async (title) => {
-            console.log("title", title);
-          },
-          async (msg) =>
-            await client.views.publish({
-              user_id: event.user,
-              view: {
-                type: "home",
-                blocks: msg,
-              },
-            })
-        )
-      )
-      .get(event.user)!
-  );
-}
-
-function buildServerBlocks(
-  connections: Array<serverConfig & { status: string }>,
-  {
-    id,
-    name,
-    version,
-    url,
-  }: { id: string; name: string; version: string; url: string },
-  user: string
-) {
-  // Check if user is logged in by checking if they have any connections
-
-  return [
+  function buildServerBlocks(
+    connections: Array<serverConfig & { status: string }>,
     {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: "*MCP Server:* " + `${url}`,
-      },
-    },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: "*MCP Dashboard:* " + `${env.MCP_DASHBOARD_URL}/agents/${id}`,
-      },
-    },
-    { type: "divider" },
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: "*Connected Servers*" },
-    },
-    ...(connections.length === 0
-      ? [
-          {
-            type: "context",
-            elements: [{ type: "mrkdwn", text: "No servers connected." }],
-          },
-        ]
-      : connections.map(({ id, url, status }) => ({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*${id}*\n${url}\nStatus: ${status || "disconnected"}`,
-          },
-          accessory: {
-            type: "button",
-            text: { type: "plain_text", text: "Remove", emoji: true },
-            style: "danger",
-            value: id,
-            action_id: "disconnect",
-          },
-        }))),
-    { type: "divider" },
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: "*Add New Server*" },
-    },
-    {
-      type: "input",
-      block_id: "mcp_server",
-      element: {
-        type: "url_text_input",
-        action_id: "url",
-        initial_value: "https://mcpagent.val.run/mcp",
-        placeholder: {
-          type: "plain_text",
-          text: "Enter the MCP server URL",
+      id,
+      name,
+      version,
+      url,
+    }: { id: string; name: string; version: string; url: string },
+    user: string
+  ) {
+    // Check if user is logged in by checking if they have any connections
+  
+    return [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "*MCP Server:* " + `${url}`,
         },
       },
-      label: {
-        type: "plain_text",
-        text: "Server URL",
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "*MCP Dashboard:* " + `${env.MCP_DASHBOARD_URL}/agents/${id}`,
+        },
       },
-    },
-    {
-      type: "input",
-      block_id: "mcp_server_name",
-      element: {
-        type: "plain_text_input",
-        action_id: "name",
-        initial_value: "agent",
-        placeholder: {
+      { type: "divider" },
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "*Connected Servers*" },
+      },
+      ...(connections.length === 0
+        ? [
+            {
+              type: "context",
+              elements: [{ type: "mrkdwn", text: "No servers connected." }],
+            },
+          ]
+        : connections.map(({ id, url, status }) => ({
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*${id}*\n${url}\nStatus: ${status || "disconnected"}`,
+            },
+            accessory: {
+              type: "button",
+              text: { type: "plain_text", text: "Remove", emoji: true },
+              style: "danger",
+              value: id,
+              action_id: "disconnect",
+            },
+          }))),
+      { type: "divider" },
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "*Add New Server*" },
+      },
+      {
+        type: "input",
+        block_id: "mcp_server",
+        element: {
+          type: "url_text_input",
+          action_id: "url",
+          initial_value: "https://mcpagent.val.run/mcp",
+          placeholder: {
+            type: "plain_text",
+            text: "Enter the MCP server URL",
+          },
+        },
+        label: {
+          type: "plain_text",
+          text: "Server URL",
+        },
+      },
+      {
+        type: "input",
+        block_id: "mcp_server_name",
+        element: {
+          type: "plain_text_input",
+          action_id: "name",
+          initial_value: "agent",
+          placeholder: {
+            type: "plain_text",
+            text: "Server Name",
+          },
+        },
+        label: {
           type: "plain_text",
           text: "Server Name",
         },
       },
-      label: {
-        type: "plain_text",
-        text: "Server Name",
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: ":add:", emoji: true },
+            action_id: "connect",
+          },
+        ],
       },
-    },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: ":add:", emoji: true },
-          action_id: "connect",
-        },
-      ],
-    },
-  ];
+    ];
+  }
 }
+
+ 
+
 
 (async () => {
   // Start your app

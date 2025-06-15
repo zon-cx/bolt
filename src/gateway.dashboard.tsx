@@ -20,7 +20,6 @@ import { serve } from "@hono/node-server";
 import { createServer } from "node:https";
 
 import { env } from "process";
-import { gigyaOAuthProvider, requireAuth } from "./gateway.mcp.auth";
 import { StatusCode } from "hono/utils/http-status";
 import { InMemoryOAuthClientProvider } from "./mcp.auth.client.ts";
 import { OAuthClientMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
