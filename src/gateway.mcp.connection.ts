@@ -37,13 +37,13 @@ export class MCPClientManager {
     public resourceTemplates = createAtom<NamespacedData["resourceTemplates"]>([]);
 
     /**
-     * @param _name Name of the MCP client
-     * @param _version Version of the MCP Client
+     * @param id Name of the MCP client
+     * @param version Version of the MCP Client
      * @param store
      */
     constructor(
-        public _name: string,
-        public _version: string,
+        public id: string,
+        public version: string,
         public store: Y.Map<serverConfig>,
     ) {
         for (const [key, value] of store.entries()) {
@@ -120,16 +120,16 @@ export class MCPClientManager {
             console.log("new connection", id, url);
             this.mcpConnections[id] = new MCPClientConnection(new URL(url), {
                 info: {
-                    name: this._name,
-                    version: this._version,
+                    name: this.id,
+                    version: this.version,
                 },
                 ...options,
             });
            this.store.set(id, {
                 id,
                 url,
-                name: this._name,
-                version: this._version,
+                name: this.id,
+                version: this.version,
             });
             this.mcpConnections[id].tools.subscribe(() => {
                 this.tools.set(getNamespacedData(this.mcpConnections, "tools"));

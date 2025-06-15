@@ -26,15 +26,15 @@ const agentServerStore = (agentId: string) => {
 
 const agentsStore = doc.getMap<agentConfig>("agents");
 
-export function createMcpAgent(id: string, mcpServer?:McpServer) {
+export function createMcpAgent({id, name, created}: Partial<agentConfig> & {id: string}, mcpServer?:McpServer) {
   const agent = new MCPClientManager(id, "1.0.0", agentServerStore(id));
   mcpAgents[id] = agent;
 
   // Store agent metadata
   agentsStore.set(id, {
     id,
-    name: id,
-    created: new Date().toISOString(),
+    name: name || id,
+    created: created || new Date().toISOString(),
   });
 
   if(!!mcpServer) {
@@ -60,7 +60,7 @@ export function createMcpAgent(id: string, mcpServer?:McpServer) {
       })
     });
   }
-
+  
 
   return agent;
 }
@@ -69,14 +69,17 @@ export function getMcpAgent(id: string) {
   return mcpAgents[id];
 }
 
-export function getOrCreateMcpAgent(id: string, mcpServer?:McpServer) {
-  if (mcpAgents[id]) {
-    return mcpAgents[id];
+export function getOrCreateMcpAgent(id: string | Partial<agentConfig> & {id: string}, mcpServer?:McpServer) {
+  if(typeof id === "string") {
+    id = {id, name: id, created: new Date().toISOString()};
+  }
+  if (mcpAgents[id.id]) {
+    return Object.assign(mcpAgents[id.id], agentsStore.get(id.id));
   }
  
   
   // Create new agent if it doesn't exist
-  return createMcpAgent(id, mcpServer);
+  return  Object.assign(createMcpAgent(id, mcpServer), agentsStore.get(id.id));
 }
 
 export function listAgents() {

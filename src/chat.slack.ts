@@ -126,10 +126,10 @@ const assistant = new Assistant({
       const result = await say({
         blocks: messages.loginMessage(url?.toString() || ""),
       });
-      oauthProvider.save("permalink", await client.chat.getPermalink({
+      await oauthProvider.save("permalink", await client.chat.getPermalink({
         channel: event.assistant_thread.channel_id,
-        message_ts: result.message?.ts || result.ts || id
-       }).then(r=>r.permalink)); 
+        message_ts: result.ts || event.assistant_thread.thread_ts
+       }))
     });
     const connection = await mcpConnection({
       oauthProvider,
@@ -214,10 +214,10 @@ const assistant = new Assistant({
      const result = await say({
         blocks: messages.loginMessage(url?.toString() || ""),
       });
-      oauthProvider.save("permalink", await client.chat.getPermalink({
+       await oauthProvider.save("permalink", await client.chat.getPermalink({
         channel: message.channel,
         message_ts: result.message?.ts || result.ts || message.ts
-       }).then(r=>r.permalink)); 
+       }))
     });
  
     const connection = await mcpConnection({

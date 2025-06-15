@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {getOrCreateMcpAgent} from "@/gateway.mcp.connection.store.ts";
+import {agentConfig, getOrCreateMcpAgent} from "@/gateway.mcp.connection.store.ts";
 import {randomUUID} from "node:crypto";
 import {env} from "node:process";
 import { ProxyOAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js";
@@ -25,6 +25,12 @@ async function createServerManager(id?: string) {
         if(id) return id;
         const agentId =  extra?.authInfo?.extra?.sub as string  ||extra?.authInfo?.subject
         return agentId;
+    }
+
+    const agentInfo = (extra?: RequestHandlerExtra<any,any>): Partial<agentConfig> & {id: string} | string => {
+        if(id) return  id;
+        const agentId =  extra?.authInfo?.extra?.sub as string  ||extra?.authInfo?.subject
+        return {id: agentId, name: extra?.authInfo?.extra?.name as string};
     }
     const mcpServer = new McpServer({
         name: "mcp-manager",
@@ -73,21 +79,20 @@ async function createServerManager(id?: string) {
     }, async function (  extra) {
         console.log("Listing MCP servers",   extra);  
         try {
-            const agentId = getAgentId(extra);
-            const agent = getOrCreateMcpAgent(agentId, mcpServer);
+            const agent = getOrCreateMcpAgent(agentInfo(extra), mcpServer);
             const connections = await agent.listConnections();
             await extra.sendNotification({
                 method: "notifications/message",
                 params: {
                     level: "info",
                     type: "text",
-                    text: `Available ${connections.length} MCP servers for agent ${agentId}`,
+                    text: `Available ${connections.length} MCP servers for agent ${agent.name}`,
                 }
             });
             return {
                 content: [{
                     type: "text",
-                    text: `Available MCP servers for agent ${agentId}`,
+                    text: `Available MCP servers for agent ${agent.name}`,
                 }],
                 structuredContent:{
                    connections
@@ -120,8 +125,7 @@ async function createServerManager(id?: string) {
         },
         description: "Connect to a new MCP server",
     }, async function (params, extra) {
-        const agentId = getAgentId(extra);
-        const agent = getOrCreateMcpAgent(agentId, mcpServer);
+        const agent = getOrCreateMcpAgent(agentInfo(extra), mcpServer);
         const connection = await agent.connect(params.url, {
             id: params.name,
         })
@@ -144,8 +148,7 @@ async function createServerManager(id?: string) {
             },
             description: "Disconnect from an MCP server",
         }, async function (params, extra) {
-            const agentId = getAgentId(extra);
-            const agent = getOrCreateMcpAgent(agentId, mcpServer);
+            const agent = getOrCreateMcpAgent(agentInfo(extra), mcpServer);
             await agent.closeConnection(params.id);
             return {
                 content: [{
@@ -168,20 +171,19 @@ async function createServerManager(id?: string) {
         },
         description: "Get information about the MCP server",
     }, async function ( extra) { 
-        const agentId = getAgentId(extra);
-        const agent = getOrCreateMcpAgent(agentId, mcpServer);
+        const agent = getOrCreateMcpAgent(agentInfo(extra), mcpServer);
         const connections = await agent.listConnections();
          return {
             content: [{
                 type: "text",
-                text: `Agent info for ${agentId}  with ${connections.length} connections )`,
+                text: `Agent info for ${agent.name}  with ${connections.length} connections )`,
             }],
             structuredContent: {
-                id: agentId,  
+                id: agent.id,  
                 connections: connections.length,
-                name: agent._name,
-                url: `${env.MCP_GATEWAY_URL}/${agentId}`,
-                version:agent._version
+                name: agent.name,
+                url: `${env.MCP_GATEWAY_URL}/${agent.id}`,
+                version:agent.version
              }
         }
     });
@@ -197,8 +199,7 @@ async function createServerManager(id?: string) {
         },
         description: "Get information about the MCP server",
     }, async function (params, extra) {
-        const agentId = getAgentId(extra);
-        const agent = getOrCreateMcpAgent(agentId, mcpServer);
+        const agent = getOrCreateMcpAgent(agentInfo(extra), mcpServer);
         const connection =  agent.mcpConnections[params.id] 
         if (!connection) {
             return {
@@ -296,7 +297,10 @@ const proxyProvider = new ProxyOAuthServerProvider({
             subject: String(userInfo.sub), // 'sub' is a standard claim for the subject (user's ID)
             scopes: ["openid", "profile", "email" ,"agent"],
             token,
-            extra:userInfo,
+            extra:{
+                ...userInfo,
+                name: userInfo.nickname || userInfo.name || userInfo.given_name || userInfo.family_name,
+            },
             clientId: "FYEcmQ4aAAZ-i69s1UZSxJ8x", // Client ID is not used in this example, but can be set if needed
         };
     },
@@ -318,7 +322,7 @@ app.use(mcpAuthRouter({
 
 export const requireAuth = requireBearerAuth({
     verifier: proxyProvider,
-    requiredScopes: ["openid", "profile", "email" ],
+    requiredScopes: ["openid", "profile", "email","agent" ],
 });
 
 app.all("/mcp", requireAuth, async (req, res) => {

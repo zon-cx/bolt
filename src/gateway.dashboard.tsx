@@ -46,8 +46,14 @@ type Variables = {
   agent: {
     id: string;
     name: string;
+    version: string;
+    url: string; 
+  };
+  auth: {
+    id: string;
+    name: string;
     email: string;
-    access_token: string;
+    nickname: string;
   };
 };
 
@@ -246,7 +252,7 @@ app.get("/oauth/callback", async function (c) {
       httpOnly: true,
       secure: c.req.url.startsWith("https://"),
       sameSite: "none",
-      domain: ".local.pyzlo.in",
+      domain: `.${new URL(c.req.url).hostname}`,
       maxAge: 60 * 60 * 24 * 30,
     });
 
@@ -254,7 +260,7 @@ app.get("/oauth/callback", async function (c) {
       httpOnly: true,
       secure: c.req.url.startsWith("https://"),
       sameSite: "none",
-      domain: ".local.pyzlo.in",
+      domain: `.${new URL(c.req.url).hostname}`,
       maxAge: 60 * 60 * 24 * 30,
     });
 
@@ -268,24 +274,25 @@ app.get("/oauth/callback", async function (c) {
 const connections = new Map<string, MCPClientConnection>();
 
 const agentMiddleware = createMiddleware(async (c, next) => {
-  const agentId =c.req.param("id") || c.var.agent?.id;
+  const agentId =c.req.param("id") || c.var.auth?.id;
   c.set("agentId", agentId);
 
   console.log("agentId", agentId);
+  const url = agentId ? `${env.MCP_MANAGER_URL}/${agentId}` : env.MCP_MANAGER_URL!;
   const connection =
   agentId && connections.get(agentId)?.connectionState.get() === "ready"
       ? connections.get(agentId)!
-      : new MCPClientConnection(new URL(env.MCP_MANAGER_URL!), {
+      : new MCPClientConnection(new URL(url), {
           id: agentId,
           info: {
-            name: c.var.agent?.name || "me",
+            name: c.var.auth?.name || "me",
             version: "1.0.0",
           },
           client: {
             capabilities: {},
           },
           transport: () =>
-            new StreamableHTTPClientTransport(agentId ? new URL(`${env.MCP_MANAGER_URL}/${agentId}`) : new URL(env.MCP_MANAGER_URL!), {
+            new StreamableHTTPClientTransport(new URL(url), {
               authProvider: c.get("oauthProvider")!,
             }),
         });
@@ -299,7 +306,12 @@ const agentMiddleware = createMiddleware(async (c, next) => {
 
   agentId && connections.set(agentId, connection);
   c.set("connection", connection);
-
+  const info = await connection.client.callTool({
+    name: "info",
+    arguments: {},
+  });
+  console.log("agent info", info);
+  c.set("agent", info.structuredContent);
   await next();
 });
 
@@ -327,26 +339,25 @@ const oauthMiddleware = createMiddleware(async (c, next) => {
     httpOnly: true,
     secure: c.req.url.startsWith("https://"),
     sameSite: "none",
-    domain: ".local.pyzlo.in",
+    domain: `.${new URL(c.req.url).hostname}`,
     maxAge: 60 * 60 * 24 * 30,
   });
 
   const info = await oauthProvider.info();
-  console.log("info", info);
-  c.set("agent",info);
+  console.log("auth info", info);
+  c.set("auth",info);
 
   await next();
 });
 
 app.get("/agents/me", oauthMiddleware, agentMiddleware, async (c) => {
-  return c.redirect(`/agents/${c.var.agent.id}`);
+  return c.redirect(c.var.agent?.id ? `/agents/${c.var.agent.id}` : "/login");
 });
 // Agent-specific endpoints
 app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
   const connection = c.var.connection;
-  const agentId = c.var.agent?.id;
-  const agentName = c.var.agent?.name;
-  if (connection.connectionState.get() != "ready") {
+  const {auth, agent} = c.var;
+   if (connection.connectionState.get() != "ready") {
     return c.html(
       <html>
         <body>
@@ -372,21 +383,34 @@ app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
   return c.html(
     <html>
       <head>
-        <title>MCP Agent: {agentName || agentId}</title>
+        <title>MCP Agent: {agent?.name}</title>
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
         <script src="https://unpkg.com/htmx.org@2.0.4"></script>
       </head>
       <body>
         <div class="p-6 max-w-xl mx-auto">
           <h1 class="text-2xl font-bold mb-4">
-            MCP Agent{agentName ? `: ${agentName}` : ""}
-            <span class="text-sm text-gray-500 ml-2">({agentId})</span>
+            Hello {auth?.name} 
           </h1>
-
+          <h1 class="text-2xl font-bold mb-4">
+             Welcome to the MCP Agent{agent?.name ? `: ${agent?.name}` : ""}
+            <span class="text-sm text-gray-500 ml-2">({agent?.id})</span>
+          </h1>
+          <span class="text-sm text-gray-500 ml-2 cursor-pointer" onclick={()=>{
+            navigator.clipboard.writeText(agent?.url || "");
+            alert("MCP Server URL copied to clipboard");
+          }}>
+            {`${agent?.url}`} 
+            <span class="text-sm text-gray-500 ml-2">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.057 1.123-.08M15.75 18H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08M15.75 18.75v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5A3.375 3.375 0 006.375 7.5H5.25m11.9-3.664A2.251 2.251 0 0015 2.25h-1.5a2.251 2.251 0 00-2.15 1.586m5.8 0c.065.21.1.433.1.664v.75h-6V4.5c0-.231.035-.454.1-.664M6.75 7.5H4.875c-.621 0-1.125.504-1.125 1.125v12c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V16.5a9 9 0 00-9-9z" />
+              </svg>
+            </span>
+          </span>
           <div class="mb-6">
             <h2 class="text-xl font-semibold mb-2">Connect to MCP Server</h2>
             <form
-              hx-post={`/agents/${agentId}/connect`}
+              hx-post={`/agents/${agent?.id}/connect`}
               hx-target="#servers-list"
               hx-swap="outerHTML"
             >
@@ -428,7 +452,7 @@ app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
                     </div>
                     <button
                       class="bg-red-500 text-white px-3 py-1 rounded text-sm"
-                      hx-delete={`/agents/${agentId}/server/${server.id}`}
+                      hx-delete={`/agents/${agent?.id}/server/${server.id}`}
                       hx-target="#servers-list"
                       hx-swap="outerHTML"
                     >
@@ -444,7 +468,7 @@ app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
             <h2 class="text-xl font-semibold mb-2">Available Tools</h2>
             <div
               id="tools-list"
-              hx-get={`/agents/${agentId}/tools`}
+              hx-get={`/agents/${agent?.id}/tools`}
               hx-trigger="load"
             >
               Loading tools...
@@ -532,8 +556,8 @@ app.delete("/agents/:id/server/:server", async (c) => {
       return {
         id,
         url: connection.url.toString(),
-        name: agent._name,
-        version: agent._version,
+        name: agent.id,
+        version: agent.version,
       };
     });
 

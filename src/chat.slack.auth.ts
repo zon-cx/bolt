@@ -10,6 +10,7 @@ import {URL, URLSearchParams} from "node:url";
 
 
 export const authCallback =async (req: ParamsIncomingMessage, res: ServerResponse) => { 
+        console.log("authCallback", req.url);
         const url = new URLSearchParams(req.url!.split("?")[1]);
         const authCode = url.get("code")!;
         const state = url.get("state")!;
