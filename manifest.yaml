@@ -1,7 +1,7 @@
 id: assistant
 applications:
   - name: slack
-    command: node ./dist/chat.slack.cjs
+    command: npm run start:slack
     health-check-type: process
     routes:
       - route: 'https://slack.cfapps.eu12.hana.ondemand.com'
@@ -18,15 +18,16 @@ applications:
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
       MCP_INSPECTOR_URL: 'https://inspector.cfapps.eu12.hana.ondemand.com'
-      MCP_MANAGER_URL: 'https://manager.cfapps.eu12.hana.ondemand.com/mcp'  
-      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com/mcp'
+      MCP_REGISTRY_URL: 'https://registry.cfapps.eu12.hana.ondemand.com/mcp'
+      MCP_GATEWAY_URL: 'https://router.cfapps.eu12.hana.ondemand.com/mcp'
       BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com' 
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
-  - name: manager
-    command: node ./dist/gateway.mcp.manager.cjs
+  - name: registry
+    command: npm run start:registry
     health-check-type: process
     routes:
+      - route: 'https://registry.cfapps.eu12.hana.ondemand.com'
       - route: 'https://manager.cfapps.eu12.hana.ondemand.com'
     stack: cflinuxfs4
     memory: 512M
@@ -40,12 +41,12 @@ applications:
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
-      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com/mcp'
-      BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com'
+      MCP_GATEWAY_URL: 'https://router.cfapps.eu12.hana.ondemand.com/mcp'
+      BASE_URL: 'https://registry.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
   - name: web
-    command: node ./dist/chat.web.cjs
+    command: npm run start:web
     routes:
       - route: 'https://assistant.cfapps.eu12.hana.ondemand.com'
     stack: cflinuxfs4
@@ -59,7 +60,7 @@ applications:
       LOG_REMOTE_USER: true
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      MCP_GATEWAY_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com/mcp'
+      MCP_GATEWAY_URL: 'https://router.cfapps.eu12.hana.ondemand.com/mcp'
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
       BASE_URL: 'https://assistant.cfapps.eu12.hana.ondemand.com'
     buildpacks:
@@ -68,7 +69,7 @@ applications:
   - name: dashboard
     routes:
       - route: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
-    command: node ./dist/gateway.dashboard.cjs
+    command: npm run start:dashboard
     stack: cflinuxfs4
     memory: 512M
     instances: 1
@@ -81,18 +82,18 @@ applications:
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       BASE_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
+      MCP_REGISTRY_URL: https://registry.cfapps.eu12.hana.ondemand.com/mcp
+      MCP_GATEWAY_URL: https://router.cfapps.eu12.hana.ondemand.com/mcp
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
-  - name: gateway
+  - name: router
     routes:
-      - route: 'https://gateway.cfapps.eu12.hana.ondemand.com'
-
-    command: node ./dist/gateway.mcp.server.cjs
+      - route: 'https://router.cfapps.eu12.hana.ondemand.com'
+    command: npm run start:router
     stack: cflinuxfs4
     memory: 1024M
     instances: 1
     version: 0.0.2
-    
     env:
       NODE_OPTIONS: --max-http-header-size=80000
       NODE_ENV: production
@@ -100,14 +101,15 @@ applications:
       LOG_REMOTE_USER: true
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      BASE_URL: 'https://gateway.cfapps.eu12.hana.ondemand.com'
+      BASE_URL: 'https://router.cfapps.eu12.hana.ondemand.com'
+      MCP_REGISTRY_URL: https://registry.cfapps.eu12.hana.ondemand.com/mcp
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
   - name: whoami
     routes:
       - route: 'https://whoami.cfapps.eu12.hana.ondemand.com'
 
-    command: node ./dist/mcp.server.whoami.cjs
+    command: npm run start:whoami
     stack: cflinuxfs4
     memory: 524M
     instances: 1

@@ -1,29 +1,31 @@
 {
-  "name": "assistant",
+  "name": "agent-mcp-identity",
   "version": "0.0.2",
   "description": "",
-  "main": "./dist/chat.slack.js",
-  "bin": "./dist/chat.slack.js",
+  "main": "./dist/chat.ui.slack.js",
+  "bin": "./dist/chat.ui.slack.js",
   "packageManager": "yarn@1.22.22",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx   --env-file=.env src/chat.slack.ts",
-    "web": "tsx --env-file=.env src/chat.web.tsx",
+    "dev": "tsx   --env-file=.env src/chat.ui.slack.ts",
+    "web": "tsx --env-file=.env src/chat.ui.web.tsx",
     "simple": "tsx --env-file=.env src/simple.ts",
-    "dashboard": "tsx --env-file=.env src/gateway.dashboard.tsx",
-    "manager": "PORT=8090 tsx --env-file=.env src/gateway.mcp.manager.ts",
-    "gateway": "tsx --env-file=.env src/gateway.mcp.server.ts",
-    "gateway:client": "tsx --env-file=.env src/gateway.dashboard.tsx",
-    "build:mta": "mbt build -p=cf",
+    "dashboard": "tsx --env-file=.env src/registry.identity.dashboard.tsx",
+    "registry": "PORT=8090 tsx --env-file=.env src/registry.mcp.server.ts",
+    "router": "tsx --env-file=.env src/registry.router.mcp.server..ts",
     "build": "npm run build:pkgroll",
-    "deploy": "cf deploy mta_archives/assistant_0.0.1.mtar -f --retries 1",
     "build:pkgroll": "npx pkgroll  --clear-dist --dist ./dist --shims  --treeshake   --target=node22.16.0 -y",
+    "build:mta": "mbt build -p=cf --mtar-name=archive.0.1.mtar",
+    "deploy:mta": "cf deploy mta_archives/archive.0.1.mtar -f --retries 1",
     "push-env": "./push-env.sh",
     "build:copypackage": "cp package.json ./dist/ && cp package-lock.json ./dist/ || true",
-    "build:tsup": "pnpx tsup ./src/chat.slack.ts --outDir ./dist --target=esnext --format esm --treeshake --shims --publicDir ",
-    "start": "node ./dist/chat.slack.cjs",
-    "start:gateway": "node ./dist/gateway.mcp.server.cjs",
-    "start:gateway:client": "node ./dist/gateway.dashboard.cjs",
+    "build:tsup": "pnpx tsup ./src/chat.app.slack.ts --outDir ./dist --target=esnext --format esm --treeshake --shims --publicDir ",
+    "start:router": "node ./dist/registry.router.mcp.server.cjs",
+    "start:registry": "node ./dist/registry.mcp.server.cjs",
+    "start:dashboard": "node ./dist/registry.identity.dashboard.cjs",
+    "start:slack": "node ./dist/chat.ui.slack.cjs",
+    "start:web": "node ./dist/chat.ui.web.cjs",
+    "start:whoami": "node ./dist/whoami.mcp.server.cjs",
     "node-with-import": "node --import ./start.js /.main.mjs",
     "inspector": "npx @modelcontextprotocol/inspector "
   },
@@ -81,34 +83,34 @@
   },
   "exports": {
     ".": {
-      "require": "./dist/chat.slack.cjs",
-      "import": "./dist/chat.slack.mjs",
-      "bin": "./dist/chat.slack.js"
+      "require": "./dist/chat.ui.slack.cjs",
+      "import": "./dist/chat.ui.slack.mjs",
+      "bin": "./dist/chat.ui.slack.js"
     },
     "./web": {
-      "require": "./dist/chat.web.cjs",
-      "import": "./dist/chat.web.mjs",
-      "bin": "./dist/chat.web.js"
+      "require": "./dist/chat.ui.web.cjs",
+      "import": "./dist/chat.ui.web.mjs",
+      "bin": "./dist/chat.ui.web.js"
     },
-    "./gateway": {
-      "require": "./dist/gateway.mcp.server.cjs",
-      "import": "./dist/gateway.mcp.server.mjs",
-      "bin": "./dist/gateway.mcp.server.js"
+    "./router": {
+      "require": "./dist/registry.router.mcp.server.cjs",
+      "import": "./dist/registry.router.mcp.server.mjs",
+      "bin": "./dist/registry.router.mcp.server.js"
     },
-    "./mcp.dashboard": {
-      "require": "./dist/gateway.dashboard.cjs",
-      "import": "./dist/gateway.dashboard.mjs",
-      "bin": "./dist/gateway.dashboard.js"
+    "./dashboard": {
+      "require": "./dist/registry.identity.dashboard.cjs",
+      "import": "./dist/registry.identity.dashboard.mjs",
+      "bin": "./dist/registry.identity.dashboard.js"
     },
     "./whoami": {
-      "require": "./dist/mcp.server.whoami.cjs",
-      "import": "./dist/mcp.server.whoami.mjs",
-      "bin": "./dist/mcp.server.whoami.js"
+      "require": "./dist/whoami.mcp.server.cjs",
+      "import": "./dist/whoami.mcp.server.mjs",
+      "bin": "./dist/whoami.mcp.server.js"
     },
-    "./manager": {
-      "require": "./dist/gateway.mcp.manager.cjs",
-      "import": "./dist/gateway.mcp.manager.mjs",
-      "bin": "./dist/gateway.mcp.manager.js"
+    "./registry": {
+      "require": "./dist/registry.mcp.server.cjs",
+      "import": "./dist/registry.mcp.server.mjs",
+      "bin": "./dist/registry.mcp.server.js"
     }
   }
 }

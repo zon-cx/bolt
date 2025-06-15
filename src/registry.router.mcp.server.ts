@@ -1,93 +1,24 @@
 import express, {RequestHandler} from "express";
 import { randomUUID } from "node:crypto";
-import {McpServer} from "@modelcontextprotocol/sdk/server/mcp.js"
 import { Server  } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema, CompatibilityCallToolResultSchema, CompleteRequestSchema, Prompt, ResourceTemplateSchema } from "@modelcontextprotocol/sdk/types.js";
-import { getOrCreateMcpAgent } from "./gateway.mcp.connection.store";
+import { MCPAgentManager } from "./registry.identity.store";
 import { env } from "node:process";
-import { Subscription } from "@xstate/store";
-import { toFetchResponse, toReqRes } from "fetch-to-node";
-import { MCPClientManager } from "./gateway.mcp.connection";
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { ProxyOAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js";
-import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
-import { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { InMemoryEventStore } from '@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js';
 
-import {z} from "zod";
+ import { authRouter, getAuthId, requireAuth } from "./registry.mcp.server.auth";
 const app = express();
 app.use(express.json());
-
+app.use(authRouter);
 // Map to store transports by session ID
 const transports = {
   streamable: {} as Record<string, StreamableHTTPServerTransport>,
   sse: {} as Record<string, SSEServerTransport>
 };
 
-
-
-const GIGYA_ISSUER =
-    "https://gigya.authz.id/oidc/op/v1.0/4_yCXuvQ52Ux52BdaQTxUVhg";
-
-const proxyProvider = new ProxyOAuthServerProvider({
-  endpoints: {
-    authorizationUrl: `${GIGYA_ISSUER}/authorize`,
-    tokenUrl: `${GIGYA_ISSUER}/token`,
-    registrationUrl: `${GIGYA_ISSUER}/register`,
-    revocationUrl: `${GIGYA_ISSUER}/revoke`, // optional, if supported by Gigya
-  },
-
-  verifyAccessToken: async (token) => {
-    console.log("verifyAccessToken", token);
-    const response = await fetch(`${GIGYA_ISSUER}/userinfo`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
-      },
-
-    });
-
-    if (!response.ok) {
-      console.error("token_verification_failed", Object.fromEntries(response.headers.entries()));
-      throw new Error('token_verification_failed');
-    }
-
-    const userInfo = await response.json();
-
-    if (typeof userInfo !== 'object' || userInfo === null || !('sub' in userInfo)) {
-      throw new Error('invalid_token');
-    }
-
-    return {
-      issuer: GIGYA_ISSUER,
-      subject: String(userInfo.sub), // 'sub' is a standard claim for the subject (user's ID)
-      scopes: ["openid", "profile", "email"],
-      extra: userInfo,
-      token,
-      clientId: "FYEcmQ4aAAZ-i69s1UZSxJ8x", // Client ID is not used in this example, but can be set if needed
-    };
-  },
-  getClient: async (client_id) => {
-    return {
-      scope: "openid profile email",
-      client_id,
-      redirect_uris: ["http://localhost:3000/callback", "http://localhost:6274/oauth/callback/debug", "http://localhost:6274/oauth/callback", "http://localhost:8080/oauth/callback", "http://localhost:8090/oauth/callback", `${env.BASE_URL || "http://localhost:8080"}/oauth/callback`, `${env.BASE_URL || "http://localhost:8080"}/oauth/callback/debug`],
-    }
-  }
-})
-app.use(mcpAuthRouter({
-  provider: proxyProvider,
-  issuerUrl: new URL("https://mcp-auth.val.run"),
-  baseUrl: new URL( "https://mcp-auth.val.run"),
-  serviceDocumentationUrl: new URL("https://docs.example.com/"),
-}))
-export const requireAuth = requireBearerAuth({
-  verifier: proxyProvider,
-  requiredScopes: ["openid", "profile", "email" ,"agent"],
-});
+ 
 
 
  app.use(async (req, res, next) => {
@@ -104,11 +35,7 @@ export const requireAuth = requireBearerAuth({
     console.log(`[LOG] [DONE] ${req.method} ${req.url} ${res.statusCode}`);
   });
 
-function getAuthId(extra: RequestHandlerExtra<any,any>): string {
-  const id = extra?.authInfo?.extra?.sub as string  || "default";
-  console.log("agent id", id, extra?.authInfo?.extra);
-  return id;
-}
+
 
 // Helper to create a new MCP server and transport for a session
 async function createSessionTransport(getId = getAuthId) {
@@ -134,46 +61,33 @@ async function createSessionTransport(getId = getAuthId) {
       },
     }
   ); 
+  const mcpAgentManager = new MCPAgentManager(mcpServer);
   // Register handlers to proxy requests to the agent
   mcpServer.setRequestHandler(ListToolsRequestSchema, async (request,extra) => ({
-    tools: getOrCreateMcpAgent(getId(extra),mcpServer).listTools(),
+    tools: mcpAgentManager.initAgent(getId(extra)).listTools(),
   }));
   mcpServer.setRequestHandler(ListPromptsRequestSchema, async (_,extra) => ({
-    prompts: getOrCreateMcpAgent(getId(extra),mcpServer).listPrompts(),
+    prompts: mcpAgentManager.initAgent(getId(extra)).listPrompts(),
   }));
   mcpServer.setRequestHandler(ListResourcesRequestSchema, async (_,extra) => ({
-    resources:  getOrCreateMcpAgent(getId(extra),mcpServer).listResources(),
+    resources: mcpAgentManager.initAgent(getId(extra)).listResources(),
   }));
   mcpServer.setRequestHandler(ListResourceTemplatesRequestSchema, async (_, extra) => ({
-    resourceTemplates:  getOrCreateMcpAgent(getId(extra),mcpServer).listResourceTemplates(),
+    resourceTemplates: mcpAgentManager.initAgent(getId(extra)).listResourceTemplates(),
   }));
   mcpServer.setRequestHandler(GetPromptRequestSchema, async (request,extra) => {
-    return  getOrCreateMcpAgent(getId(extra),mcpServer).getPrompt(request.params);
+    return  mcpAgentManager.initAgent(getId(extra)).getPrompt(request.params);
   });
   mcpServer.setRequestHandler(CallToolRequestSchema, async (request,extra) => {
-    return  getOrCreateMcpAgent(getId(extra),mcpServer).callTool(request.params);
+    return  mcpAgentManager.initAgent(getId(extra)).callTool(request.params);
   });
   mcpServer.setRequestHandler(ReadResourceRequestSchema, async (request,extra) => {
-    return  getOrCreateMcpAgent(getId(extra),mcpServer).readResource(request.params);
+    return  mcpAgentManager.initAgent(getId(extra)).readResource(request.params);
   });
   mcpServer.setRequestHandler(CompleteRequestSchema, async (request,extra) => {
-    return  getOrCreateMcpAgent(getId(extra),mcpServer).complete(request.params);
+    return  mcpAgentManager.initAgent(getId(extra)).complete(request.params);
   });
-
-  // const subscriptions: Subscription[] = [];
-  // // Subscribe to tool changes and notify clients
-  // subscriptions.push(agent.tools.subscribe(() => {
-  //   if (agent.tools.get()) mcpServer.sendToolListChanged();
-  // }));
-  // subscriptions.push(agent.prompts.subscribe(() => {
-  //   if (agent.prompts.get()) mcpServer.sendPromptListChanged();
-  // }));
-  // subscriptions.push(agent.resources.subscribe(() => {
-  //   if (agent.resources.get()) mcpServer.sendResourceListChanged();
-  // }));
-  // subscriptions.push(agent.resourceTemplates.subscribe(() => {
-  //   if (agent.resourceTemplates.get()) mcpServer.sendResourceListChanged();
-  // }));
+ 
 
   const transport = new StreamableHTTPServerTransport({
     eventStore: new InMemoryEventStore(),

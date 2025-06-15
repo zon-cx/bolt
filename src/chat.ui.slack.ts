@@ -1,15 +1,15 @@
 import { env } from "node:process";
 import slack from "@slack/bolt";
 import { ActorRef, waitFor } from "xstate";
-import { fromMcpSession, Tools } from "./chat.handler.thread";
-import yjsActor from "./chat.store";
+import { fromMcpSession, Tools } from "./chat.handler.thread.ts";
+import yjsActor from "./chat.store.ts";
 import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
-import messages from "./chat.slack.messages";
-import { type Chat } from "./chat";
-import { type serverConfig } from "./gateway.mcp.connection.store";
+import messages from "./chat.ui.slack.messages.ts";
+import { type Chat } from "./chat.type.ts";
+import { type serverConfig } from "./registry.identity.store.ts";
 import { trace } from "@opentelemetry/api";
-import { InMemoryOAuthClientProvider } from "./mcp.auth.client.ts";
-import { MCPClientConnection } from "./gateway.mcp.client.ts";
+import { InMemoryOAuthClientProvider } from "./mcp.client.auth.ts";
+import { MCPClientConnection } from "./mcp.client.ts";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
@@ -127,7 +127,7 @@ const assistant = new Assistant({
     const connection = await mcpConnection({
       oauthProvider,
       client,
-      server: new URL(env.MCP_MANAGER_URL!),
+      server: new URL(env.MCP_REGISTRY_URL!),
       user: userId,
     });
     if (connection.connectionState.get() === "ready") {
@@ -216,7 +216,7 @@ const assistant = new Assistant({
     const connection = await mcpConnection({
       oauthProvider,
       client,
-      server: new URL(env.MCP_MANAGER_URL!),
+      server: new URL(env.MCP_REGISTRY_URL!),
       user: userId,
     });
 
@@ -308,7 +308,7 @@ app.action("connect", async ({ ack, client, logger, body, action }) => {
     const connection = await mcpConnection({
       oauthProvider: slackOAuthProvider(body.user.id),
       client,
-      server: new URL(env.MCP_MANAGER_URL!),
+      server: new URL(env.MCP_REGISTRY_URL!),
       user: body.user.id,
     });
 
@@ -355,7 +355,7 @@ app.action("disconnect", async ({ ack, body, logger, action, client }) => {
     const connection = await mcpConnection({
       oauthProvider: slackOAuthProvider(body.user.id),
       client,
-      server: new URL(env.MCP_MANAGER_URL!),
+      server: new URL(env.MCP_REGISTRY_URL!),
       user: body.user.id,
     });
     logger.info(`Disconnecting from server: ${serverId}`);
@@ -406,7 +406,7 @@ app.event("app_home_opened", async ({ event, client, logger }) => {
       connection: await mcpConnection({
         oauthProvider,
         client,
-        server: new URL(env.MCP_MANAGER_URL!),
+        server: new URL(env.MCP_REGISTRY_URL!),
         user: user,
       }),
       client,
@@ -465,7 +465,7 @@ async function mcpConnection({
       capabilities: {},
     },
     transport: () =>
-      new StreamableHTTPClientTransport(new URL(env.MCP_MANAGER_URL!), {
+      new StreamableHTTPClientTransport(new URL(env.MCP_REGISTRY_URL!), {
         authProvider: oauthProvider,
       }),
   });
@@ -501,7 +501,7 @@ async function mcpConnection({
   }
   if (connection.connectionState.get() === "authenticating") {
     const authCode = await oauthProvider.waitForCode();
-    await new StreamableHTTPClientTransport(new URL(env.MCP_MANAGER_URL!), {
+    await new StreamableHTTPClientTransport(new URL(env.MCP_REGISTRY_URL!), {
       authProvider: oauthProvider,
     }).finishAuth(authCode);
     await oauthProvider.tokensAsync();
