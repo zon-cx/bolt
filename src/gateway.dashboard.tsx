@@ -668,6 +668,14 @@ app.get("/", (c) => {
   );
 });
 
+
+const https = process.env.KEY_PATH && process.env.CERT_PATH ? {
+  createServer: createServer,
+  serverOptions: {
+    key: readFileSync(env.KEY_PATH!),
+    cert: readFileSync(env.CERT_PATH!),
+  },
+} : {};
 // Export the fetch handler for HTTP vals
 export default async function handler(req: Request) {
   console.log(`Received request: ${req.method} ${new URL(req.url).pathname}`);
@@ -678,13 +686,8 @@ serve(
     fetch: app.fetch,
     // createServer,
     port: env.PORT ? parseInt(env.PORT) : 8080,
-    hostname: "local.pyzlo.in",
-    createServer: createServer,
-
-    serverOptions: {
-      key: readFileSync(env.KEY_PATH!),
-      cert: readFileSync(env.CERT_PATH!),
-    },
+    hostname: "0.0.0.0",
+    ...https,
   },
   (server) => {
     console.log(`Server is running on https://local.pyzlo.in:${server.port}`);

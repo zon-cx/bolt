@@ -79,11 +79,12 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
 
   public static finishAuth(id: string, authCode: string) {
     authState.getMap<string>(id).set("code", authCode);
+    return authState.getMap<string>(id);
   }
   public finishAuth(authCode: string) {
     authState.getMap<string>(this.id).set("code", authCode);
   }
-
+  
   public async save<T>(key: string, value: T) {
     authState.getMap<T>(this.id).set(key, value);
   }

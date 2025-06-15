@@ -12,6 +12,7 @@ import express from "express";
 import { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
 import { version } from "node:os";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
 
 const app = express();
@@ -353,3 +354,12 @@ app.listen(port  , () => {
 });
 
  
+const ListConnectionsResultSchema = CallToolResultSchema.extend({
+    connections: z.array(
+      z.object({
+        name: z.string(),
+        url: z.string(),
+        status: z.string(),
+      })
+    ),
+  });

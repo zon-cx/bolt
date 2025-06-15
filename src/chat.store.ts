@@ -80,7 +80,7 @@ export default function yjsActor(
     const actor = await start();
     actor.send(event);
   }
-
+ 
   return {
     send,
     start,

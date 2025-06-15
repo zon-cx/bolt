@@ -10,8 +10,6 @@ import { serverConfig } from "./gateway.mcp.connection.store";
 import { trace } from "@opentelemetry/api";
 import {
   authCallback,
-  connections,
-  SlackInteractiveOAuthClient,
 } from "./chat.slack.auth";
 import { slackClient } from "../ref/src/slack/slackClient.ts";
 import { WebClient } from "@slack/web-api";
@@ -88,7 +86,6 @@ function listener(
   };
 }
 
-const slackMcpClients = new Map<string, SlackInteractiveOAuthClient>();
 
 const assistant = new Assistant({
   /**
@@ -124,11 +121,15 @@ const assistant = new Assistant({
     const id = event.assistant_thread.thread_ts;
     const ctx = await getThreadContext();
     console.log("thread context", ctx, context);
-    const oauthProvider = slackOAuthProvider(userId, client);
+    const oauthProvider = slackOAuthProvider(userId);
     oauthProvider.authorizationUrl.subscribe(async (url) => {
-      await say({
+      const result = await say({
         blocks: messages.loginMessage(url?.toString() || ""),
       });
+      oauthProvider.save("permalink", await client.chat.getPermalink({
+        channel: event.assistant_thread.channel_id,
+        message_ts: result.message?.ts || result.ts || id
+       }).then(r=>r.permalink)); 
     });
     const connection = await mcpConnection({
       oauthProvider,
@@ -208,12 +209,17 @@ const assistant = new Assistant({
       message.event_ts ||
       message.ts;
 
-    const oauthProvider = slackOAuthProvider(userId, client);
+    const oauthProvider = slackOAuthProvider(userId);
     oauthProvider.authorizationUrl.subscribe(async (url) => {
-      await say({
+     const result = await say({
         blocks: messages.loginMessage(url?.toString() || ""),
       });
+      oauthProvider.save("permalink", await client.chat.getPermalink({
+        channel: message.channel,
+        message_ts: result.message?.ts || result.ts || message.ts
+       }).then(r=>r.permalink)); 
     });
+ 
     const connection = await mcpConnection({
       oauthProvider,
       client,
@@ -240,21 +246,12 @@ const assistant = new Assistant({
         content: message.text,
       });
 
-      console.log("message sent", assistant.getPersistedSnapshot());
     }
   },
 });
-const port = parseInt(env.PORT || "8090");
+const port = parseInt(env.PORT || "8080");
 
-const ListConnectionsResultSchema = CallToolResultSchema.extend({
-  connections: z.array(
-    z.object({
-      name: z.string(),
-      url: z.string(),
-      status: z.string(),
-    })
-  ),
-});
+
 const app = new App({
   token: env.SLACK_BOT_TOKEN,
   signingSecret: env.SLACK_SIGNING_SECRET,
@@ -431,6 +428,7 @@ app.action("disconnect", async ({ ack, body, logger, action, client }) => {
 app.event("app_home_opened", async ({ event, client, logger }) => {
   const user = event.user;
   const oauthProvider = slackOAuthProvider(user);
+ 
   oauthProvider.authorizationUrl.subscribe(async (url) => {
     await client.views.publish({
       user_id: event.user,
@@ -440,6 +438,7 @@ app.event("app_home_opened", async ({ event, client, logger }) => {
       },
     });
   });
+
   try {
     await publishHome({
       connection: await mcpConnection({
@@ -474,6 +473,8 @@ app.event("app_home_opened", async ({ event, client, logger }) => {
     });
   }
 });
+
+const connections = new Map<string, MCPClientConnection>();
 async function mcpConnection({
   oauthProvider,
   client,
