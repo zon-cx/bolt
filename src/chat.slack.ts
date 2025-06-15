@@ -119,10 +119,11 @@ const assistant = new Assistant({
       const result = await say({
         blocks: messages.loginMessage(url?.toString() || ""),
       });
-      await oauthProvider.save("permalink", await client.chat.getPermalink({
-        channel: event.assistant_thread.channel_id,
-        message_ts: result.ts || event.assistant_thread.thread_ts
-       }))
+      await oauthProvider.save("permalink", `slack://user?team=${context.teamId}&id=${context.botUserId}`
+      //   await client.chat.getPermalink({
+      //   channel: event.assistant_thread.channel_id,
+      //   message_ts: result.ts || event.assistant_thread.thread_ts
+      //  }))
     });
     const connection = await mcpConnection({
       oauthProvider,
@@ -265,7 +266,7 @@ const app = new App({
       },
     },
     {
-      path: "/oauth/callback",
+      path: "/  ",
       method: "GET",
       handler: async  function (req, res) { 
         console.log("authCallback", req.url);
