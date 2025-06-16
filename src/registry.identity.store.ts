@@ -1,3 +1,4 @@
+import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { MCPClientManager } from "./registry.mcp.client";
 import { connectYjs } from "./store.yjs";
 import { yMapIterate } from "@cxai/stream";
@@ -29,7 +30,7 @@ const agentServerStore = (agentId: string) => {
 
 export class MCPAgentManager {
   public mcpAgents: Record<string, MCPClientManager & agentConfig> = {};
-  constructor( public mcpServer?:Server,public store = agentsStore) {
+  constructor(public auth: AuthInfo, public mcpServer?:Server , public store = agentsStore) {
     this.initFromStore();
   }
 
@@ -74,7 +75,7 @@ export class MCPAgentManager {
       created: created || new Date().toISOString(),
     });
 
-    const agent = new MCPClientManager(id, "1.0.0", agentServerStore(id));
+    const agent = new MCPClientManager(this.auth, id, "1.0.0", agentServerStore(id));
     if(!!this.mcpServer) {
       agent.bindToMcpServer(this.mcpServer);
     } 
@@ -97,4 +98,3 @@ export class MCPAgentManager {
 }
  
 
-export const mcpAgentManager = new MCPAgentManager();

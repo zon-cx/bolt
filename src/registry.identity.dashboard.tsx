@@ -9,7 +9,7 @@ import { Hono } from "hono";
 import { html } from "hono/html";
 import { streamText } from "hono/streaming";
 import {
-  mcpAgentManager,
+  MCPAgentManager,
    serverConfig,
 } from "./registry.identity.store.ts";
 import { serve } from "@hono/node-server";
@@ -251,6 +251,8 @@ app.get("/oauth/callback", async function (c) {
     return c.redirect(`${targetUrl}`, 302);
   }
 });
+
+const mcpAgentManager = new MCPAgentManager(null);
 
 // Agent management endpoints
 app.get("/agents", async (c) => {

@@ -26,6 +26,8 @@ import { Subscription } from "@xstate/store";
 import { connectYjs } from "./store.yjs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { env } from "node:process";
+import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
  
 
  
@@ -48,6 +50,7 @@ export class MCPClientManager {
    * @param store
    */
   constructor(
+    public auth: AuthInfo,
     public id: string,
     public version: string,
     public store: Y.Map<serverConfig>
@@ -74,7 +77,7 @@ export class MCPClientManager {
           const { url } = store.get(key)!;
           this.connect(url, {
             id: key,
-          });
+          }).catch(console.error);
         }
       }
     });
@@ -138,8 +141,21 @@ export class MCPClientManager {
           name: this.id,
           version: this.version,
         },
+        client: {
+          capabilities: {},
+        },
+        transport: () =>
+          new StreamableHTTPClientTransport(new URL(url), {
+            requestInit: this.auth?.token ? {
+              headers: {
+                Authorization: `Bearer ${this.auth.token}`,
+              },
+            } : undefined,
+            // sessionId: this.auth.extra?.sub? `${this.auth.extra.sub}-${this.id}` : undefined,
+          }),
         ...options,
       });
+    
       this.store.set(id, {
         id,
         url,
