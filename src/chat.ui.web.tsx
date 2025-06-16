@@ -23,7 +23,7 @@ import {
 import * as Y from "yjs";
 import { Chat } from "./chat";
 import { connectYjs } from "./store.yjs";
-import { getOrCreateMcpAgent } from "./gateway.mcp.connection.store";
+ import { mcpAgentManager } from "./registry.identity.store";
 // Helper to lazily create / retrieve an assistant actor backed by Yjs for a given thread id
 function getAssistant(threadId: string) {
   const doc = connectYjs(`@assistant/${threadId}`);
@@ -244,7 +244,7 @@ app.post("/@assistant/:thread/select", (c) => {
 
 app.get("/@assistant/:thread", async (c) => {
   const threadId = c.req.param("thread");
-  const session = getOrCreateMcpAgent(threadId);
+  const session = mcpAgentManager.initAgent(threadId);
   const servers = Object.keys(session.mcpConnections);
   return c.html(
     <div
@@ -456,7 +456,7 @@ app.post("/@assistant/:thread/messages", async (c) => {
 app.post("/@assistant/:thread/add-server", async (c) => {
   const threadId = c.req.param("thread");
   const url = (await c.req.parseBody()).url;
-  const session = getOrCreateMcpAgent(threadId);
+  const session = mcpAgentManager.initAgent(threadId);
   if (url) {
     try {
       await session.connect(url);
@@ -489,7 +489,7 @@ app.post("/@assistant/:thread/add-server", async (c) => {
 app.post("/@assistant/:thread/remove-server", async (c) => {
   const threadId = c.req.param("thread");
   const url = (await c.req.parseBody()).url;
-  const session = getOrCreateMcpAgent(threadId);
+  const session = mcpAgentManager.initAgent(threadId);
   if (url) {
     try {
       await session.closeConnection(url);

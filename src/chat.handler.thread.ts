@@ -10,10 +10,8 @@ import {
 } from "xstate";
 import{ fromMcpMessageHandler } from "./chat.handler.message.ts";
 import { Bootstrap, fromMcpBootstrap } from "./chat.handler.bootstrap.ts";
-import { Chat } from "./chat.ts";
-import { type MCPClientManager } from "./gateway.mcp.connection.manager.ts";
+import { Chat } from "./chat.type";
 import { Tool, ToolCall, ToolResult ,experimental_createMCPClient} from "ai";
-import { MCPClientConnection } from "./gateway.mcp.connection.ts";
 import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
 // type McpClient = ReturnType<typeof experimental_createMCPClient>;
 export function fromMcpSession(client:McpClient) {
