@@ -9,6 +9,7 @@ import { env } from "node:process";
 import { InMemoryEventStore } from '@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js';
 
  import { authRouter, getAuthId, requireAuth } from "./registry.mcp.server.auth";
+import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 const app = express();
 app.use(express.json());
 app.use(authRouter);
@@ -38,7 +39,7 @@ const transports = {
 
 
 // Helper to create a new MCP server and transport for a session
-async function createSessionTransport(getId = getAuthId) {
+async function createSessionTransport(authInfo: AuthInfo, getId = getAuthId) {
   const mcpServer = new Server(
     {
       name: "mcp-gateway-server",
@@ -61,7 +62,7 @@ async function createSessionTransport(getId = getAuthId) {
       },
     }
   ); 
-  const mcpAgentManager = new MCPAgentManager(mcpServer);
+  const mcpAgentManager = new MCPAgentManager(authInfo, mcpServer);
   // Register handlers to proxy requests to the agent
   mcpServer.setRequestHandler(ListToolsRequestSchema, async (request,extra) => ({
     tools: mcpAgentManager.initAgent(getId(extra)).listTools(),
@@ -125,7 +126,7 @@ app.all("/mcp/:id", requireAuth, async (req, res) => {
   if (sessionId && transports.streamable[sessionId]) {
     transport = transports.streamable[sessionId];
   } else { 
-    transport = await createSessionTransport(()=>id);
+    transport = await createSessionTransport(req.auth as AuthInfo, ()=>id);
   }
   await transport.handleRequest(req, res, req.body);
 });
@@ -139,7 +140,7 @@ app.all("/mcp", requireAuth, async (req, res) => {
     transport = transports.streamable[sessionId];
   } else {
 
-    transport = await createSessionTransport( );
+    transport = await createSessionTransport(req.auth as AuthInfo);
   }
   await transport.handleRequest(req, res, req.body);
 });

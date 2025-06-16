@@ -27,6 +27,7 @@ import * as Y from "yjs";
 import { randomFill, randomFillSync, randomUUID } from "node:crypto";
 import { createAtom } from "@xstate/store";
 import { jwtDecode } from "jwt-decode";
+import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 // Configuration
 const CALLBACK_PORT = 8090; // Use different port than auth server (3001)
 const CALLBACK_URL = `http://localhost:${CALLBACK_PORT}/oauth/callback`;
@@ -60,6 +61,7 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
       this.authorizationUrl.set(url);
     }
   ) {
+    console.log("InMemoryOAuthClientProvider", redirectUrl, clientMetadata, id);
     authState.getMap(this.id).set("redirectUrl", redirectUrl);
     authState.getMap(this.id).set("clientMetadata", clientMetadata);
     authState.getMap(this.id).set("id", id);
@@ -208,3 +210,41 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
 //   console.error('Unhandled error:', error);
 //   process.exit(1);
 // });
+
+
+export class PassThroughOAuthClientProvider implements OAuthClientProvider {
+  constructor(public auth: AuthInfo) {
+  }
+  get redirectUrl(): string | globalThis.URL {
+    throw new Error("Method not implemented.");
+  }
+  get clientMetadata(): { redirect_uris: string[]; jwks_uri?: string | undefined; scope?: string | undefined; token_endpoint_auth_method?: string | undefined; grant_types?: string[] | undefined; response_types?: string[] | undefined; client_name?: string | undefined; client_uri?: string | undefined; logo_uri?: string | undefined; contacts?: string[] | undefined; tos_uri?: string | undefined; policy_uri?: string | undefined; jwks?: any; software_id?: string | undefined; software_version?: string | undefined; } {
+    throw new Error("Method not implemented.");
+  }
+  state?(): string | Promise<string> {
+    throw new Error("Method not implemented.");
+  }
+  clientInformation(): OAuthClientInformation | undefined | Promise<OAuthClientInformation | undefined> {
+    throw new Error("Method not implemented.");
+  }
+  saveClientInformation?(clientInformation: OAuthClientInformationFull): void | Promise<void> {
+    throw new Error("Method not implemented.");
+  }
+  tokens(): OAuthTokens | undefined | Promise<OAuthTokens | undefined> {
+     return this.auth;
+  }
+  saveTokens(tokens: OAuthTokens): void | Promise<void> {
+    throw new Error("Method not implemented.");
+  }
+  redirectToAuthorization(authorizationUrl: globalThis.URL): void | Promise<void> {
+    throw new Error("Method not implemented.");
+  }
+  saveCodeVerifier(codeVerifier: string): void | Promise<void> {
+    throw new Error("Method not implemented.");
+  }
+  codeVerifier(): string | Promise<string> {
+    throw new Error("Method not implemented.");
+  }
+
+ 
+}

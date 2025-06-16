@@ -21,9 +21,10 @@ import {
   yMapIterate,
 } from "@cxai/stream";
 import * as Y from "yjs";
-import { Chat } from "./chat";
+import { Chat } from "./chat.type";
 import { connectYjs } from "./store.yjs";
- import { mcpAgentManager } from "./registry.identity.store";
+ import { MCPAgentManager } from "./registry.identity.store";
+import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 // Helper to lazily create / retrieve an assistant actor backed by Yjs for a given thread id
 function getAssistant(threadId: string) {
   const doc = connectYjs(`@assistant/${threadId}`);
@@ -57,7 +58,7 @@ function getAssistant(threadId: string) {
   });
   return createActor(remoteAssistant).start();
 }
-
+const mcpAgentManager = new MCPAgentManager(null);
 // --- Hono App ---
 const app = new Hono();
 app.use(

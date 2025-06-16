@@ -127,7 +127,7 @@ const assistant = new Assistant({
     const connection = await mcpConnection({
       oauthProvider,
       client,
-      server: new URL(env.MCP_REGISTRY_URL!),
+      server: new URL(env.MCP_GATEWAY_URL!),
       user: userId,
     });
     if (connection.connectionState.get() === "ready") {
@@ -216,7 +216,7 @@ const assistant = new Assistant({
     const connection = await mcpConnection({
       oauthProvider,
       client,
-      server: new URL(env.MCP_REGISTRY_URL!),
+      server: new URL(env.MCP_GATEWAY_URL!),
       user: userId,
     });
 

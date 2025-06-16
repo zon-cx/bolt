@@ -15,6 +15,7 @@ export const proxyProvider = new ProxyOAuthServerProvider({
         registrationUrl: `${GIGYA_ISSUER}/register`,
         revocationUrl: `${GIGYA_ISSUER}/revoke`, // optional, if supported by Gigya
     },
+   
 
     verifyAccessToken: async (token) => {
         console.log("verifyAccessToken", token);
