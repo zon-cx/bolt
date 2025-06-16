@@ -19,7 +19,7 @@ applications:
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
       MCP_INSPECTOR_URL: 'https://inspector.cfapps.eu12.hana.ondemand.com'
       MCP_REGISTRY_URL: 'https://registry.cfapps.eu12.hana.ondemand.com/mcp'
-      MCP_GATEWAY_URL: 'https://router.cfapps.eu12.hana.ondemand.com/mcp'
+      MCP_GATEWAY_URL: 'https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp'
       BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com' 
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
@@ -28,7 +28,6 @@ applications:
     health-check-type: process
     routes:
       - route: 'https://registry.cfapps.eu12.hana.ondemand.com'
-      - route: 'https://manager.cfapps.eu12.hana.ondemand.com'
     stack: cflinuxfs4
     memory: 512M
     instances: 1
@@ -41,7 +40,7 @@ applications:
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
-      MCP_GATEWAY_URL: 'https://router.cfapps.eu12.hana.ondemand.com/mcp'
+      MCP_GATEWAY_URL: 'https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp'
       BASE_URL: 'https://registry.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
@@ -60,7 +59,7 @@ applications:
       LOG_REMOTE_USER: true
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      MCP_GATEWAY_URL: 'https://router.cfapps.eu12.hana.ondemand.com/mcp'
+      MCP_GATEWAY_URL: 'https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp'
       MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
       BASE_URL: 'https://assistant.cfapps.eu12.hana.ondemand.com'
     buildpacks:
@@ -83,12 +82,12 @@ applications:
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
       BASE_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
       MCP_REGISTRY_URL: https://registry.cfapps.eu12.hana.ondemand.com/mcp
-      MCP_GATEWAY_URL: https://router.cfapps.eu12.hana.ondemand.com/mcp
+      MCP_GATEWAY_URL: https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
   - name: router
     routes:
-      - route: 'https://router.cfapps.eu12.hana.ondemand.com'
+      - route: 'https://mcp-router.cfapps.eu12.hana.ondemand.com'
     command: npm run start:router
     stack: cflinuxfs4
     memory: 1024M
@@ -101,7 +100,7 @@ applications:
       LOG_REMOTE_USER: true
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      BASE_URL: 'https://router.cfapps.eu12.hana.ondemand.com'
+      BASE_URL: 'https://mcp-router.cfapps.eu12.hana.ondemand.com'
       MCP_REGISTRY_URL: https://registry.cfapps.eu12.hana.ondemand.com/mcp
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
