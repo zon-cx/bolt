@@ -10,3 +10,5 @@ env
 /mta-*/
 /dist/
 /node-http/
+/ref/
+/keys/
