@@ -37,7 +37,7 @@ export class MCPClientConnection {
   public resources: Atom<Resource[]>;
   public resourceTemplates: Atom<ResourceTemplate[]>;
   public serverCapabilities: Atom<ServerCapabilities | undefined>;
-  public  error: Atom<Error | undefined> = createAtom<Error | undefined>(undefined);
+  public  error= createAtom<{message:string, stack:string, code:number}  | undefined>(undefined);
   public transportFactory: TransportFactory;
   public transport: ReturnType<TransportFactory>;
   
@@ -132,13 +132,17 @@ export class MCPClientConnection {
             } else { 
             console.error(`❌ Error connecting to MCP server at ${this.url}:`, error, "\n", error.stack); 
            this.connectionState.set("failed");
-            this.error.set(error);
+            this.error.set({    
+                message: "message" in error ? error.message : error.toString(),
+                stack:  "stack" in error ? error.stack : "",
+                code:  "code" in error ? error.code : -1,
+            });
         }
         return this.connectionState.get(); 
       }
-      
-      console.log(`🔐 ping  ${JSON.stringify(await this.client.ping())} `);
-
+    
+      await this.client.ping();
+      console.log(`🔐 ping  🔐` , this.name, this.url.href,"id:", this.id, "state:", "discovering");
       this.connectionState.set("discovering");
 
       const serverCapabilities = await this.client.getServerCapabilities();

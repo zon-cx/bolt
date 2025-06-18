@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {agentConfig, MCPAgentManager} from "@/registry.identity.store";
+import {agentConfig, mcpAgentManager, MCPAgentManager} from "@/registry.identity.store";
 import {randomUUID} from "node:crypto";
 import {env} from "node:process";
 import { ProxyOAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js";
@@ -11,7 +11,7 @@ import { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.j
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
 import { version } from "node:os";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import { authRouter, requireAuth } from "./registry.mcp.server.auth";
+import { authRouter, requireAuth, getAgentAuthInfo } from "./registry.mcp.server.auth";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
 // Add cleanup tracking
@@ -131,19 +131,13 @@ app.all("/mcp/:id", requireAuth, async (req, res, next) => {
     }
 });
 
-const port = parseInt(env.MCP_SERVER_PORT || "8080", 10);
+const port = parseInt(env.PORT || "8080", 10);
 
 app.listen(port  , () => {
     console.log(`MCP Gateway Server running on http://localhost:${port}`);
 });
 
 async function createServerManager(auth: AuthInfo, id?: string) {
-    const agentInfo = (extra?: RequestHandlerExtra<any,any>): Partial<agentConfig> & {id: string} | string => {
-        if(id) return id;
-        const agentId = extra?.authInfo?.extra?.sub as string;
-        return {id: agentId, name: extra?.authInfo?.extra?.name as string};
-    }
-    const mcpAgentManager = new MCPAgentManager(auth);
     const mcpServer = new McpServer({
         name: "mcp-manager",
         version: "1.0.0",
@@ -163,9 +157,11 @@ async function createServerManager(auth: AuthInfo, id?: string) {
             logging: {},
         },
     });
-
+    const agent= mcpAgentManager.initAgent(getAgentAuthInfo(auth, id));
+    mcpAgentManager.store.observe((e)=>{
+        mcpServer.sendResourceListChanged()
+    })
     mcpServer.resource("connections", "urn:mcp:connections",  { mimeType: "text/json" },  async (params, extra) => {
-        const agent =  mcpAgentManager.initAgent(agentInfo(extra));
         const connections = await agent.listConnections();
         return {
             contents: [
@@ -184,6 +180,11 @@ async function createServerManager(auth: AuthInfo, id?: string) {
                     url: z.string(),
                     version: z.string().optional(),
                     name: z.string().optional(),
+                    error: z.object({
+                        message: z.string(),
+                        code: z.number().optional(),
+                        stack: z.string().optional(),
+                    }).optional(),
                     status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ]).optional(),
                 }))},
         description: "List all available MCP servers",
@@ -192,7 +193,6 @@ async function createServerManager(auth: AuthInfo, id?: string) {
     async function ( extra: RequestHandlerExtra<any,any>) {
         console.log("Listing MCP servers",  extra);
         try {
-            const agent = mcpAgentManager.initAgent(agentInfo( extra ));
             const connections = await agent.listConnections();
             await extra.sendNotification({
                 method: "notifications/message",
@@ -235,13 +235,22 @@ async function createServerManager(auth: AuthInfo, id?: string) {
             name: z.string(),
             url: z.string(),
             version: z.string().optional(),
+            error: z.object({
+                message: z.string(),
+                code: z.string().optional(),
+                stack: z.string().optional(),
+            }).optional(),
+            status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ,"initializing"]).optional(),
         },
         description: "Connect to a new MCP server",
     }, async function (params, extra) {
-        const agent = await mcpAgentManager.initAgent(agentInfo(extra));
-        const connection = await agent.connect(params.url, {
-            id: params.name,
-        })
+         const connection = await agent.addConnection({
+            id: params.name || params.url,
+            url: params.url,
+            name: params.name || params.url,
+            version: "1.0.0",
+         });
+        
 
         return {
             content: [{
@@ -262,7 +271,6 @@ async function createServerManager(auth: AuthInfo, id?: string) {
             },
             description: "Disconnect from an MCP server",
         }, async function (params, extra) {
-            const agent =  mcpAgentManager.initAgent(agentInfo(extra));
             await agent.closeConnection(params.id);
             return {
                 content: [{
@@ -286,9 +294,8 @@ async function createServerManager(auth: AuthInfo, id?: string) {
     }, 
     // @ts-ignore when no args, extra is first argument but typescript is not aware of that
     async function ( extra: RequestHandlerExtra<any,any>) {
-        console.log("Getting agent info",  extra);
+        console.log("Getting agent info",  extra.authInfo);
         try {
-            const agent = mcpAgentManager.initAgent(agentInfo( extra ));
             const connections = await agent.listConnections();
             return {
                 content: [{
@@ -325,7 +332,12 @@ async function createServerManager(auth: AuthInfo, id?: string) {
             url: z.string(),
             version: z.string().optional(),
             name: z.string().optional(),
-            state: z.string().optional(),
+            status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ,"initializing"]).optional(),
+            error: z.object({
+                message: z.string(),
+                code: z.string().optional(),
+                stack: z.string().optional(),
+            }).optional(),
             tools: z.number().optional(),
             prompts: z.number().optional(),
             resources: z.number().optional(),
@@ -334,7 +346,6 @@ async function createServerManager(auth: AuthInfo, id?: string) {
         description: "Get information about a specific MCP connection",
     }, async function (args: { [x: string]: any }, extra: RequestHandlerExtra<any,any>) {
         try {
-            const agent = mcpAgentManager.initAgent(agentInfo(extra));
             const connection = agent.mcpConnections[args.id];
             
             if (!connection) {
@@ -409,12 +420,17 @@ async function createServerManager(auth: AuthInfo, id?: string) {
     return transport;
 }
 
-const ListConnectionsResultSchema = CallToolResultSchema.extend({
-    connections: z.array(
-      z.object({
-        name: z.string(),
+export const ListConnectionsResultSchema = CallToolResultSchema.extend({
+    connections:z.array(z.object({
+        id: z.string(),
         url: z.string(),
-        status: z.string(),
-      })
-    ),
+        version: z.string().optional(),
+        name: z.string().optional(),
+        error: z.object({
+            message: z.string(),
+            code: z.number().optional(),
+            stack: z.string().optional(),
+        }).optional(),
+        status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ]).optional(),
+    })),
   });

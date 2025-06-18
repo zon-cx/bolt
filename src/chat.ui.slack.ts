@@ -465,7 +465,7 @@ async function mcpConnection({
       capabilities: {},
     },
     transport: () =>
-      new StreamableHTTPClientTransport(new URL(env.MCP_REGISTRY_URL!), {
+      new StreamableHTTPClientTransport(server, {
         authProvider: oauthProvider,
       }),
   });

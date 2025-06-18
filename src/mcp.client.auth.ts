@@ -32,7 +32,7 @@ import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 const CALLBACK_PORT = 8090; // Use different port than auth server (3001)
 const CALLBACK_URL = `http://localhost:${CALLBACK_PORT}/oauth/callback`;
 
-const authState = connectYjs("@mcp.auth");
+const authState =  connectYjs("@mcp.auth");
 
 async function logRedirect(url: URL) {
   console.log(`mock redirect to: ${url.toString()}`);
