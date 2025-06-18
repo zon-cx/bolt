@@ -144,32 +144,76 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
   // Connect the MCP server to the transport
   await mcpServer.connect(transport);
   mcpServer.onerror = console.error.bind(console);
-    const subscriptions: Subscription[] = [
-      await agent.updateFromRegistry(registry),
-      agent.tools.subscribe(() => {
-        if (agent.tools.get()) mcpServer.sendToolListChanged();
-      }),
-      agent.prompts.subscribe(() => {
-        if (agent.prompts.get()) mcpServer.sendPromptListChanged();
-      }),
-      agent.resources.subscribe(() => {
-        if (agent.resources.get()) mcpServer.sendResourceListChanged();
-      }),
-      agent.resourceTemplates.subscribe(() => {
-        if (agent.resourceTemplates.get()) mcpServer.sendResourceListChanged();
-      }),
-    ];
+  
+  // Add debouncing to prevent infinite loops
+  let resourceChangeTimeout: NodeJS.Timeout | null = null;
+  let toolChangeTimeout: NodeJS.Timeout | null = null;
+  let promptChangeTimeout: NodeJS.Timeout | null = null;
+  
+  const debouncedResourceChange = () => {
+    if (resourceChangeTimeout) {
+      clearTimeout(resourceChangeTimeout);
+    }
+    resourceChangeTimeout = setTimeout(() => {
+      if (agent.resources.get()) {
+        console.log("Sending resource list changed notification");
+        mcpServer.sendResourceListChanged();
+      }
+    }, 1000); // 1 second debounce
+  };
+  
+  const debouncedToolChange = () => {
+    if (toolChangeTimeout) {
+      clearTimeout(toolChangeTimeout);
+    }
+    toolChangeTimeout = setTimeout(() => {
+      if (agent.tools.get()) {
+        console.log("Sending tool list changed notification");
+        mcpServer.sendToolListChanged();
+      }
+    }, 1000); // 1 second debounce
+  };
+  
+  const debouncedPromptChange = () => {
+    if (promptChangeTimeout) {
+      clearTimeout(promptChangeTimeout);
+    }
+    promptChangeTimeout = setTimeout(() => {
+      if (agent.prompts.get()) {
+        console.log("Sending prompt list changed notification");
+        mcpServer.sendPromptListChanged();
+      }
+    }, 1000); // 1 second debounce
+  };
+  
+  const subscriptions: Subscription[] = [
+    await agent.updateFromRegistry(registry),
+    agent.tools.subscribe(debouncedToolChange),
+    agent.prompts.subscribe(debouncedPromptChange),
+    agent.resources.subscribe(debouncedResourceChange),
+    agent.resourceTemplates.subscribe(debouncedResourceChange),
+  ];
 
-    agent.onClose(() => {
-      subscriptions.forEach((sub) => {
-        sub.unsubscribe();
-      });
+  agent.onClose(() => {
+    subscriptions.forEach((sub) => {
+      sub.unsubscribe();
     });
+  });
 
-      // Clean up transport when closed
+    // Clean up transport when closed
   transport.onclose = () => {
     if (transport.sessionId) {
       delete transports[transport.sessionId];
+    }
+    // Clear any pending timeouts
+    if (resourceChangeTimeout) {
+      clearTimeout(resourceChangeTimeout);
+    }
+    if (toolChangeTimeout) {
+      clearTimeout(toolChangeTimeout);
+    }
+    if (promptChangeTimeout) {
+      clearTimeout(promptChangeTimeout);
     }
     subscriptions.forEach((sub) => {
       sub.unsubscribe();

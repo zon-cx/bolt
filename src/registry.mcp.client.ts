@@ -116,6 +116,11 @@ export class MCPClientManager {
             if (serverResponse.contents?.[0]) {
               const serverData = JSON.parse(serverResponse.contents[0].text as string);
               console.log("add connection", serverData);
+              const existingConnection = this.store.get(serverData.id);
+              if (existingConnection && existingConnection.url === serverData.url && existingConnection.id === serverData.id) {
+                  console.log("Connection already exists", existingConnection);
+                  continue; // Skip if the connection already exists with the same URL
+              }
               if (serverData.id && serverData.url ) {
                 await this.addConnection({
                   id: serverData.id,
@@ -412,7 +417,7 @@ export class MCPClientManager {
 
           const client = new Client({
             name: "mcp-client",
-            version: version,
+            version: "1.0.0",
           }); 
    
         await client.connect(transport);

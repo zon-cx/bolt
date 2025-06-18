@@ -371,7 +371,7 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
                     connections: connections.length,
                     name: agent.name,
                     url: `${env.MCP_GATEWAY_URL}/${agent.id}`,
-                    version: agent.version
+                    version: "1.0.0"
                 }
             }
         } catch (error: unknown) {
