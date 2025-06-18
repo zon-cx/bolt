@@ -20,7 +20,7 @@ export const actorsStore = new Y.Doc({
   shouldLoad: true,
   gc: false,
 });
-connectYjs(actorsStore);
+ connectYjs(actorsStore);
 
 setTimeout(() => {
   console.log(

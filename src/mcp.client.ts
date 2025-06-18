@@ -77,43 +77,8 @@ export class MCPClientConnection {
       disableEntropyCache: true, // Disable entropy cache for better performance in tests
     })
      
-      // authState.getMap<string>(this.id).observe(this.authCallback.bind(this)); 
-    }
-    
-    // async authCallback (event: Y.YMapEvent<string>) {
-    //   const { info, client, transport } = this.options || {};
-    //
-    //   console.log(`🔐 Ymap event received:`, Array.from(event.keysChanged.keys()));
-    //   if (event.keysChanged.has('code')) {
-    //     const code = authState.getMap<string>(this.id).get('code');
-    //     if (code) {
-    //       console.log(`🔐 Authorization code received: ${code.substring(0, 10)}...`);
-    //       // authState.getMap<string>(this.id).unobserve(callback);
-    //       this.transport.finishAuth(code);
-    //       // await this.init(new Client(info, client));
-    //     } else {
-    //       console.error('❌ No authorization code found in session state');
-    //     }
-    //   }
-    // }
-    
-    async  waitForAuth(transport: ReturnType<TransportFactory>, authState:Y.Map<string>): Promise<void> { 
-      return new Promise<void>((resolve, reject) => {
-            const callback = async (event: Y.YMapEvent<string>) => {
-              console.log(`🔐 Ymap event received:`, Array.from(event.keysChanged.keys()));
-              if (event.keysChanged.has('code')) {
-                const code = authState.get('code');
-                if (code) {
-                  console.log(`🔐 Authorization code received: ${code.substring(0, 10)}...`);
-                  authState.unobserve(callback);
-                  await transport.finishAuth(code);
-                  resolve();
-                }
-              }
-            };
-            authState.observe(callback);
-        });
-    }
+  }
+  
 
   /**
    * Initialize a client connection

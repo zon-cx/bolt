@@ -458,33 +458,7 @@ export class MCPClientManager {
     );
   }
 
-  bindToMcpServer(mcpServer: Server) {
-    const subscriptions: Subscription[] = [
-      this.tools.subscribe(() => {
-        if (this.tools.get()) mcpServer.sendToolListChanged();
-      }),
-      this.prompts.subscribe(() => {
-        if (this.prompts.get()) mcpServer.sendPromptListChanged();
-      }),
-      this.resources.subscribe(() => {
-        if (this.resources.get()) mcpServer.sendResourceListChanged();
-      }),
-      this.resourceTemplates.subscribe(() => {
-        if (this.resourceTemplates.get()) mcpServer.sendResourceListChanged();
-      }),
-    ];
-    mcpServer.onclose=(() => {
-      console.log("Agent closed", this.id);
-      subscriptions.forEach((sub) => {
-        sub.unsubscribe();
-      });
-    });
-    this.onClose(() => {
-      subscriptions.forEach((sub) => {
-        sub.unsubscribe();
-      });
-    });
-  }
+ 
 }
 
 type NamespacedSource = {

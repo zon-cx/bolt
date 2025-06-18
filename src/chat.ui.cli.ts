@@ -22,11 +22,6 @@ import {
   OAuthClientProvider,
   UnauthorizedError,
 } from "@modelcontextprotocol/sdk/client/auth.js";
-import { connectYjs } from "@/store.yjs.ts";
-import * as Y from "yjs";
-import { randomFill, randomFillSync, randomUUID } from "node:crypto";
-import { createAtom } from "@xstate/store";
-import { jwtDecode } from "jwt-decode";
 import { InMemoryOAuthClientProvider } from "./mcp.client.auth";
 // Configuration
 const CALLBACK_PORT = 8090; // Use different port than auth server (3001)

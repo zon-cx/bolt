@@ -11,10 +11,7 @@ import {
   ListResourceTemplatesRequestSchema,
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
-  CompatibilityCallToolResultSchema,
   CompleteRequestSchema,
-  Prompt,
-  ResourceTemplateSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { mcpAgentManager, MCPAgentManager } from "./registry.identity.store";
 import { env } from "node:process";
@@ -26,31 +23,18 @@ import {
   requireAuth,
 } from "./registry.mcp.server.auth";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { MCPClientConnection } from "./mcp.client";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MCPClientManager } from "./registry.mcp.client";
+import { Subscription } from "@xstate/store";
+
 const app = express();
 app.use(express.json());
 app.use(authRouter);
+
 // Map to store transports by session ID
 const transports = {
   streamable: {} as Record<string, StreamableHTTPServerTransport>,
   sse: {} as Record<string, SSEServerTransport>,
 };
 
-app.use(async (req, res, next) => {
-  console.log(`[LOG] ${req.method} ${req.url}`);
-  console.log("Headers:", req.headers);
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log("Body:", req.body);
-  }
-  res.on("finish", () => {
-    console.log(`[LOG] ${req.method} ${req.url} ${res.statusCode}`);
-  });
-
-  await next();
-  console.log(`[LOG] [DONE] ${req.method} ${req.url} ${res.statusCode}`);
-});
 
 // Helper to create a new MCP server and transport for a session
 async function createSessionTransport(auth: AuthInfo, id?: string) {
@@ -78,31 +62,7 @@ async function createSessionTransport(auth: AuthInfo, id?: string) {
   );
 
   const agent = mcpAgentManager.initAgent(getAgentAuthInfo(auth, id));
-  agent.connected.once("registry", (connection) => {
-    console.log("connections", connection);
-    if(connection.connectionState.get() === "ready") {
-      agent.updateFromRegistry(connection);
-    }
-     else if(connection.connectionState.get() !== "failed") {
-      console.log("registry connection state", connection.connectionState.get());
-      connection.connectionState.subscribe((state) => {
-        if(state === "failed") {
-          console.error("registry connection failed", connection.error);
-        }
-        if(state === "ready") {
-          agent.updateFromRegistry(connection);
-        }
-      });
-     }
-     else if(connection.connectionState.get() === "failed") {
-      console.error("registry connection failed", connection.error);
-     }
-     else {
-       console.log("registry connection not found",);
-     }
-  });
-
-
+ 
   // Register handlers to proxy requests to the agent
   mcpServer.setRequestHandler(
     ListToolsRequestSchema,
@@ -149,20 +109,60 @@ async function createSessionTransport(auth: AuthInfo, id?: string) {
     },
   });
 
-  // Clean up transport when closed
-  transport.onclose = () => {
-    if (transport.sessionId) {
-      delete transports[transport.sessionId];
-    }
-  };
+
 
   // Connect the MCP server to the transport
   await mcpServer.connect(transport);
   mcpServer.onerror = console.error.bind(console);
-  agent.bindToMcpServer(mcpServer);
+    const subscriptions: Subscription[] = [
+      agent.tools.subscribe(() => {
+        if (agent.tools.get()) mcpServer.sendToolListChanged();
+      }),
+      agent.prompts.subscribe(() => {
+        if (agent.prompts.get()) mcpServer.sendPromptListChanged();
+      }),
+      agent.resources.subscribe(() => {
+        if (agent.resources.get()) mcpServer.sendResourceListChanged();
+      }),
+      agent.resourceTemplates.subscribe(() => {
+        if (agent.resourceTemplates.get()) mcpServer.sendResourceListChanged();
+      }),
+    ];
 
+    agent.onClose(() => {
+      subscriptions.forEach((sub) => {
+        sub.unsubscribe();
+      });
+    });
+
+      // Clean up transport when closed
+  transport.onclose = () => {
+    if (transport.sessionId) {
+      delete transports[transport.sessionId];
+    }
+    subscriptions.forEach((sub) => {
+      sub.unsubscribe();
+    });
+  };
+  
   return transport;
 }
+
+
+
+app.use(async (req, res, next) => {
+  console.log(`[LOG] ${req.method} ${req.url}`);
+  console.log("Headers:", req.headers);
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log("Body:", req.body);
+  }
+  res.on("finish", () => {
+    console.log(`[LOG] ${req.method} ${req.url} ${res.statusCode}`);
+  });
+
+  await next();
+  console.log(`[LOG] [DONE] ${req.method} ${req.url} ${res.statusCode}`);
+});
 
 // POST handler for client-to-server communication
 app.all("/mcp/:id", requireAuth, async (req, res) => {
@@ -195,38 +195,3 @@ const port = parseInt(env.MCP_SERVER_PORT || "8080", 10);
 app.listen(port, () => {
   console.log(`MCP Gateway Server running on http://localhost:${port}`);
 });
-
-
-
-async function bindToRegistry(agent: MCPClientManager, auth: AuthInfo, id?: string) {
-  if (env.MCP_REGISTRY_URL) {
-    const registry = new MCPClientConnection(new URL(env.MCP_REGISTRY_URL!), {
-      id: id,
-      info: {
-        name: "mcp-gateway-server",
-        version: "1.0.0",
-      },
-      transport: () =>
-        new StreamableHTTPClientTransport(new URL(env.MCP_REGISTRY_URL!), {
-          requestInit: {
-            headers: {
-              Authorization: `Bearer ${auth.token}`,
-            },
-          },
-        }),
-    });
-    await registry.init();
-    await agent.updateFromRegistry(registry);
-    registry.connectionState.subscribe((state) => {
-      console.log("registry connection state", state);
-      if (state === "ready") {
-        agent.updateFromRegistry(registry);
-      }
-      if (state === "failed") {
-        console.error("registry connection failed", registry.error);
-      } else {
-        console.log("registry connection state", state);
-      }
-    });
-  }
-}
