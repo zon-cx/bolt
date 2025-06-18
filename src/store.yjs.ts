@@ -6,8 +6,30 @@ const docs = new Map<string, HocuspocusProvider>();
 import WebSocket from "ws";
 import {HocuspocusProviderWebsocket} from "@hocuspocus/provider";
 
+const wsProviders=new Map<string, HocuspocusProviderWebsocket>();
+const wsProvider = (url: string) => {
+    if (!wsProviders.has(url)) {
+        wsProviders.set(url, new HocuspocusProviderWebsocket({
+            url: url,
+            initialDelay: 0,
+            maxDelay: 1000,
+            maxAttempts:4,
+            onConnect: () => {
+                console.log("connected to yjs websocket", url);
+            },
+            onStatus: (status) => {
+                console.log("status to yjs websocket",url, status);
+            },
+            // WebSocketPolyfill: WebSocket
+        }));
+        // wsProviders.get(url)!.connect().catch(e=>{
+        //     console.error("error connecting to yjs websocket", url, e);
+        // });
+    }
+    return wsProviders.get(url)!;
+}
 
-export function connectYjs(doc: Y.Doc | string, url?: string): Y.Doc {
+export  function connectYjs(doc: Y.Doc | string, url?: string): Y.Doc {
     const document =
         typeof doc === "string"
             ? new Y.Doc({guid: doc, shouldLoad: true, gc: false})
@@ -19,19 +41,8 @@ export function connectYjs(doc: Y.Doc | string, url?: string): Y.Doc {
             url: url,
             document: document,
             forceSyncInterval: 4000,
-            // websocketProvider: new HocuspocusProviderWebsocket({
-            //     url: url,
-            //     initialDelay: 0,
-            //     maxDelay: 1000,
-            //     onConnect: () => {
-            //         console.log("connected to yjs websocket", url);
-            //     },
-            //     onStatus: (status) => {
-            //         // console.log("status to yjs websocket",url, status);
-            //     },
-            //     WebSocketPolyfill: WebSocket
-            // }),
             name: document.guid,
+            // websocketProvider: wsProvider(url),
             onConnect: () => {
                 console.log("connected to yjs", provider.document.guid);
             },
@@ -65,15 +76,24 @@ export function connectYjs(doc: Y.Doc | string, url?: string): Y.Doc {
                 console.log("awareness change to yjs");
             },
             onDisconnect(data) {
-                console.log("disconnect to yjs");
+                console.log("yjs disconnected", data);
             },
         });
 
-        provider.connect();
-        provider.startSync();
-
-        provider.document.load();
+        // wsProvider.attach(provider);
         docs.set(document.guid, provider);
+
+        provider.startSync();
+        provider.document.load();
+
+        // provider.forceSync();
+        console.log("yjs started", provider.document.guid, {
+            isSynced: provider.isSynced,
+            isAuthenticated: provider.isAuthenticated,
+            attached: provider.isAttached,
+            
+        });
+        // provider.document.load();
     }
     return docs.get(document.guid)!.document;
 }
