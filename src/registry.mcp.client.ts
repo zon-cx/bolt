@@ -3,19 +3,20 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { SSEClientTransportOptions } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type {
-  CallToolRequestSchema,
-  CallToolResultSchema,
-  CompatibilityCallToolResultSchema,
-  CompleteRequest,
-  GetPromptRequest,
-  Prompt,
-  ReadResourceRequest,
-  Request,
-  Resource,
-  ResourceTemplate,
-  ResultSchema,
-  Tool,
+import {
+  ResourceUpdatedNotificationSchema,
+  type CallToolRequestSchema,
+  type CallToolResultSchema,
+  type CompatibilityCallToolResultSchema,
+  type CompleteRequest,
+  type GetPromptRequest,
+  type Prompt,
+  type ReadResourceRequest,
+  type Request,
+  type Resource,
+  type ResourceTemplate,
+  type ResultSchema,
+  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Atom, createAtom } from "@xstate/store";
 import { jsonSchema, type ToolSet } from "ai";
@@ -28,9 +29,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { env } from "node:process";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
- 
+import { ListConnectionsResultSchema } from "./registry.mcp.server";
+import { z } from "zod";
+import EventEmitter from "node:events";
 
- 
 /**
  * Utility class that aggregates multiple MCP clients into one
  */
@@ -43,14 +45,14 @@ export class MCPClientManager {
   public resourceTemplates = createAtom<NamespacedData["resourceTemplates"]>(
     []
   );
-
+  public connected = new EventEmitter();
   /**
    * @param id Name of the MCP client
    * @param version Version of the MCP Client
    * @param store
    */
   constructor(
-    public auth: AuthInfo,
+    public auth: Partial<AuthInfo>,
     public id: string,
     public version: string,
     public store: Y.Map<serverConfig>
@@ -58,40 +60,98 @@ export class MCPClientManager {
     for (const [key, value] of store.entries()) {
       if (!this.mcpConnections[key]) {
         console.log("connecting", key, value);
-        const { url } = value;
-        this.connect(url, {
-          id: key,
-        })
-          .catch(console.error)
-          .then(console.log);
+        this.connect(value)
+          .then((connection) => {
+            console.log(
+              "connected",
+              key,
+              connection.connectionState.get()
+            );
+            store.set(key, {
+              ...store.get(key)!,
+              error: connection.error?.get(),
+              status: connection.connectionState.get(),
+            })  
+          })
+          .catch(console.error);
       }
       console.log("exists connection", key, value);
     }
-    store.observe((event) => {
-      for (const [key, { action }] of event.changes.keys.entries()) {
-        if (
-          action === "add" ||
-          (action === "update" && !this.mcpConnections[key])
-        ) {
+    store.observe(async (event) => {
+      for (const [key] of event.changes.keys.entries()) {
+        if (store.get(key) && !this.mcpConnections[key]) {
           console.log("connecting", key);
-          const { url } = store.get(key)!;
-          this.connect(url, {
-            id: key,
-          }).catch(console.error);
+          const c = await this.connect(store.get(key)!).then((c)=>{
+            console.log("connected", key, c.connectionState.get() , c.error?.get());
+            store.set(key, {
+              ...store.get(key)!,
+              error: c.error?.get(),
+              status: c.connectionState.get(),
+            }) 
+          })
+          .catch((e)=>{
+            console.error("error connecting", key, store.get(key));
+            store.set(key, {
+              ...store.get(key)!,
+              error: {
+                message: "message" in e ? e.message : "unknown error",
+                stack: "stack" in e ? e.stack : undefined,
+                code: "code" in e ? e.code : undefined,
+              },
+            });
+          });
         }
       }
     });
 
-    this.connect("https://store-mcp.val.run/mcp", {
+    this.store.set("store", {
       id: "store",
-    }).catch(console.error);
+      url: "https://store-mcp.val.run/mcp",
+      name: "store",
+      version: "1.0.0",
+    });
 
-    env.MCP_REGISTRY_URL && this.connect(env.MCP_REGISTRY_URL, {
-      id: "registry",
-    }).catch(console.error);
+    env.MCP_REGISTRY_URL &&
+      this.store.set("registry", {
+        id: "registry",
+        url: env.MCP_REGISTRY_URL,
+        name: "registry",
+        version: "1.0.0",
+      });
+  }
+
+  async updateFromRegistry(connection: MCPClientConnection) {
+    async function updateStore(this: MCPClientManager) {
+      try {
+      const connections = await connection.client.callTool({
+        name: "list-connections",
+        arguments: {},
+      }) as {
+        isError: boolean;
+        error: any;
+        structuredContent: z.infer<typeof ListConnectionsResultSchema>;
+      };
+
+      connections.structuredContent?.connections?.forEach(
+        this.addConnection.bind(this)
+      );
+
+      if (connections.isError) {
+          console.error("error listing connections", connections.error);
+        }
+      } catch (error) {
+        console.error("error listing connections", error);
+      }
+    }
+    updateStore.call(this);
+    connection.client.setNotificationHandler(
+      ResourceUpdatedNotificationSchema,
+      updateStore.bind(this)
+    );
   }
 
   async *streamConnections(): AsyncGenerator<serverConfig> {
+    //@ts-ignore   
     for await (const [key] of yMapIterate(this.store)) {
       const value = this.store.get(key);
       if (value) {
@@ -106,8 +166,8 @@ export class MCPClientManager {
   }
 
   async listConnections(): Promise<Array<serverConfig & { status: string }>> {
-    const iterator = this.streamConnections();
-    await iterator.next();
+    // const iterator = this.streamConnections();
+    // await iterator.next();
     return Array.from(this.store.entries()).map(([key, value]) => ({
       id: key,
       url: value.url,
@@ -115,7 +175,25 @@ export class MCPClientManager {
       version: value.version,
       status:
         this.mcpConnections[key]?.connectionState?.get() ?? "disconnected",
+      error: this.mcpConnections[key]?.error?.get() ?? undefined,
     }));
+  }
+
+  async addConnection({ id, url, name, version }: serverConfig) {
+    this.store.set(id, {
+      id,
+      url,
+      name,
+      version,
+    });
+
+    return {
+      id,
+      url,
+      name,
+      version,
+      status: this.mcpConnections[id]?.connectionState?.get() ?? "initializing",
+    };
   }
 
   /**
@@ -124,44 +202,36 @@ export class MCPClientManager {
    * @param url
    * @param options
    */
-  async connect(
-    url: string,
-    options: {
-      transport?: TransportFactory;
-      client?: ConstructorParameters<typeof Client>[1];
-      id?: string;
-    } = {}
-  ): Promise<MCPClientConnection & serverConfig> {
-    const id = options.id || url;
-
+  async connect({ id, url, name, version }: serverConfig) {
     if (!this.mcpConnections[id]) {
       console.log("new connection", id, url);
       this.mcpConnections[id] = new MCPClientConnection(new URL(url), {
         info: {
-          name: this.id,
-          version: this.version,
+          name: name || id,
+          version: version || "1.0.0",
         },
         client: {
           capabilities: {},
         },
         transport: () =>
           new StreamableHTTPClientTransport(new URL(url), {
-            requestInit: this.auth?.token ? {
-              headers: {
-                Authorization: `Bearer ${this.auth.token}`,
-              },
-            } : undefined,
+            requestInit: this.auth?.token
+              ? {
+                  headers: {
+                    Authorization: `Bearer ${this.auth.token}`,
+                  },
+                }
+              : undefined,
             // sessionId: this.auth.extra?.sub? `${this.auth.extra.sub}-${this.id}` : undefined,
           }),
-        ...options,
       });
-    
-      this.store.set(id, {
-        id,
-        url,
-        name: this.id,
-        version: this.version,
+      const stateSubscription  = this.mcpConnections[id].connectionState.subscribe((state) => {
+        if(state === "ready") {
+          this.connected.emit(id);
+          stateSubscription.unsubscribe();
+        }
       });
+
       this.mcpConnections[id].tools.subscribe(() => {
         this.tools.set(getNamespacedData(this.mcpConnections, "tools"));
         this.aiTools.set(this.unstable_getAITools());
@@ -177,10 +247,9 @@ export class MCPClientManager {
           getNamespacedData(this.mcpConnections, "resourceTemplates")
         )
       );
-
-      await this.mcpConnections[id].init();
-      console.log("connected", id, url);
     }
+
+    await this.mcpConnections[id].init();
 
     return Object.assign(this.mcpConnections[id], this.store.get(id)!);
   }
@@ -308,7 +377,7 @@ export class MCPClientManager {
       this.tools.get().map(({ name, source }) => ({ source, name })),
       "connections",
       Object.keys(this.mcpConnections),
-      "stote",
+      "store",
       Array.from(this.store.keys()),
       tool
     );
@@ -404,8 +473,13 @@ export class MCPClientManager {
         if (this.resourceTemplates.get()) mcpServer.sendResourceListChanged();
       }),
     ];
-    this.onClose(() => {
+    mcpServer.onclose=(() => {
       console.log("Agent closed", this.id);
+      subscriptions.forEach((sub) => {
+        sub.unsubscribe();
+      });
+    });
+    this.onClose(() => {
       subscriptions.forEach((sub) => {
         sub.unsubscribe();
       });
@@ -518,14 +592,9 @@ async function findSourceAsync<
   }
 }
 
- 
 export type serverConfig = {
   id: string;
   url: string;
-  name: string;
-  version: string;
+  name?: string;
+  version?: string;
 };
-
-
-
-
