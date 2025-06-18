@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {agentConfig, mcpAgentManager, MCPAgentManager} from "@/registry.identity.store";
+import type {agentConfig,serverConfig} from "@/registry.identity.store";
 import {randomUUID} from "node:crypto";
 import {env} from "node:process";
 import { ProxyOAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js";
@@ -13,6 +13,8 @@ import { version } from "node:os";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { authRouter, requireAuth, getAgentAuthInfo } from "./registry.mcp.server.auth";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { connectYjs } from "./store.yjs";
+import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // Add cleanup tracking
 const cleanupTimeouts = new Map<string, NodeJS.Timeout>();
@@ -43,6 +45,12 @@ function getActiveTransportCount(): number {
     return Object.keys(transports.streamable).length;
 }
 
+const doc =  connectYjs("@mcp.registry");
+
+const agentsStore = doc.getMap<agentConfig>("agents");
+
+
+
 const app = express();
 app.use(express.json());
 
@@ -56,10 +64,10 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 
 app.all("/mcp", requireAuth, async (req, res, next) => {
     try {
-        const sessionId = req.header("mcp-session-id") as string | undefined;
+        const session = req.header("mcp-session-id") as string | undefined;
         
         // Check if we're at the transport limit
-        if (!sessionId && getActiveTransportCount() >= MAX_CONCURRENT_TRANSPORTS) {
+        if (!session && getActiveTransportCount() >= MAX_CONCURRENT_TRANSPORTS) {
             console.warn('Maximum concurrent transports reached');
             res.status(503).json({ error: 'Server is at maximum capacity' });
             return;
@@ -67,14 +75,14 @@ app.all("/mcp", requireAuth, async (req, res, next) => {
 
         let transport: StreamableHTTPServerTransport;
 
-        if (sessionId && transports.streamable[sessionId]) {
-            transport = transports.streamable[sessionId];
+        if (session && transports.streamable[session]) {
+            transport = transports.streamable[session];
             // Reset cleanup timeout
-            if (cleanupTimeouts.has(sessionId)) {
-                clearTimeout(cleanupTimeouts.get(sessionId));
+            if (cleanupTimeouts.has(session)) {
+                clearTimeout(cleanupTimeouts.get(session));
             }
         } else {
-            transport = await createServerManager(req.auth as AuthInfo);
+            transport = await createServerManager( {auth:req.auth as AuthInfo, session} );
         }
 
         // Set cleanup timeout
@@ -94,11 +102,11 @@ app.all("/mcp", requireAuth, async (req, res, next) => {
 
 app.all("/mcp/:id", requireAuth, async (req, res, next) => {
     try {
-        const sessionId = req.header("mcp-session-id") as string | undefined;
+        const session = req.header("mcp-session-id") as string | undefined;
         const id = req.params.id;
         
         // Check if we're at the transport limit
-        if (!sessionId && getActiveTransportCount() >= MAX_CONCURRENT_TRANSPORTS) {
+        if (!session && getActiveTransportCount() >= MAX_CONCURRENT_TRANSPORTS) {
             console.warn('Maximum concurrent transports reached');
             res.status(503).json({ error: 'Server is at maximum capacity' });
             return;
@@ -106,14 +114,14 @@ app.all("/mcp/:id", requireAuth, async (req, res, next) => {
 
         let transport: StreamableHTTPServerTransport;
 
-        if (sessionId && transports.streamable[sessionId]) {
-            transport = transports.streamable[sessionId];
+        if (session && transports.streamable[session]) {
+            transport = transports.streamable[session];
             // Reset cleanup timeout
-            if (cleanupTimeouts.has(sessionId)) {
-                clearTimeout(cleanupTimeouts.get(sessionId));
+            if (cleanupTimeouts.has(session)) {
+                clearTimeout(cleanupTimeouts.get(session));
             }
         } else {
-            transport = await createServerManager(req.auth as AuthInfo, id);
+            transport = await createServerManager( {auth:req.auth as AuthInfo, session, id} );
         }
 
         // Set cleanup timeout
@@ -137,7 +145,7 @@ app.listen(port  , () => {
     console.log(`MCP Gateway Server running on http://localhost:${port}`);
 });
 
-async function createServerManager(auth: AuthInfo, id?: string) {
+async function createServerManager( {session, auth, id}:{session?: string, auth: AuthInfo, id?: string}): Promise<StreamableHTTPServerTransport> {
     const mcpServer = new McpServer({
         name: "mcp-manager",
         version: "1.0.0",
@@ -157,23 +165,73 @@ async function createServerManager(auth: AuthInfo, id?: string) {
             logging: {},
         },
     });
-    const agent= mcpAgentManager.initAgent(getAgentAuthInfo(auth, id));
-    mcpAgentManager.store.observe((e)=>{
-        mcpServer.sendResourceListChanged()
-    })
-    mcpServer.resource("connections", "urn:mcp:connections",  { mimeType: "text/json" },  async (params, extra) => {
-        const connections = await agent.listConnections();
-        return {
-            contents: [
-                {
-                    uri: "urn:mcp:connections",
-                    text:   JSON.stringify(connections, null, 2),
-                }
-            ],
-        }
-    })
 
-    mcpServer.registerTool("list-connections", {
+    const agentId = id || (auth?.extra?.sub as string) || "default";
+    const agent = agentsStore.set(agentId, {
+        id:agentId,
+        name: (auth?.extra?.name as string) || agentId,
+        created: new Date().toISOString(),
+      ... agentsStore.get(agentId) || {}
+    });
+    
+    const store = doc.getMap<serverConfig>(agentId)
+     const connectionCallback = () => {
+        mcpServer.sendResourceListChanged()
+    }
+    
+    store.observe(connectionCallback)
+    
+    mcpServer.resource(
+        "server",
+        new ResourceTemplate("urn:mcp:server/{id}", { 
+            list: async () => {
+                const servers = Array.from(store.entries()).map(([key, value]) => ({
+                    ...value,
+                    id: key
+                }));
+                return {
+                    resources: servers.map(server => ({
+                        uri: `urn:mcp:server/${server.id}`,
+                        name: server.name || server.id,
+                        description: `MCP server at ${server.url}`,
+                        mimeType: "application/json"
+                    }))
+                };
+            }
+        }),
+        {
+            title: "MCP Server",
+            description: "Dynamic MCP server resource by ID",
+            mimeType: "application/json"
+        },
+        async (uri, params) => {
+            const serverId = String(params.id);
+            const server = store.get(serverId);
+            if (!server) {
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify({ error: "Server not found" }, null, 2),
+                        mimeType: "application/json"
+                    }]
+                };
+            }
+            return {
+                contents: [{
+                    uri: uri.href,
+                    text: JSON.stringify({
+                        ...server,
+                        id: serverId,
+                        url: server.url,
+                        name: server.name
+                    }, null, 2),
+                    mimeType: "application/json"
+                }]
+            };
+        }
+    );
+
+    mcpServer.registerTool("list", {
         outputSchema:
             {connections:z.array(z.object({
                     id: z.string(),
@@ -193,19 +251,22 @@ async function createServerManager(auth: AuthInfo, id?: string) {
     async function ( extra: RequestHandlerExtra<any,any>) {
         console.log("Listing MCP servers",  extra);
         try {
-            const connections = await agent.listConnections();
+           const connections = Array.from(store.entries()).map(([key, value]) => ({
+            ...value,
+            id: key,
+           }));
             await extra.sendNotification({
                 method: "notifications/message",
                 params: {
                     level: "info",
                     type: "text",
-                    text: `Available ${connections.length} MCP servers for agent ${agent.name}`,
+                    text: `Available ${connections.length} MCP servers for agent ${agent?.name}`,
                 }
             });
             return {
                 content: [{
                     type: "text",
-                    text: `Available MCP servers for agent ${agent.name}`,
+                    text: `Available MCP servers for agent ${agent?.name}`,
                 }],
                 structuredContent: {
                     connections
@@ -243,15 +304,14 @@ async function createServerManager(auth: AuthInfo, id?: string) {
             status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ,"initializing"]).optional(),
         },
         description: "Connect to a new MCP server",
-    }, async function (params, extra) {
-         const connection = await agent.addConnection({
+    }, async function (params, extra) { 
+         const connection = store.set(params.name || params.url, {
             id: params.name || params.url,
             url: params.url,
             name: params.name || params.url,
             version: "1.0.0",
-         });
-        
-
+        });
+         
         return {
             content: [{
                 type: "text",
@@ -271,7 +331,7 @@ async function createServerManager(auth: AuthInfo, id?: string) {
             },
             description: "Disconnect from an MCP server",
         }, async function (params, extra) {
-            await agent.closeConnection(params.id);
+            store.delete(params.id);
             return {
                 content: [{
                     type: "text",
@@ -296,7 +356,11 @@ async function createServerManager(auth: AuthInfo, id?: string) {
     async function ( extra: RequestHandlerExtra<any,any>) {
         console.log("Getting agent info",  extra.authInfo);
         try {
-            const connections = await agent.listConnections();
+            const connections = Array.from(store.entries()).map(([key, value]) => ({
+                ...value,
+                id: key,
+            }));
+            const agentInfo = store.get(agent.id);
             return {
                 content: [{
                     type: "text",
@@ -323,7 +387,7 @@ async function createServerManager(auth: AuthInfo, id?: string) {
         }
     });
 
-    mcpServer.registerTool("connection-info", {
+    mcpServer.registerTool("details", {
         inputSchema: {
             id: z.string()
         },
@@ -346,7 +410,7 @@ async function createServerManager(auth: AuthInfo, id?: string) {
         description: "Get information about a specific MCP connection",
     }, async function (args: { [x: string]: any }, extra: RequestHandlerExtra<any,any>) {
         try {
-            const connection = agent.mcpConnections[args.id];
+            const connection = store.get(args.id);
             
             if (!connection) {
                 console.warn(`No MCP server found with id ${args.id}`);
@@ -359,25 +423,16 @@ async function createServerManager(auth: AuthInfo, id?: string) {
                 };
             }
 
-            const connectionInfo = {
-                id: args.id,
-                name: connection.name,
-                url: connection.url,
-                state: connection.connectionState.get(),
-                tools: connection.tools.get().length,
-                prompts: connection.prompts.get().length,
-                resources: connection.resources.get().length,
-                resourceTemplates: connection.resourceTemplates.get().length,
-            };
+            
 
-            console.log(`Retrieved connection info for ${args.id}:`, connectionInfo);
+            console.log(`Retrieved connection info for ${args.id}:`, connection);
 
             return {
                 content: [{
                     type: "text",
                     text: `MCP server info for ${args.id}: ${connection.name} (${connection.url})`,
                 }],
-                structuredContent: connectionInfo
+                structuredContent: connection
             }
         } catch (error: unknown) {
             console.error(`Error getting connection info for ${args.id}:`, error);
@@ -394,7 +449,7 @@ async function createServerManager(auth: AuthInfo, id?: string) {
 
     const transport = new StreamableHTTPServerTransport({
         eventStore: new InMemoryEventStore(),
-        sessionIdGenerator: () => randomUUID(),
+        sessionIdGenerator: () => session || randomUUID(),
         onsessioninitialized: (sessionId) => {
             console.log(`Initializing transport for session ${sessionId}`);
             transports.streamable[sessionId] = transport;
@@ -406,6 +461,7 @@ async function createServerManager(auth: AuthInfo, id?: string) {
             console.log(`Transport closed for session ${transport.sessionId}`);
             cleanupTransport(transport.sessionId);
         }
+        store.unobserve(connectionCallback)
     }
 
     transport.onerror = (error) => {
@@ -413,6 +469,7 @@ async function createServerManager(auth: AuthInfo, id?: string) {
         if (transport.sessionId) {
             cleanupTransport(transport.sessionId);
         }
+        store.unobserve(connectionCallback)
     }
 
     // Connect the MCP server to the transport

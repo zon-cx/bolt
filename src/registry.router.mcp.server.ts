@@ -24,6 +24,8 @@ import {
 } from "./registry.mcp.server.auth";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { Subscription } from "@xstate/store";
+import { MCPClientConnection } from "./mcp.client";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const app = express();
 app.use(express.json());
@@ -37,7 +39,7 @@ const transports = {
 
 
 // Helper to create a new MCP server and transport for a session
-async function createSessionTransport(auth: AuthInfo, id?: string) {
+async function createSessionTransport(sessionInfo: {session?: string; auth: AuthInfo; id?: string}): Promise<StreamableHTTPServerTransport> {
   const mcpServer = new Server(
     {
       name: "mcp-gateway-server",
@@ -61,7 +63,34 @@ async function createSessionTransport(auth: AuthInfo, id?: string) {
     }
   );
 
-  const agent = mcpAgentManager.initAgent(getAgentAuthInfo(auth, id));
+  const agent = mcpAgentManager.init(sessionInfo);
+  const registry = new MCPClientConnection(new URL(`${env.MCP_REGISTRY_URL}/${agent.id}`), {
+    info: {
+      name: "registry",
+      version: "1.0.0",
+    },
+    client: {
+      capabilities: {
+        tools: true,
+        resources: true,
+      },
+    },
+    transport: () =>
+      new StreamableHTTPClientTransport(new URL(`${env.MCP_REGISTRY_URL}/${agent.id}`), {
+        sessionId: sessionInfo.session,
+        requestInit: sessionInfo.auth?.token
+          ? {
+              headers: {
+                Authorization: `Bearer ${sessionInfo.auth.token}`,
+              },
+            }
+          : undefined,
+      })
+  });
+
+  
+  await registry.init();
+   
  
   // Register handlers to proxy requests to the agent
   mcpServer.setRequestHandler(
@@ -79,26 +108,27 @@ async function createSessionTransport(auth: AuthInfo, id?: string) {
   mcpServer.setRequestHandler(
     ListResourceTemplatesRequestSchema,
     async (_, extra) => ({
+      resources: agent.listResources(),
       resourceTemplates: agent.listResourceTemplates(),
     })
   );
   mcpServer.setRequestHandler(
     GetPromptRequestSchema,
     async (request, extra) => {
-      return agent.getPrompt(request.params);
+      return agent.getPrompt(request.params, extra);
     }
   );
   mcpServer.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    return agent.callTool(request.params);
+    return agent.callTool(request.params, extra);
   });
   mcpServer.setRequestHandler(
     ReadResourceRequestSchema,
     async (request, extra) => {
-      return agent.readResource(request.params);
+      return agent.readResource(request.params, extra);
     }
   );
   mcpServer.setRequestHandler(CompleteRequestSchema, async (request, extra) => {
-    return agent.complete(request.params);
+    return agent.complete(request.params, extra);
   });
 
   const transport = new StreamableHTTPServerTransport({
@@ -115,6 +145,7 @@ async function createSessionTransport(auth: AuthInfo, id?: string) {
   await mcpServer.connect(transport);
   mcpServer.onerror = console.error.bind(console);
     const subscriptions: Subscription[] = [
+      await agent.updateFromRegistry(registry),
       agent.tools.subscribe(() => {
         if (agent.tools.get()) mcpServer.sendToolListChanged();
       }),
@@ -163,29 +194,34 @@ app.use(async (req, res, next) => {
   await next();
   console.log(`[LOG] [DONE] ${req.method} ${req.url} ${res.statusCode}`);
 });
+// Add error handling middleware
+app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Error handling request:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
 
 // POST handler for client-to-server communication
 app.all("/mcp/:id", requireAuth, async (req, res) => {
   const id = req.params.id;
-  const sessionId = req.header("mcp-session-id") as string | undefined;
+  const session = req.header("mcp-session-id") as string | undefined;
   let transport: StreamableHTTPServerTransport;
 
-  if (sessionId && transports.streamable[sessionId]) {
-    transport = transports.streamable[sessionId];
+  if (session && transports.streamable[session]) {
+    transport = transports.streamable[session];
   } else {
-    transport = await createSessionTransport(req.auth as AuthInfo, id);
+    transport = await createSessionTransport({session, auth:req.auth as AuthInfo, id} );
   }
   await transport.handleRequest(req, res, req.body);
 });
 
 app.all("/mcp", requireAuth, async (req, res) => {
-  const sessionId = req.header("mcp-session-id") as string | undefined;
+  const session = req.header("mcp-session-id") as string | undefined;
   let transport: StreamableHTTPServerTransport;
 
-  if (sessionId && transports.streamable[sessionId]) {
-    transport = transports.streamable[sessionId];
+  if (session && transports.streamable[session]) {
+    transport = transports.streamable[session];
   } else {
-    transport = await createSessionTransport(req.auth as AuthInfo);
+    transport = await createSessionTransport( {auth:req.auth as AuthInfo, session} );
   }
   await transport.handleRequest(req, res, req.body);
 });

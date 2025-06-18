@@ -1,9 +1,11 @@
-import { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { auth, OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { SSEClientTransportOptions } from "@modelcontextprotocol/sdk/client/sse.js";
-import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import type { RequestHandlerExtra, RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
+  CallToolRequest,
+  CallToolResult,
   ResourceUpdatedNotificationSchema,
   type CallToolRequestSchema,
   type CallToolResultSchema,
@@ -26,12 +28,35 @@ import { yMapIterate } from "@cxai/stream";
 import { Subscription } from "@xstate/store";
 import { connectYjs } from "./store.yjs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { env } from "node:process";
+import { env, version } from "node:process";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ListConnectionsResultSchema } from "./registry.mcp.server";
 import { z } from "zod";
 import EventEmitter from "node:events";
+
+type NamespacedSource = {
+  name: string;
+  source: {
+    name: string;
+    url: string;
+    server: string;
+  };
+};
+
+type NamespacedData = {
+  tools: (Tool & NamespacedSource)[];
+  prompts: (Prompt & NamespacedSource)[];
+  resources: (Resource & NamespacedSource)[];
+  resourceTemplates: (ResourceTemplate & NamespacedSource)[];
+};
+
+export type serverConfig = {
+  id: string;
+  url: string;
+  name?: string;
+  version?: string;
+};
 
 /**
  * Utility class that aggregates multiple MCP clients into one
@@ -46,109 +71,107 @@ export class MCPClientManager {
     []
   );
   public connected = new EventEmitter();
+  public store: Y.Map<serverConfig>;
+  private clientCache: Map<string, { client: Client; transport: StreamableHTTPClientTransport; lastUsed: number }> = new Map();
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  private readonly CLEANUP_INTERVAL = 60 * 1000; // 1 minute
   /**
    * @param id Name of the MCP client
    * @param version Version of the MCP Client
    * @param store
    */
   constructor(
-    public auth: Partial<AuthInfo>,
-    public id: string,
-    public version: string,
-    public store: Y.Map<serverConfig>
+  public session: {store: Y.Map<serverConfig>, auth: AuthInfo, session?: string, id?: string, name?: string, version?: string}
   ) {
-    for (const [key, value] of store.entries()) {
-      if (!this.mcpConnections[key]) {
-        console.log("connecting", key, value);
-        this.connect(value)
-          .then((connection) => {
-            console.log(
-              "connected",
-              key,
-              connection.connectionState.get()
-            );
-            store.set(key, {
-              ...store.get(key)!,
-              error: connection.error?.get(),
-              status: connection.connectionState.get(),
-            })  
-          })
-          .catch(console.error);
-      }
-      console.log("exists connection", key, value);
-    }
-    store.observe(async (event) => {
+    this.store = this.session.store; 
+    this.store.observe(async (event) => {
       for (const [key] of event.changes.keys.entries()) {
-        if (store.get(key) && !this.mcpConnections[key]) {
-          console.log("connecting", key);
-          const c = await this.connect(store.get(key)!).then((c)=>{
-            console.log("connected", key, c.connectionState.get() , c.error?.get());
-            store.set(key, {
-              ...store.get(key)!,
-              error: c.error?.get(),
-              status: c.connectionState.get(),
-            }) 
-          })
-          .catch((e)=>{
-            console.error("error connecting", key, store.get(key));
-            store.set(key, {
-              ...store.get(key)!,
-              error: {
-                message: "message" in e ? e.message : "unknown error",
-                stack: "stack" in e ? e.stack : undefined,
-                code: "code" in e ? e.code : undefined,
-              },
-            });
-          });
+        if (this.store.get(key) && !this.mcpConnections[key]) {
+           await this.attemptConnection(this.store.get(key)!);
         }
       }
     });
 
-    this.store.set("store", {
-      id: "store",
-      url: "https://store-mcp.val.run/mcp",
-      name: "store",
-      version: "1.0.0",
-    });
-
-    env.MCP_REGISTRY_URL &&
-      this.store.set("registry", {
-        id: "registry",
-        url: env.MCP_REGISTRY_URL,
-        name: "registry",
-        version: "1.0.0",
-      });
+    // Start cleanup interval
+    setInterval(() => {
+      this.cleanupExpiredClients();
+    }, this.CLEANUP_INTERVAL);
   }
 
   async updateFromRegistry(connection: MCPClientConnection) {
-    async function updateStore(this: MCPClientManager) {
+    const callback = async function updateStore(this: MCPClientManager) {
       try {
-      const connections = await connection.client.callTool({
-        name: "list-connections",
-        arguments: {},
-      }) as {
-        isError: boolean;
-        error: any;
-        structuredContent: z.infer<typeof ListConnectionsResultSchema>;
-      };
+        console.log("updateFromRegistry", connection.name);
+        const {resources} = await connection.client.listResources();
+        const serverResources = resources.filter(
+          (resource) => resource.uri.includes("urn:mcp:server/")
+        );
+        console.log("serverResources", serverResources,resources);
 
-      connections.structuredContent?.connections?.forEach(
-        this.addConnection.bind(this)
-      );
-
-      if (connections.isError) {
-          console.error("error listing connections", connections.error);
+        for (const resource of serverResources) {
+          try {
+            const {uri, name} = resource;
+            const serverResponse = await connection.client.readResource({uri});
+            
+            if (serverResponse.contents?.[0]) {
+              const serverData = JSON.parse(serverResponse.contents[0].text as string);
+              console.log("add connection", serverData);
+              if (serverData.id && serverData.url ) {
+                await this.addConnection({
+                  id: serverData.id,
+                  url: serverData.url,
+                  name: serverData.name || name,
+                  version: serverData.version
+                });
+              }
+            }
+          } catch (error) {
+            console.error(`Error processing server resource ${resource.uri}:`, error);
+          }
         }
       } catch (error) {
-        console.error("error listing connections", error);
+        console.error("Error updating from registry:", error);
       }
-    }
-    updateStore.call(this);
-    connection.client.setNotificationHandler(
-      ResourceUpdatedNotificationSchema,
-      updateStore.bind(this)
-    );
+    }.bind(this);
+
+    await callback();
+
+    return connection.resources.subscribe(callback);
   }
+
+  async  attemptConnection(connection:serverConfig) {
+    console.log(" connecting", connection.id);
+    const c = await this.connect(connection).then((c)=>{
+      console.log("🔗 connected", connection.id, c.connectionState.get() , c.error?.get());
+      this.store.set(connection.id, {
+        ...this.store.get(connection.id)!,
+        error: c.error?.get(),
+        status: c.connectionState.get(),
+      })  
+      return c;
+    })
+    .catch((e)=>{
+      console.error("❌ error connecting", connection.id, e,this.store.get(connection.id));
+      this.store.set(connection.id, {
+        ...this.store.get(connection.id)!,
+        ...connection,
+        error: {
+          message: "message" in e ? e.message : "unknown error",
+          stack: "stack" in e ? e.stack : undefined,
+          code: "code" in e ? String(e.code) : undefined,
+        },
+      }); 
+    });
+    
+    if(c?.connectionState?.get() === "failed") { 
+      setTimeout(() => {
+        if(c?.connectionState?.get() === "failed") {
+          delete this.mcpConnections[connection.id];
+        }
+      }, 5000); 
+    }
+  }
+
 
   async *streamConnections(): AsyncGenerator<serverConfig> {
     //@ts-ignore   
@@ -202,7 +225,8 @@ export class MCPClientManager {
    * @param url
    * @param options
    */
-  async connect({ id, url, name, version }: serverConfig) {
+  async connect({ id, url, name, version }: serverConfig, extra?: {auth?: AuthInfo}) {
+    const auth = extra?.auth  || this.session.auth;
     if (!this.mcpConnections[id]) {
       console.log("new connection", id, url);
       this.mcpConnections[id] = new MCPClientConnection(new URL(url), {
@@ -211,14 +235,15 @@ export class MCPClientManager {
           version: version || "1.0.0",
         },
         client: {
-          capabilities: {},
+          capabilities: {
+          },
         },
         transport: () =>
           new StreamableHTTPClientTransport(new URL(url), {
-            requestInit: this.auth?.token
+            requestInit: auth?.token
               ? {
                   headers: {
-                    Authorization: `Bearer ${this.auth.token}`,
+                    Authorization: `Bearer ${auth.token}`,
                   },
                 }
               : undefined,
@@ -230,7 +255,7 @@ export class MCPClientManager {
           this.connected.emit(id);
           stateSubscription.unsubscribe();
         }
-      });
+        });
 
       this.mcpConnections[id].tools.subscribe(() => {
         this.tools.set(getNamespacedData(this.mcpConnections, "tools"));
@@ -250,7 +275,7 @@ export class MCPClientManager {
     }
 
     await this.mcpConnections[id].init();
-
+ 
     return Object.assign(this.mcpConnections[id], this.store.get(id)!);
   }
 
@@ -273,10 +298,21 @@ export class MCPClientManager {
             parameters: jsonSchema(tool.inputSchema),
             description: tool.description,
             execute: async (args) => {
-              const result = await this.callTool({
-                name: tool.name,
-                arguments: args,
-              });
+              const result = await this.callTool(
+                {
+                  name: tool.name,
+                  arguments: args,
+                },
+                {
+                  authInfo: this.session.auth,
+                  sendRequest: async () => ({} as any),
+                  sendNotification: async () => {},
+                  signal: new AbortController().signal,
+                  requestId: "",
+                  sessionId: this.session.session,
+                  _meta: {}
+                }
+              );
               if (result.isError) {
                 // @ts-expect-error TODO we should fix this
                 throw new Error(result.content[0].text);
@@ -341,10 +377,100 @@ export class MCPClientManager {
   }
 
   /**
+   * Helper method to create a fresh connection to a server and execute an operation
+   */
+  private async useServer<T>(
+    serverId: string,
+    authInfo: AuthInfo | undefined,
+    sessionId: string | undefined,
+    operation: (client: Client) => Promise<T>,
+    notifications: {
+      started?: (params: any) => void;
+      connected?: (params: any) => void;
+      completed?: (params: any) => void;
+      disconnected?: (params: any) => void;
+    } = {}
+  ): Promise<T> {
+    const serverConfig = this.store.get(serverId);
+    if (!serverConfig) {
+      throw new Error(`Server configuration not found for ID: ${serverId}`);
+    }
+    const { url } = serverConfig;
+
+    const cacheKey = sessionId ? `${serverId}:${sessionId}` : serverId;
+    const newClient = async () => {
+        // Create new client and transport
+          const transport = new StreamableHTTPClientTransport(new URL(url), {
+            requestInit: authInfo?.token
+              ? {
+                  headers: {
+                    Authorization: `Bearer ${authInfo.token}`,
+                  }
+                }
+              : undefined,
+          });
+
+          const client = new Client({
+            name: "mcp-client",
+            version: version,
+          }); 
+   
+        await client.connect(transport);
+
+        return {client, transport}; 
+    }
+    // Check if we have a cached client
+    const cached = this.clientCache.get(cacheKey) || await newClient();
+   
+    this.clientCache.set(cacheKey, {
+      client: cached.client,
+      transport: cached.transport,
+      lastUsed: Date.now(),
+    }); 
+      try {
+        const result = await operation(cached.client); 
+        if (notifications.completed) {
+          notifications.completed({
+            server: serverId,
+            url: url,
+            result,
+            cached: true,
+          });
+        }
+
+        return result;
+      } catch (error: any) {
+        // If operation fails, remove from cache and recreate
+        console.log(`Cached client failed for ${cacheKey}, removing from cache`);
+        this.clientCache.delete(cacheKey);
+        try {
+          await cached.client.close();
+          await cached.transport.close();
+        } catch (closeError) {
+          console.error(`Error closing failed cached client:`, closeError);
+        }
+        if (notifications.disconnected) {
+          notifications.disconnected({
+            server: serverId,
+            url: url,
+            cached: true,
+            error: {
+              message: "message" in error ? error.message : error.toString(),
+              stack: "stack" in error ? error.stack : undefined,
+              code: "code" in error ? String(error.code) : undefined,
+            }
+          });
+        }
+        throw error;
+      }
+    }
+
+  /**
    * Namespaced version of
    */
   async callTool(
     { name, ...params }: Zod.infer<typeof CallToolRequestSchema>["params"],
+    {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<CallToolRequest, any>,
     resultSchema?:
       | typeof CallToolResultSchema
       | typeof CompatibilityCallToolResultSchema,
@@ -363,6 +489,7 @@ export class MCPClientManager {
     );
 
     const tool = await findSourceAsync(this.tools, name);
+
     console.log(
       "call-tool",
       name,
@@ -386,20 +513,107 @@ export class MCPClientManager {
       throw new Error(`Tool with name "${name}" does not exist.`);
     }
 
+    sendNotification({
+      method: "notifications/call-tool/started",
+      params: {
+        requestId,
+        sessionId,
+        authInfo,
+        server: tool.server,
+        name: tool.name,
+        uri: tool.uri,
+        url: this.store.get(tool.server)?.url,
+        version: this.store.get(tool.server)?.version,
+        ref: {
+          type: "ref/tool",
+          name: name,
+        },
+        arguments: params,
+      },
+    });
+
     console.log("Tool found", tool);
 
-    return this.mcpConnections[tool.server].client.callTool(
-      {
-        ...params,
-        name: tool.name,
+    return this.useServer(
+      tool.server,
+      authInfo,
+      sessionId,
+      async (client) => {
+        return client.callTool(
+          {
+            ...params,
+            name: tool.name,
+          },
+          resultSchema,
+          options
+        );
       },
-      resultSchema,
-      options
+      {
+        connected: (params) => {
+          sendNotification({
+            method: "client/connected",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: tool.server,
+              name: tool.name,
+              uri: tool.uri,
+              url: this.store.get(tool.server)?.url,
+              version: this.store.get(tool.server)?.version,
+              ref: {
+                type: "ref/tool",
+                name: name,
+              },
+            },
+          });
+        },
+        completed: (params) => {
+          sendNotification({
+            method: "notifications/call-tool/completed",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: tool.server,
+              name: tool.name,
+              uri: tool.uri,
+              url: this.store.get(tool.server)?.url,
+              version: this.store.get(tool.server)?.version,
+              result: params.result,
+              ref: {
+                type: "ref/tool",
+                name: name,
+              },
+            },
+          });
+        },
+        disconnected: (params) => {
+          sendNotification({
+            method: "client/disconnected",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: tool.server,
+              name: tool.name,
+              uri: tool.uri,
+              url: this.store.get(tool.server)?.url,
+              version: this.store.get(tool.server)?.version,
+              ref: {
+                type: "ref/tool",
+                name: name,
+              },
+            },
+          });
+        },
+      }
     );
   }
 
   async complete(
     { ref, ...params }: CompleteRequest["params"],
+    {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<CompleteRequest, any>,
     options?: RequestOptions
   ): Promise<any> {
     const source =
@@ -412,15 +626,89 @@ export class MCPClientManager {
         `No MCP client found for resource name: ${ref.name}  URI: ${ref.uri}  URI Template: ${ref.uriTemplate}`
       );
     }
-    return this.mcpConnections[source.server].client.complete(
-      {
-        ...params,
-        ref: {
-          ...ref,
-          ...source,
-        },
+
+    sendNotification({
+      method: "notifications/complete/started",
+      params: {
+        requestId,
+        sessionId,
+        authInfo,
+        server: source.server,
+        name: source.name,
+        uri: source.uri,
+        url: this.store.get(source.server)?.url,
+        version: this.store.get(source.server)?.version,
+        ref: ref,
       },
-      options
+    });
+
+    return this.useServer(
+      source.server,
+      authInfo,
+      sessionId,
+      async (client) => {
+        return client.complete(
+          {
+            ...params,
+            ref: {
+              ...ref,
+              ...source,
+            },
+          },
+          options
+        );
+      },
+      {
+        connected: (params) => {
+          sendNotification({
+            method: "client/connected",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: source.server,
+              name: source.name,
+              uri: source.uri,
+              url: this.store.get(source.server)?.url,
+              version: this.store.get(source.server)?.version,
+              ref: ref,
+            },
+          });
+        },
+        completed: (params) => {
+          sendNotification({
+            method: "notifications/complete/completed",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: source.server,
+              name: source.name,
+              uri: source.uri,
+              url: this.store.get(source.server)?.url,
+              version: this.store.get(source.server)?.version,
+              result: params.result,
+              ref: ref,
+            },
+          });
+        },
+        disconnected: (params) => {
+          sendNotification({
+            method: "client/disconnected",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: source.server,
+              name: source.name,
+              uri: source.uri,
+              url: this.store.get(source.server)?.url,
+              version: this.store.get(source.server)?.version,
+              ref: ref,
+            },
+          });
+        },
+      }
     );
   }
 
@@ -429,15 +717,102 @@ export class MCPClientManager {
    */
   async readResource(
     params: ReadResourceRequest["params"],
+    {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<ReadResourceRequest, any>,
     options?: RequestOptions
   ) {
     const source = await findSourceAsync(this.resources, params.uri);
-    return await this.mcpConnections[source.server].client.readResource(
-      {
-        ...params,
-        ...source,
+
+    sendNotification({
+      method: "notifications/read-resource/started",
+      params: {
+        requestId,
+        sessionId,
+        authInfo,
+        server: source.server,
+        name: source.name,
+        uri: source.uri,
+        url: this.store.get(source.server)?.url,
+        version: this.store.get(source.server)?.version,
+        ref: {
+          type: "ref/resource",
+          uri: params.uri,
+        },
       },
-      options
+    });
+
+    return this.useServer(
+      source.server,
+      authInfo,
+      sessionId,
+      async (client) => {
+        return client.readResource(
+          {
+            ...params,
+            ...source,
+          },
+          options
+        );
+      },
+      {
+        connected: (params) => {
+          sendNotification({
+            method: "client/connected",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: source.server,
+              name: source.name,
+              uri: source.uri,
+              url: this.store.get(source.server)?.url,
+              version: this.store.get(source.server)?.version,
+              ref: {
+                type: "ref/resource",
+                uri: params.uri,
+              },
+            },
+          });
+        },
+        completed: (params) => {
+          sendNotification({
+            method: "notifications/read-resource/completed",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: source.server,
+              name: source.name,
+              uri: source.uri,
+              url: this.store.get(source.server)?.url,
+              version: this.store.get(source.server)?.version,
+              result: params.result,
+              ref: {
+                type: "ref/resource",
+                uri: params.uri,
+              },
+            },
+          });
+        },
+        disconnected: (params) => {
+          sendNotification({
+            method: "client/disconnected",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: source.server,
+              name: source.name,
+              uri: source.uri,
+              url: this.store.get(source.server)?.url,
+              version: this.store.get(source.server)?.version,
+              ref: {
+                type: "ref/resource",
+                uri: params.uri,
+              },
+            },
+          });
+        },
+      }
     );
   }
 
@@ -446,36 +821,217 @@ export class MCPClientManager {
    */
   async getPrompt(
     params: GetPromptRequest["params"],
+    {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<GetPromptRequest, any>,
     options?: RequestOptions
   ) {
     const { server, name } = await findSourceAsync(this.prompts, params.name);
-    return await this.mcpConnections[server].client.getPrompt(
-      {
-        ...params,
-        name,
+
+    sendNotification({
+      method: "notifications/get-prompt/started",
+      params: {
+        requestId,
+        sessionId,
+        authInfo,
+        server: server,
+        name: name,
+        uri: this.store.get(server)?.url,
+        version: this.store.get(server)?.version,
+        ref: {
+          type: "ref/prompt",
+          name: name,
+        },
       },
-      options
+    });
+
+    return this.useServer(
+      server,
+      authInfo,
+      sessionId,
+      async (client) => {
+        return client.getPrompt(
+          {
+            ...params,
+            name,
+          },
+          options
+        );
+      },
+      {
+        connected: (params) => {
+          sendNotification({
+            method: "client/connected",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: server,
+              name: name,
+              uri: this.store.get(server)?.url,
+              version: this.store.get(server)?.version,
+              ref: {
+                type: "ref/prompt",
+                name: name,
+              },
+            },
+          });
+        },
+        completed: (params) => {
+          sendNotification({
+            method: "notifications/get-prompt/completed",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: server,
+              name: name,
+              uri: this.store.get(server)?.url,
+              version: this.store.get(server)?.version,
+              result: params.result,
+              ref: {
+                type: "ref/prompt",
+                name: name,
+              },
+            },
+          });
+        },
+        disconnected: (params) => {
+          sendNotification({
+            method: "client/disconnected",
+            params: {
+              requestId,
+              sessionId,
+              authInfo,
+              server: server,
+              name: name,
+              uri: this.store.get(server)?.url,
+              version: this.store.get(server)?.version,
+              ref: {
+                type: "ref/prompt",
+                name: name,
+              },
+            },
+          });
+        },
+      }
     );
   }
 
- 
+  /**
+   * Clean up expired clients from the cache
+   */
+  private async cleanupExpiredClients() {
+    const now = Date.now();
+    const expiredKeys: string[] = [];
+
+    for (const [key, cached] of this.clientCache.entries()) {
+      if (now - cached.lastUsed > this.CACHE_TTL) {
+        expiredKeys.push(key);
+      }
+    }
+
+    for (const key of expiredKeys) {
+      const cached = this.clientCache.get(key);
+      if (cached) {
+        try {
+          await cached.client.close();
+          await cached.transport.close();
+        } catch (error) {
+          console.error(`Error closing cached client ${key}:`, error);
+        }
+        this.clientCache.delete(key);
+        console.log(`Cleaned up expired cached client: ${key}`);
+      }
+    }
+  }
+
+  /**
+   * Manually clear a cached client for a specific server and session
+   */
+  async clearCachedClient(serverId: string, sessionId?: string) {
+    const cacheKey = sessionId ? `${serverId}:${sessionId}` : serverId;
+    const cached = this.clientCache.get(cacheKey);
+    
+    if (cached) {
+      try {
+        await cached.client.close();
+        await cached.transport.close();
+      } catch (error) {
+        console.error(`Error closing cached client ${cacheKey}:`, error);
+      }
+      this.clientCache.delete(cacheKey);
+      console.log(`Manually cleared cached client: ${cacheKey}`);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Clear all cached clients for a specific session
+   */
+  async clearSessionCache(sessionId: string) {
+    const keysToRemove: string[] = [];
+    
+    for (const [key, cached] of this.clientCache.entries()) {
+      if (key.includes(`:${sessionId}`)) {
+        keysToRemove.push(key);
+      }
+    }
+
+    for (const key of keysToRemove) {
+      const cached = this.clientCache.get(key);
+      if (cached) {
+        try {
+          await cached.client.close();
+          await cached.transport.close();
+        } catch (error) {
+          console.error(`Error closing cached client ${key}:`, error);
+        }
+        this.clientCache.delete(key);
+      }
+    }
+
+    console.log(`Cleared ${keysToRemove.length} cached clients for session: ${sessionId}`);
+    return keysToRemove.length;
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getCacheStats() {
+    const now = Date.now();
+    const stats = {
+      totalCached: this.clientCache.size,
+      expired: 0,
+      active: 0,
+      details: [] as Array<{
+        key: string;
+        lastUsed: number;
+        age: number;
+        expired: boolean;
+      }>
+    };
+
+    for (const [key, cached] of this.clientCache.entries()) {
+      const age = now - cached.lastUsed;
+      const expired = age > this.CACHE_TTL;
+      
+      if (expired) {
+        stats.expired++;
+      } else {
+        stats.active++;
+      }
+
+      stats.details.push({
+        key,
+        lastUsed: cached.lastUsed,
+        age,
+        expired
+      });
+    }
+
+    return stats;
+  }
 }
-
-type NamespacedSource = {
-  name: string;
-  source: {
-    name: string;
-    url: string;
-    server: string;
-  };
-};
-
-type NamespacedData = {
-  tools: (Tool & NamespacedSource)[];
-  prompts: (Prompt & NamespacedSource)[];
-  resources: (Resource & NamespacedSource)[];
-  resourceTemplates: (ResourceTemplate & NamespacedSource)[];
-};
 
 export function getNamespacedData<T extends keyof NamespacedData>(
   mcpClients: Record<string, MCPClientConnection>,
@@ -565,10 +1121,3 @@ async function findSourceAsync<
     });
   }
 }
-
-export type serverConfig = {
-  id: string;
-  url: string;
-  name?: string;
-  version?: string;
-};

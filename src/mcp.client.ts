@@ -37,25 +37,21 @@ export class MCPClientConnection {
   public resources: Atom<Resource[]>;
   public resourceTemplates: Atom<ResourceTemplate[]>;
   public serverCapabilities: Atom<ServerCapabilities | undefined>;
-  public  error= createAtom<{message:string, stack:string, code:number}  | undefined>(undefined);
+  public error: Atom<{message:string, stack:string, code:number}  | undefined>;
   public transportFactory: TransportFactory;
   public transport: ReturnType<TransportFactory>;
   
   public name: string;
-  public id: string | undefined;
   constructor(
     public url: URL,
     public options: {
-      id?: string;
       info: ConstructorParameters<typeof Client>[0];
       client?: ConstructorParameters<typeof Client>[1] ;
       transport?:TransportFactory
     },
   ) {
-    const { info, client, transport, id } = this.options || {};
-    this.transportFactory = transport ?? (()=> new StreamableHTTPClientTransport(url, {
-      sessionId: id,
-    }));
+    const { info, client, transport } = this.options || {};
+    this.transportFactory = transport ?? (()=> new StreamableHTTPClientTransport(url));
     this.transport = this.transportFactory();
     this.name = info?.name;
     this.connectionState = createAtom<
@@ -71,11 +67,9 @@ export class MCPClientConnection {
     this.resources = createAtom<Resource[]>([]);
     this.resourceTemplates = createAtom<ResourceTemplate[]>([]);
     this.serverCapabilities = createAtom<ServerCapabilities | undefined>(undefined);
+    this.error = createAtom<{message:string, stack:string, code:number}  | undefined>(undefined);
     this.client = new Client(info, client);
-    this.id = options?.id ??
-        randomUUID({
-      disableEntropyCache: true, // Disable entropy cache for better performance in tests
-    })
+ 
      
   }
   
@@ -107,13 +101,13 @@ export class MCPClientConnection {
       }
     
       await this.client.ping();
-      console.log(`🔐 ping  🔐` , this.name, this.url.href,"id:", this.id, "state:", "discovering");
+      console.log(`🔐 ping  🔐` , this.name, this.url.href, "state:", "discovering");
       this.connectionState.set("discovering");
 
       const serverCapabilities = await this.client.getServerCapabilities();
-      if (!serverCapabilities) {
-        throw new Error("The MCP Server failed to return server capabilities");
-      }
+      // if (!serverCapabilities) {
+      //   throw new Error("The MCP Server failed to return server capabilities");
+      // }
       this.serverCapabilities.set(serverCapabilities);
 
       const [instructions, tools, resources, prompts, resourceTemplates] = await Promise.all([
