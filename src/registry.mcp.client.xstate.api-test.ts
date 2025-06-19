@@ -75,6 +75,14 @@ app.get("/resources", (c) => {
   return c.json({ resources: dataStore.resources.get() });
 });
 
+app.get("/resource-templates", (c) => {
+  return c.json({ resourceTemplates: dataStore.resourceTemplates.get() });
+});
+
+app.get("/prompts", (c) => {
+  return c.json({ prompts: dataStore.prompts.get() });
+});
+
 app.get("/debug/actors", (c) => {
   const snapshot = actor.getSnapshot();
   const actors = Object.entries(snapshot.context.mcpActors ?? {}).map(([key, act]: [string, any]) => ({
@@ -283,7 +291,7 @@ app.get("/tool-examples", (c) => {
 });
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = Number(process.env.PORT || 8789);
+  const port = Number(process.env.PORT || 8788);
   console.log(`[ClientManager Hono] listening http://localhost:${port}`);
   serve({ fetch: app.fetch, port });
 }

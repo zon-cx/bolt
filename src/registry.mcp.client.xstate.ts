@@ -184,7 +184,12 @@ export class NamespacedDataStore {
     {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<ReadResourceRequest, any>,
     options?: RequestOptions) {
 
-      const {server, uri: resourceUri, name: resourceName} = await this.findSource(this.resources, name || uri);
+      const searchKey = name || uri;
+      if (!searchKey) {
+        throw new Error("Either name or uri must be provided");
+      }
+      
+      const {server, uri: resourceUri, name: resourceName} = await this.findSource(this.resources, searchKey);
       if(!resourceUri){
         throw new Error(`Resource URI not found for ${uri}`);
       }
@@ -197,21 +202,74 @@ export class NamespacedDataStore {
         throw new Error(`MCP client for server ${server} not ready`);
       }
       const client = mcpSnapshot.context.client;
-      const result = await client.readResource({uri: resourceUri, name: resourceName, ...params}, options);
-      return result;
+      const readResult = await client.readResource({uri: resourceUri, name: resourceName, ...params}, options);
+      return readResult;
     }
 
  public async complete( { ref, ...params }: Zod.infer<typeof CompleteRequestSchema>["params"],
     {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<CompleteRequest, any>,
     options?: RequestOptions) {
-      const source =
-      ref.type === "ref/resource"
-        ? await this.findSource(this.resources, ref.uri)
-        : await this.findSource(this.prompts, ref.name);
+      
+      console.log(`[complete] Starting completion for ref:`, ref);
+      
+      let source;
+      let templateUri: string | undefined;
+      
+      if (ref.type === "ref/resource") {
+        // For resource refs, we need to find the matching resource template
+        const templates = this.resourceTemplates.get();
+        console.log(`[complete] Found ${templates.length} resource templates`);
+        
+        // First check if any template pattern matches our URI
+        for (const template of templates) {
+          // template is of type (ResourceTemplate & NamespacedSource)
+          // template.uri contains the namespaced URI pattern
+          const templateUriPattern = template.uri;
+          console.log(`[complete] Checking template ${template.name} with pattern ${templateUriPattern}`);
+          
+          if (templateUriPattern && this.matchesTemplate(ref.uri, templateUriPattern)) {
+            console.log(`[complete] Found matching template!`);
+            // Found a matching template - use the template's original pattern URI
+            // The source object contains the original (non-namespaced) data
+            templateUri = template.source.uri;
+            source = {
+              name: template.source.name,
+              server: template.source.server,
+              uri: templateUri
+            };
+            console.log(`[complete] Using template URI: ${templateUri} for server: ${source.server}`);
+            break;
+          }
+        }
+        
+        if (!source) {
+          console.log(`[complete] No matching template found, trying direct lookup`);
+          // Try direct lookup in resource templates
+          try {
+            source = await this.findSource(this.resourceTemplates, ref.uri);
+            templateUri = source.uri;
+            console.log(`[complete] Found via direct lookup: ${templateUri}`);
+          } catch {
+            // Fall back to looking for the resource itself
+            console.log(`[complete] Falling back to resource lookup`);
+            try {
+              source = await this.findSource(this.resources, ref.uri);
+              console.log(`[complete] Found resource: ${source.uri}`);
+            } catch (error) {
+              throw new Error(
+                `No MCP client found for resource/template with URI: ${ref.uri}`
+              );
+            }
+          }
+        }
+      } else {
+        // For prompt refs, look in prompts
+        source = await this.findSource(this.prompts, ref.name);
+      }
 
     if (!source || !source.server) {
       throw new Error(
-        `No MCP client found for resource name: ${ref.name}  URI: ${ref.uri}  URI Template: ${ref.uriTemplate}`
+        `No MCP client found for ${ref.type === "ref/resource" ? "resource/template" : "prompt"} - name: ${ref.name}  URI: ${ref.uri}  URI Template: ${ref.uriTemplate}`
       );
     }
       const {server} = source;
@@ -224,13 +282,29 @@ export class NamespacedDataStore {
         throw new Error(`MCP client for server ${server} not ready`);
       }
       const client = mcpSnapshot.context.client;
-      const result = await client.complete({ref:{
-        ...ref,
-        uri: source.uri!,
-        name: source.name,
-      }, ...params}, options);
-      return result;
+      
+      // Create the proper ref object based on type
+      // For resource templates, use the template pattern URI, not the instance URI
+      const updatedRef = ref.type === "ref/resource" 
+        ? { ...ref, uri: templateUri || source.uri || ref.uri }
+        : { ...ref, name: source.name };
+      
+      console.log(`[complete] Sending completion request to ${server} with ref:`, updatedRef);
+        
+      const completeResult = await client.complete({ref: updatedRef, ...params}, options);
+      return completeResult;
     }
+
+  private matchesTemplate(uri: string, template: string): boolean {
+    // Simple template matching - converts {param} to regex
+    // Remove namespace prefix if present
+    const cleanUri = uri.includes(':') && uri.split(':').length > 2 ? uri.split(':').slice(1).join(':') : uri;
+    const cleanTemplate = template.includes(':') && template.split(':').length > 2 ? template.split(':').slice(1).join(':') : template;
+    
+    const regexPattern = cleanTemplate.replace(/{[^}]+}/g, '[^/]+');
+    const regex = new RegExp(`^${regexPattern}$`);
+    return regex.test(cleanUri);
+  }
 
   public async callTool( { name, ...params }: Zod.infer<typeof CallToolRequestSchema>["params"],
     {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<CallToolRequest, any>,
@@ -249,8 +323,8 @@ export class NamespacedDataStore {
         throw new Error(`MCP client for server ${server} not ready`);
       }
       const client = mcpSnapshot.context.client;
-      const result = await client.callTool({name: toolName, ...params}, resultSchema,options);
-      return result;
+      const toolResult = await client.callTool({name: toolName, ...params}, resultSchema,options);
+      return toolResult;
     }
 
   async findSource<

@@ -5,7 +5,7 @@ import mcpClientMachine from "./mcp.client.xstate.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { Resource } from "@modelcontextprotocol/sdk/types.js";
 
-const testLocalRouter = false;
+const testLocalRouter = true;
 const MCP_URL = testLocalRouter ? new URL("http://localhost:8080/mcp/4db27887f15847f9be1ccf92334dfbb3") : new URL("https://registry.cfapps.eu12.hana.ondemand.com/mcp/4db27887f15847f9be1ccf92334dfbb3");
 
 // Connect to local router instead of remote registry
@@ -106,6 +106,64 @@ app.post("/read-resource/:name", async (c) => {
     return c.json({ ok: true, data });
   } catch (e: any) {
     return c.json({ ok: false, error: e.message || String(e) }, 504);
+  }
+});
+
+// Get resource templates
+app.get("/resource-templates", (c) => {
+  const snapshot = actor.getSnapshot();
+  return c.json({ resourceTemplates: snapshot.context.resourceTemplates ?? [] });
+});
+
+// Get prompts
+app.get("/prompts", (c) => {
+  const snapshot = actor.getSnapshot();
+  return c.json({ prompts: snapshot.context.prompts ?? [] });
+});
+
+// Test completion endpoint
+app.post("/test-complete", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { ref, argument } = body;
+    
+    const snapshot = actor.getSnapshot();
+    if (!snapshot.matches("ready") || !snapshot.context.client) {
+      return c.json({ ok: false, error: "Client not ready" }, 503);
+    }
+    
+    const client = snapshot.context.client;
+    const result = await client.complete({ ref, argument });
+    
+    return c.json({ ok: true, result });
+  } catch (error: any) {
+    return c.json({ 
+      ok: false, 
+      error: error.message || "Completion failed" 
+    }, 500);
+  }
+});
+
+// Call tool endpoint
+app.post("/call-tool", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { name, arguments: args } = body;
+    
+    const snapshot = actor.getSnapshot();
+    if (!snapshot.matches("ready") || !snapshot.context.client) {
+      return c.json({ ok: false, error: "Client not ready" }, 503);
+    }
+    
+    const client = snapshot.context.client;
+    const result = await client.callTool({ name, arguments: args });
+    
+    return c.json({ ok: true, result });
+  } catch (error: any) {
+    return c.json({ 
+      ok: false, 
+      error: error.message || "Tool call failed" 
+    }, 500);
   }
 });
 
