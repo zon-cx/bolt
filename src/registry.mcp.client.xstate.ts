@@ -21,7 +21,7 @@ import type {
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   CallToolRequest,
-  CallToolResult,
+  type CallToolResult,
   ResourceUpdatedNotificationSchema,
   type CallToolRequestSchema,
   type CallToolResultSchema,
@@ -35,6 +35,8 @@ import {
   type ResourceTemplate,
   type ResultSchema,
   type Tool,
+  ReadResourceRequestSchema,
+  CompleteRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { jsonSchema, type ToolSet } from "ai";
 import * as Y from "yjs";
@@ -47,6 +49,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { ListConnectionsResultSchema } from "./registry.mcp.server";
 import { z } from "zod";
 import { createActor } from "xstate";
+import { Atom, createAtom } from "@xstate/store";
 
 type NamespacedSource = {
   name: string;
@@ -76,6 +79,224 @@ export type ServerConfig = {
     code?: string;
   };
 };
+
+// Separate stores for namespaced data management
+export class NamespacedDataStore {
+  public tools = createAtom<NamespacedData["tools"]>([]);
+  public prompts = createAtom<NamespacedData["prompts"]>([]);
+  public resources = createAtom<NamespacedData["resources"]>([]);
+  public resourceTemplates = createAtom<NamespacedData["resourceTemplates"]>([]);
+  public aiTools = createAtom<ToolSet>({});
+
+  private mcpActors: Record<string, ActorRefFromLogic<typeof mcpClientMachine>> = {};
+
+  constructor() {
+    // Subscribe to changes and update aggregated data
+    this.tools.subscribe(() => {
+      this.aiTools.set(this.getAITools());
+    });
+  }
+
+  registerClient(id: string, actor: ActorRefFromLogic<typeof mcpClientMachine>) {
+    this.mcpActors[id] = actor;
+    
+    // Subscribe to client updates
+    actor.subscribe((snapshot) => {
+      if (snapshot.matches("ready")) {
+        this.updateAggregatedData();
+      }
+    });
+    
+    this.updateAggregatedData();
+  }
+
+  unregisterClient(id: string) {
+    delete this.mcpActors[id];
+    this.updateAggregatedData();
+  }
+
+  private updateAggregatedData() {
+    this.tools.set(this.getNamespacedData("tools"));
+    this.prompts.set(this.getNamespacedData("prompts"));
+    this.resources.set(this.getNamespacedData("resources"));
+    this.resourceTemplates.set(this.getNamespacedData("resourceTemplates"));
+  }
+
+  private getNamespacedData<T extends keyof NamespacedData>(type: T): NamespacedData[T] {
+    const sets = Object.entries(this.mcpActors).map(([name, actor]) => {
+      const snapshot = actor.getSnapshot();
+      return { name, data: snapshot.context[type] };
+    });
+
+    const namespacedData = sets.flatMap(({ name: server, data }) => {
+      if (!data || !Array.isArray(data)) {
+        return [];
+      }
+
+      try {
+        return data.map((resource: any) => {
+          const { name, uri, uriTemplate, ...item } = resource;
+          let resourceUri: string | undefined = undefined;
+          if (typeof uri === "string") {
+            resourceUri = uri;
+          } else if (typeof uriTemplate === "string") {
+            resourceUri = uriTemplate;
+          }
+          return {
+            ...item,
+            name: `${server}:${name}`,
+            uri: resourceUri ? `${server}:${resourceUri}` : undefined,
+            source: {
+              uri: resourceUri,
+              name,
+              server,
+            },
+          };
+        });
+      } catch (error) {
+        console.error(`Error getting ${type} data from client ${server}:`, error);
+        return [];
+      }
+    });
+
+    return namespacedData as NamespacedData[T];
+  }
+
+  private getAITools(): ToolSet {
+    return Object.fromEntries(
+      this.tools.get().map((tool) => {
+        return [
+          tool.name,
+          {
+            parameters: jsonSchema(tool.inputSchema),
+            description: tool.description,
+            execute: async (args) => {
+              // This would need to be implemented with a callback to the manager
+              throw new Error("Tool execution not implemented in store");
+            },
+          },
+        ];
+      })
+    );
+  }
+
+   public async readResource( { uri,name, ...params }: Zod.infer<typeof ReadResourceRequestSchema>["params"],
+    {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<ReadResourceRequest, any>,
+    options?: RequestOptions) {
+
+      const {server, uri: resourceUri, name: resourceName} = await this.findSource(this.resources, name || uri);
+      if(!resourceUri){
+        throw new Error(`Resource URI not found for ${uri}`);
+      }
+      const mcpActor = this.mcpActors[server];
+      if(!mcpActor){
+        throw new Error(`MCP client for server ${server} not found`);
+      }
+      const mcpSnapshot = mcpActor.getSnapshot();
+      if(!mcpSnapshot.matches("ready") || !mcpSnapshot.context.client){
+        throw new Error(`MCP client for server ${server} not ready`);
+      }
+      const client = mcpSnapshot.context.client;
+      const result = await client.readResource({uri: resourceUri, name: resourceName, ...params}, options);
+      return result;
+    }
+
+ public async complete( { ref, ...params }: Zod.infer<typeof CompleteRequestSchema>["params"],
+    {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<CompleteRequest, any>,
+    options?: RequestOptions) {
+      const source =
+      ref.type === "ref/resource"
+        ? await this.findSource(this.resources, ref.uri)
+        : await this.findSource(this.prompts, ref.name);
+
+    if (!source || !source.server) {
+      throw new Error(
+        `No MCP client found for resource name: ${ref.name}  URI: ${ref.uri}  URI Template: ${ref.uriTemplate}`
+      );
+    }
+      const {server} = source;
+      const mcpActor = this.mcpActors[server];
+      if(!mcpActor){
+        throw new Error(`MCP client for server ${server} not found`);
+      }
+      const mcpSnapshot = mcpActor.getSnapshot();
+      if(!mcpSnapshot.matches("ready") || !mcpSnapshot.context.client){
+        throw new Error(`MCP client for server ${server} not ready`);
+      }
+      const client = mcpSnapshot.context.client;
+      const result = await client.complete({ref:{
+        ...ref,
+        uri: source.uri!,
+        name: source.name,
+      }, ...params}, options);
+      return result;
+    }
+
+  public async callTool( { name, ...params }: Zod.infer<typeof CallToolRequestSchema>["params"],
+    {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<CallToolRequest, any>,
+    resultSchema?:
+      | typeof CallToolResultSchema
+      | typeof CompatibilityCallToolResultSchema,
+    options?: RequestOptions) {
+
+      const {server,  name: toolName} = await this.findSource(this.tools, name);
+      const mcpActor = this.mcpActors[server];
+      if(!mcpActor){
+        throw new Error(`MCP client for server ${server} not found`);
+      }
+      const mcpSnapshot = mcpActor.getSnapshot();
+      if(!mcpSnapshot.matches("ready") || !mcpSnapshot.context.client){
+        throw new Error(`MCP client for server ${server} not ready`);
+      }
+      const client = mcpSnapshot.context.client;
+      const result = await client.callTool({name: toolName, ...params}, resultSchema,options);
+      return result;
+    }
+
+  async findSource<
+  T extends NamespacedData[keyof NamespacedData][number] = NamespacedData[keyof NamespacedData][number]
+>(
+  atom: Atom<T[]>,
+  name: string
+): Promise<{ name: string; server: string; uri?: string }> {
+  const result = await findAsync(
+    atom,
+    (value) =>
+      (value && value.name === name) ||
+      value.uri === name ||
+      value.uriTemplate === name
+  );
+  if (!result || !result.source) {
+    throw new Error(
+      `Resource with uri '${name}' not found in any MCP client connection.`
+    );
+  }
+  return {
+    name: (result.source as any).name,
+    server: (result.source as any).server,
+    uri: (result.source as any).uri,
+  };
+
+  async function findAsync<T extends any = any>(
+    atom: Atom<T[]>,
+    predicate: (value: T) => boolean
+  ): Promise<T | undefined> {
+    return new Promise((resolve) => {
+      function onAtomChange() {
+        const value = atom.get().find(predicate);
+        if (value) {
+          resolve(value);
+        }
+      }
+
+      onAtomChange();
+      atom.subscribe(onAtomChange);
+    });
+  }
+}
+
+}
+
 const clientManagerSetup = setup({
   types: {} as {
     context: ClientManager.Context;
@@ -124,26 +345,27 @@ const clientManagerSetup = setup({
         };
       }
     ),
-    registryUpdater: fromCallback<MCPClient.Updates.ResourceUpdate,ClientManager.RegistryUpdaterInput,MCPClient.Event>(
+    registryUpdater: fromCallback<MCPClient.Updates.ResourceUpdate, ClientManager.RegistryUpdaterInput, MCPClient.Event>(
       ({
         sendBack,
         input,
         self
-      } ) => {
-        const { registry } = input;
+      }) => {
+        const { registry, store, actors } = input;
 
         const snapshot = registry.getSnapshot(); 
         if(snapshot.context.client ){
-          // Initial update
-          // updateRegistry({ resources: snapshot.context.resources, client: snapshot.context.client });
+          // Initial update - register existing resources
           for (const [id, resource] of Object.entries(snapshot.context.resourceData)) {
             const {contents} = resource;
-            const {mcpActors} = self._parent?.getSnapshot()?.context; 
-            if ( !mcpActors[id]) {
-              sendBack({
-                type: "connect", 
+            const mcpActors = actors(); 
+            if (!mcpActors[id]) {
+              // Add to store instead of sending connect event
+              store.set(id, {
                 id,
-                ...contents[0]
+                url: contents[0].url,
+                name: contents[0].name,
+                version: contents[0].version,
               });
             }
           }
@@ -151,18 +373,17 @@ const clientManagerSetup = setup({
 
         registry.on("@updates.resources.data", (e) => {
            const { name, contents } = e as MCPClient.Updates.ResourceDataUpdate;
-           const {mcpActors} = self._parent?.getSnapshot()?.context; 
-           if ( !mcpActors[name]) {
-            sendBack({
-              type: "connect", 
-               ...contents[0]
+           const mcpActors = actors(); 
+           if (!mcpActors[name]) {
+            store.set(name, {
+              id: name,
+              url: contents[0].url,
+              name: contents[0].name,
+              version: contents[0].version,
             });
           }
         }); 
       }
-       
-      
-    
     ),
   },
   actions: {
@@ -177,21 +398,19 @@ const clientManagerMachine = clientManagerSetup.createMachine({
     auth: input.auth,
     sessionId: input.sessionId,
     store: input.store,
+    dataStore: input.dataStore,
     mcpActors: {} as Record<string, any>,
-    tools: [] as NamespacedData["tools"],
-    prompts: [] as NamespacedData["prompts"],
-    resources: [] as NamespacedData["resources"],
-    resourceTemplates: [] as NamespacedData["resourceTemplates"],
   }),
   states: {
     init: {
-        entry:  enqueueActions(({ context, enqueue ,self}) => {
-            const id= self.id;
+        entry: enqueueActions(({ context, enqueue, self }) => {
+            const id = self.id;
             const registryUrl = env.MCP_REGISTRY_URL || "https://registry.cfapps.eu12.hana.ondemand.com/mcp";
-            const url= new URL(`${registryUrl}/${id}`);
+            const url = new URL(`${registryUrl}/${id}`);
+            
             enqueue.assign({
-                mcpActors: ({ context: { mcpActors, sessionId }, spawn }) => ({
-                  ["@registry"]: spawn("mcpClient", {
+                mcpActors: ({ context: { mcpActors, sessionId }, spawn }) => {
+                  const registryActor = spawn("mcpClient", {
                     systemId: `@registry:${sessionId}`,
                     syncSnapshot: true,
                     input: {
@@ -205,29 +424,41 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                         session: context.sessionId,
                       },
                     },
-                  }),
-                  ...mcpActors,
-                })
-            })
+                  });
+                  
+                  return {
+                    ["@registry"]: registryActor,
+                    ...mcpActors,
+                  };
+                }
+            });
+            
+            // Register with data store after assignment
+            enqueue(({ context }) => {
+              const registryActor = context.mcpActors["@registry"];
+              if (registryActor) {
+                context.dataStore.registerClient("@registry", registryActor);
+              }
+            });
         }),
         invoke: {
-          src:  fromPromise(async ({ input }) => {
+          src: fromPromise(async ({ input }) => {
             const { registry } = input;
             return new Promise((resolve, reject) => {
-            const snapshot = registry.getSnapshot();
-            if(snapshot.context.client && snapshot.matches("ready")){
-              return snapshot.context;
-            }
-                // Subscribe to resource changes for updates
-            const subscription = registry.subscribe((state) => {
-              if(state.matches("ready") ){
-                resolve(state.context);
+              const snapshot = registry.getSnapshot();
+              if(snapshot.context.client && snapshot.matches("ready")){
+                return resolve(snapshot.context);
               }
-            });   
-            return () => {
-              subscription.unsubscribe();
-            };
-          });
+              // Subscribe to resource changes for updates
+              const subscription = registry.subscribe((state) => {
+                if(state.matches("ready") ){
+                  resolve(state.context);
+                }
+              });   
+              return () => {
+                subscription.unsubscribe();
+              };
+            });
           }),
           input: ({ context }) => ({
             registry: context.mcpActors["@registry"],
@@ -242,8 +473,6 @@ const clientManagerMachine = clientManagerSetup.createMachine({
             }),
           },
         },
-     
-    
     },
 
     running: {
@@ -258,33 +487,14 @@ const clientManagerMachine = clientManagerSetup.createMachine({
         },
         {
           src: "registryUpdater",
-          input: ({ context: { mcpActors } }) => ({
+          input: ({ context: { mcpActors, store }, self }) => ({
             registry: mcpActors["@registry"],
-            actors: mcpActors,
+            actors: () => self.getSnapshot().context.mcpActors,
+            store: store,
           }),
         },
       ],
       on: {
-        // Handle tool updates from child actors
-        "@updates.tools": {
-          actions: [
-            assign({
-              tools: ({ context }) =>
-                getNamespacedData(context.mcpActors, "tools"),
-            }),
-          ],
-        },
-        
-        // Recalculate aggregated data
-        "recalculate-tools": {
-          actions: [
-            assign({
-              tools: ({ context }) =>
-                getNamespacedData(context.mcpActors, "tools"),
-            }),
-          ],
-        },
-
         // Handle new connections
         connect: {
           actions: enqueueActions(({ context, enqueue, event }) => {
@@ -305,9 +515,8 @@ const clientManagerMachine = clientManagerSetup.createMachine({
             // Spawn new MCP client if it doesn't exist
             if (!context.mcpActors[id]) {
               enqueue.assign({
-                mcpActors: ({ context: { mcpActors, sessionId }, spawn }) => ({
-                  ...mcpActors,
-                  [id]: spawn("mcpClient", {
+                mcpActors: ({ context: { mcpActors, sessionId }, spawn }) => {
+                  const newActor = spawn("mcpClient", {
                     systemId: `${id}:${sessionId}`,
                     syncSnapshot: true,
                     input: {
@@ -321,20 +530,20 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                         session: context.sessionId,
                       },
                     },
-                  }),
-                }),
-              });
-
-              // Subscribe to the new actor for tool updates
-              enqueue(({ context: { mcpActors }, self }) => {
-                const actor = mcpActors[id];
-                if (actor) {
-                  actor.subscribe((state) => {
-                    // When child's tools change, update manager's aggregated tools
-                    if (state.context.tools && state.matches("ready")) {
-                      self.send({ type: "recalculate-tools" });
-                    }
                   });
+
+                  return {
+                    ...mcpActors,
+                    [id]: newActor,
+                  };
+                },
+              });
+              
+              // Register with data store after assignment
+              enqueue(({ context }) => {
+                const newActor = context.mcpActors[id];
+                if (newActor) {
+                  context.dataStore.registerClient(id, newActor);
                 }
               });
             }
@@ -347,6 +556,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
             const actor = context.mcpActors[event.id];
             if (actor) {
               actor.send({ type: "cleanup" });
+              context.dataStore.unregisterClient(event.id);
             }
           },
         },
@@ -361,15 +571,20 @@ const clientManagerMachine = clientManagerSetup.createMachine({
     disconnecting: {
       invoke: {
         src: fromPromise(
-          async ({ input }: { input: { actors: Record<string, any> } }) => {
+          async ({ input }: { input: { actors: Record<string, any>; dataStore: NamespacedDataStore } }) => {
+            // Cleanup all actors and unregister from data store
             await Promise.all(
-              Object.values(input.actors).map(async (actor) => {
+              Object.entries(input.actors).map(async ([id, actor]) => {
                 actor.send({ type: "cleanup" });
+                input.dataStore.unregisterClient(id);
               })
             );
           }
         ),
-        input: ({ context }) => ({ actors: context.mcpActors }),
+        input: ({ context }) => ({ 
+          actors: context.mcpActors,
+          dataStore: context.dataStore,
+        }),
         onDone: {
           target: "done",
         },
@@ -395,56 +610,8 @@ const clientManagerMachine = clientManagerSetup.createMachine({
     },
   },
 });
-// Helper functions
-export function getNamespacedData<T extends keyof NamespacedData>(
-  mcpActors: Record<string, any>,
-  type: T
-): NamespacedData[T] {
-  const sets = Object.entries(mcpActors).map(([name, actor]) => {
-    const snapshot = actor.getSnapshot();
-    return { name, data: snapshot.context[type] };
-  });
-
-  const namespacedData = sets.flatMap(({ name: server, data }) => {
-    if (!data || !Array.isArray(data)) {
-      console.warn(`Data for ${type} in client ${server} is not an array`);
-      return [];
-    }
-
-    try {
-      return data.map((resource: any) => {
-        const { name, uri, uriTemplate, ...item } = resource;
-        let resourceUri: string | undefined = undefined;
-        if (typeof uri === "string") {
-          resourceUri = uri;
-        } else if (typeof uriTemplate === "string") {
-          resourceUri = uriTemplate;
-        }
-        return {
-          ...item,
-          name: `${server}:${name}`,
-          uri: resourceUri ? `${server}:${resourceUri}` : undefined,
-          source: {
-            uri: resourceUri,
-            name,
-            server,
-          },
-        };
-      });
-    } catch (error) {
-      console.error(`Error getting ${type} data from client ${server}:`, error);
-      return [];
-    }
-  });
-
-  return namespacedData as NamespacedData[T];
-}
 
 export default clientManagerMachine;
-
-type Optional<T> = {
-  [K in keyof T]?: T[K];
-};
 
 export namespace ClientManager {
   export type ConnectionManagerInput = {
@@ -454,14 +621,16 @@ export namespace ClientManager {
   };
 
   export type RegistryUpdaterInput = {
+    store: Y.Map<ServerConfig>;
     registry: ActorRefFromLogic<typeof mcpClientMachine>
-    actors: Record<string, ActorRefFromLogic<typeof mcpClientMachine>>
+    actors: ()=> Record<string, ActorRefFromLogic<typeof mcpClientMachine>>
   };
 
   export type Input = {
     auth: AuthInfo;
     sessionId?: string;
     store: Y.Map<ServerConfig>;
+    dataStore: NamespacedDataStore;
   };
 
   export type Context = {
@@ -469,11 +638,8 @@ export namespace ClientManager {
     sessionId?: string;
     error?: Error;
     store: Y.Map<ServerConfig>;
+    dataStore: NamespacedDataStore;
     mcpActors: Record<string, any>;
-    tools: NamespacedData["tools"];
-    prompts: NamespacedData["prompts"];
-    resources: NamespacedData["resources"];
-    resourceTemplates: NamespacedData["resourceTemplates"];
   };
 
   export type EmittedEvent = MCPClient.Event | Connection.Event;
@@ -486,9 +652,6 @@ export namespace ClientManager {
         type: "disconnect";
         id: string;
       } & ServerConfig
-    | {
-        type: "recalculate-tools";
-      }
     | MCPClient.Event;
 }
 
@@ -519,3 +682,5 @@ export namespace Connection {
         timestamp: number;
       } & ServerConfig);
 }
+
+ 

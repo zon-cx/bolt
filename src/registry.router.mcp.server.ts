@@ -26,7 +26,7 @@ import {
 } from "./registry.mcp.server.auth";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { Subscription } from "@xstate/store";
-import clientManagerMachine,{  ServerConfig } from "./registry.mcp.client.xstate";
+import clientManagerMachine, { ServerConfig, NamespacedDataStore } from "./registry.mcp.client.xstate";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { connectYjs } from "./store.yjs";
 
@@ -41,8 +41,9 @@ const transports = {
 };
 const doc = connectYjs("@mcp.registry");
 
-// Map to store client manager actors by session ID
+// Map to store client manager actors and data stores by session ID
 const clientManagers = {} as Record<string, any>;
+const dataStores = {} as Record<string, NamespacedDataStore>;
 
 // Helper to create a new MCP server and transport for a session
 async function createSessionTransport(sessionInfo: {session?: string; auth: AuthInfo; id?: string}): Promise<StreamableHTTPServerTransport> {
@@ -74,22 +75,27 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
   // Create Yjs store for server configurations
   const store = doc.getMap<ServerConfig>("servers");
   
+  // Create data store for namespaced data
+  const dataStore = new NamespacedDataStore();
+  
   // Create XState-based client manager
    const clientManagerActor = createActor(clientManagerMachine, {
     id:agent.id,
     input: {
       auth: sessionInfo.auth,
       sessionId: sessionInfo.session,
-      store
+      store,
+      dataStore
     }
   });
   
   // Start the client manager
   clientManagerActor.start();
   
-  // Store the actor for cleanup
+  // Store the actor and data store for cleanup
   if (sessionInfo.session) {
     clientManagers[sessionInfo.session] = clientManagerActor;
+    dataStores[sessionInfo.session] = dataStore;
   }
   
   // Add the registry connection to the store
@@ -104,34 +110,30 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
   mcpServer.setRequestHandler(
     ListToolsRequestSchema,
     async (request, extra) => {
-      const snapshot = clientManagerActor.getSnapshot();
       return {
-        tools: snapshot.context.tools,
+        tools: dataStore.tools.get(),
       };
     }
   );
   
   mcpServer.setRequestHandler(ListPromptsRequestSchema, async (_, extra) => {
-    const snapshot = clientManagerActor.getSnapshot();
     return {
-      prompts: snapshot.context.prompts,
+      prompts: dataStore.prompts.get(),
     };
   });
   
   mcpServer.setRequestHandler(ListResourcesRequestSchema, async (_, extra) => {
-    const snapshot = clientManagerActor.getSnapshot();
     return {
-      resources: snapshot.context.resources,
+      resources: dataStore.resources.get(),
     };
   });
   
   mcpServer.setRequestHandler(
     ListResourceTemplatesRequestSchema,
     async (_, extra) => {
-      const snapshot = clientManagerActor.getSnapshot();
       return {
-        resources: snapshot.context.resources,
-        resourceTemplates: snapshot.context.resourceTemplates,
+        resources: dataStore.resources.get(),
+        resourceTemplates: dataStore.resourceTemplates.get(),
       };
     }
   );
@@ -144,18 +146,38 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
   );
   
   mcpServer.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    return agent.callTool(request.params, extra);
+    const { name, arguments: args } = request.params;
+    
+    try {
+      // Use the data store's callTool method directly
+      const result = await dataStore.callTool(
+        { name, arguments: args },
+        extra
+      );
+      
+      return result;
+    } catch (error) {
+      throw new Error(`Tool call failed for "${name}": ${error instanceof Error ? error.message : String(error)}`);
+    }
   });
   
   mcpServer.setRequestHandler(
     ReadResourceRequestSchema,
     async (request, extra) => {
-      return agent.readResource(request.params, extra);
+      try {
+        return await dataStore.readResource(request.params, extra);
+      } catch (error) {
+        throw new Error(`Resource read failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   );
   
   mcpServer.setRequestHandler(CompleteRequestSchema, async (request, extra) => {
-    return agent.complete(request.params, extra);
+    try {
+      return await dataStore.complete(request.params, extra);
+    } catch (error) {
+      throw new Error(`Completion failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   });
 
   const transport = new StreamableHTTPServerTransport({
@@ -180,8 +202,7 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
       clearTimeout(resourceChangeTimeout);
     }
     resourceChangeTimeout = setTimeout(() => {
-      const snapshot = clientManagerActor.getSnapshot();
-      if (snapshot.context.resources.length > 0) {
+      if (dataStore.resources.get().length > 0) {
         console.log("Sending resource list changed notification");
         mcpServer.sendResourceListChanged();
       }
@@ -193,8 +214,7 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
       clearTimeout(toolChangeTimeout);
     }
     toolChangeTimeout = setTimeout(() => {
-      const snapshot = clientManagerActor.getSnapshot();
-      if (snapshot.context.tools.length > 0) {
+      if (dataStore.tools.get().length > 0) {
         console.log("Sending tool list changed notification");
         mcpServer.sendToolListChanged();
       }
@@ -206,30 +226,30 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
       clearTimeout(promptChangeTimeout);
     }
     promptChangeTimeout = setTimeout(() => {
-      const snapshot = clientManagerActor.getSnapshot();
-      if (snapshot.context.prompts.length > 0) {
+      if (dataStore.prompts.get().length > 0) {
         console.log("Sending prompt list changed notification");
         mcpServer.sendPromptListChanged();
       }
     }, 1000); // 1 second debounce
   };
   
-  // Subscribe to client manager state changes
-  const clientManagerSubscription = clientManagerActor.subscribe((snapshot) => {
-    // React to state changes
-    if (snapshot.context.tools.length > 0) {
-      debouncedToolChange();
-    }
-    if (snapshot.context.resources.length > 0) {
-      debouncedResourceChange();
-    }
-    if (snapshot.context.prompts.length > 0) {
-      debouncedPromptChange();
-    }
+  // Subscribe to data store changes
+  const toolsSubscription = dataStore.tools.subscribe(() => {
+    debouncedToolChange();
+  });
+  
+  const resourcesSubscription = dataStore.resources.subscribe(() => {
+    debouncedResourceChange();
+  });
+  
+  const promptsSubscription = dataStore.prompts.subscribe(() => {
+    debouncedPromptChange();
   });
 
   agent.onClose(() => {
-    clientManagerSubscription.unsubscribe();
+    toolsSubscription.unsubscribe();
+    resourcesSubscription.unsubscribe();
+    promptsSubscription.unsubscribe();
   });
 
   // Clean up transport when closed
@@ -237,6 +257,7 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
     if (transport.sessionId) {
       delete transports[transport.sessionId];
       delete clientManagers[transport.sessionId];
+      delete dataStores[transport.sessionId];
     }
     // Clear any pending timeouts
     if (resourceChangeTimeout) {
@@ -248,7 +269,9 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
     if (promptChangeTimeout) {
       clearTimeout(promptChangeTimeout);
     }
-    clientManagerSubscription.unsubscribe();
+    toolsSubscription.unsubscribe();
+    resourcesSubscription.unsubscribe();
+    promptsSubscription.unsubscribe();
     clientManagerActor.stop();
   };
   

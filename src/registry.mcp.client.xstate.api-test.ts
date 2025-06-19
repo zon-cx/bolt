@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createActor } from "xstate";
 import { Map as YMap } from "yjs";
-import clientManagerMachine, { type ServerConfig } from "./registry.mcp.client.xstate.js";
+import clientManagerMachine, { type ServerConfig, NamespacedDataStore } from "./registry.mcp.client.xstate.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import * as dotenv from "dotenv";
 import { connectYjs } from "./store.yjs.js";
@@ -24,13 +24,17 @@ const id = "4db27887f15847f9be1ccf92334dfbb3";
 const doc = connectYjs("@mcp.registry");
 const store = doc.getMap<ServerConfig>("@mcp.server");
 
+// Create data store for namespaced data
+const dataStore = new NamespacedDataStore();
+
 // Create and start the client manager actor
 const actor = createActor(clientManagerMachine, {
   id: id,
   input: {
     auth: authInfo,
     sessionId: id,
-    store
+    store,
+    dataStore
   }
 });
 
@@ -64,13 +68,11 @@ app.get("/servers", (c) => {
 });
 
 app.get("/tools", (c) => {
-  const snapshot = actor.getSnapshot();
-  return c.json({ tools: snapshot.context.tools ?? [] });
+  return c.json({ tools: dataStore.tools.get() });
 });
 
 app.get("/resources", (c) => {
-  const snapshot = actor.getSnapshot();
-  return c.json({ resources: snapshot.context.resources ?? [] });
+  return c.json({ resources: dataStore.resources.get() });
 });
 
 app.get("/debug/actors", (c) => {
@@ -97,13 +99,13 @@ app.post("/connect", async (c) => {
   const body = await c.req.json<ServerConfig>();
   const id = body.id ?? body.url; // simple id
   store.set(id, body);
-  actor.send({ type: "connect", ...body, sessionId: id });
+  actor.send({ type: "connect", ...body, id });
   return c.json({ ok: true });
 });
 
 app.post("/recalculate-tools", (c) => {
-  actor.send({ type: "recalculate-tools" });
-  return c.json({ ok: true });
+  // Tools are automatically recalculated when data store changes
+  return c.json({ ok: true, message: "Tools are automatically updated" });
 });
 
 app.get("/namespaced/resources", (c) => {
@@ -117,6 +119,167 @@ app.get("/namespaced/resources", (c) => {
     };
   });
   return c.json(res);
+});
+
+// Tool call endpoint - using data store's callTool method
+app.post("/call-tool", async (c) => {
+  try {
+    const body = await c.req.json<{ toolName: string; args?: any }>();
+    const { toolName, args } = body;
+    
+    if (!toolName) {
+      return c.json({ ok: false, error: "toolName is required" }, 400);
+    }
+    
+    try {
+      // Use the data store's callTool method directly
+      const result = await dataStore.callTool(
+        { name: toolName, arguments: args },
+        {
+          authInfo: authInfo,
+          sendRequest: async () => ({} as any),
+          sendNotification: async () => {},
+          signal: new AbortController().signal,
+          requestId: `test-${Date.now()}`,
+          sessionId: id,
+          _meta: {}
+        }
+      );
+      
+      return c.json({ 
+        ok: true, 
+        result,
+        toolName
+      });
+    } catch (error) {
+      return c.json({ 
+        ok: false, 
+        error: error instanceof Error ? error.message : "Tool execution failed",
+        toolName,
+        availableTools: dataStore.tools.get().map((t: any) => t.name)
+      }, 500);
+    }
+  } catch (error) {
+    return c.json({ 
+      ok: false, 
+      error: error instanceof Error ? error.message : "Unknown error" 
+    }, 500);
+  }
+});
+
+// Read resource endpoint - using data store's readResource method
+app.post("/read-resource", async (c) => {
+  try {
+    const body = await c.req.json<{ uri: string }>();
+    const { uri } = body;
+    
+    if (!uri) {
+      return c.json({ ok: false, error: "uri is required" }, 400);
+    }
+    
+    try {
+      const result = await dataStore.readResource(
+        { uri },
+        {
+          authInfo: authInfo,
+          sendRequest: async () => ({} as any),
+          sendNotification: async () => {},
+          signal: new AbortController().signal,
+          requestId: `test-${Date.now()}`,
+          sessionId: id,
+          _meta: {}
+        }
+      );
+      
+      return c.json({ 
+        ok: true, 
+        result,
+        uri
+      });
+    } catch (error) {
+      return c.json({ 
+        ok: false, 
+        error: error instanceof Error ? error.message : "Resource read failed",
+        uri,
+        availableResources: dataStore.resources.get().map((r: any) => r.uri)
+      }, 500);
+    }
+  } catch (error) {
+    return c.json({ 
+      ok: false, 
+      error: error instanceof Error ? error.message : "Unknown error" 
+    }, 500);
+  }
+});
+
+// Complete endpoint - using data store's complete method
+app.post("/complete", async (c) => {
+  try {
+    const body = await c.req.json<{ ref: any; argument?: any }>();
+    const { ref, argument } = body;
+    
+    if (!ref) {
+      return c.json({ ok: false, error: "ref is required" }, 400);
+    }
+    
+    try {
+      const result = await dataStore.complete(
+        { ref, argument },
+        {
+          authInfo: authInfo,
+          sendRequest: async () => ({} as any),
+          sendNotification: async () => {},
+          signal: new AbortController().signal,
+          requestId: `test-${Date.now()}`,
+          sessionId: id,
+          _meta: {}
+        }
+      );
+      
+      return c.json({ 
+        ok: true, 
+        result,
+        ref
+      });
+    } catch (error) {
+      return c.json({ 
+        ok: false, 
+        error: error instanceof Error ? error.message : "Completion failed",
+        ref
+      }, 500);
+    }
+  } catch (error) {
+    return c.json({ 
+      ok: false, 
+      error: error instanceof Error ? error.message : "Unknown error" 
+    }, 500);
+  }
+});
+
+// Test endpoint - list available tools with examples
+app.get("/tool-examples", (c) => {
+  const tools = dataStore.tools.get();
+  
+  const examples = tools.map((tool: any) => ({
+    name: tool.name,
+    description: tool.description,
+    server: tool.source?.server,
+    example: {
+      toolName: tool.name,
+      args: tool.inputSchema?.properties ? 
+        Object.entries(tool.inputSchema.properties).reduce((acc, [key, schema]: [string, any]) => {
+          // Generate example values based on schema type
+          if (schema.type === "string") acc[key] = schema.example || "example-string";
+          else if (schema.type === "number") acc[key] = schema.example || 123;
+          else if (schema.type === "boolean") acc[key] = schema.example || true;
+          else if (schema.type === "array") acc[key] = schema.example || [];
+          else if (schema.type === "object") acc[key] = schema.example || {};
+          return acc;
+        }, {} as any) : undefined
+    }
+  }));
+  
+  return c.json(examples);
 });
 
 if (import.meta.url === `file://${process.argv[1]}`) {
