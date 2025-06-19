@@ -40,182 +40,7 @@ export type TransportFactory = () =>
   | StreamableHTTPClientTransport
   | SSEClientTransport;
 
-  class MCPSession {
-      private clientCache: Map<string, { client: Client; transport: StreamableHTTPClientTransport; lastUsed: number; status: "connecting" | "connected" | "disconnected" }> = new Map();
-  
-    constructor(
-      
-    ) {}
-  
-   /**
-     * Helper method to create a fresh connection to a server and execute an operation
-     */
-   public async useServer<T>(
-      {
-      url,
-
-      auth,
-      session
-      }: {
-      url: URL,
-      auth: AuthInfo | undefined,
-      session: string | undefined,
-      },  
-      operation: (client: Client) => Promise<T>,
-      notifications: {
-        started?: (params: any) => void;
-        connected?: (params: any) => void;
-        completed?: (params: any) => void;
-        disconnected?: (params: any) => void;
-      } = {}
-    ): Promise<{client: Client, transport: StreamableHTTPClientTransport, result: T}> {
-       const cacheKey = session ? `${url.href}:${session}` : url.href;
-      const newClient = async () => {
-            console.log("creating new client", url.href);
-          // Create new client and transport
-            const transport = new StreamableHTTPClientTransport(new URL(url), {
-              requestInit: auth?.token
-                ? {
-                    headers: {
-                      Authorization: `Bearer ${auth.token}`,
-                    }
-                  }
-                : undefined,
-            });
-  
-            const client = new Client({
-              name: "mcp-client",
-              version: "1.0.0",
-            }); 
-            this.clientCache.set(cacheKey, {
-              client,
-              transport,
-              lastUsed: Date.now(),
-              status: "connecting",
-            });
-          try {
-            console.log("Attempting to connect client", url.href);
-            await Promise.race([
-              client.connect(transport),
-              new Promise((_, reject) => {
-                setTimeout(() => {
-                  reject(new Error("Connection timeout"));
-                }, 10000);
-              })
-            ]);
-            console.log("Client connected, attempting ping", url.href);
-            await Promise.race([
-              client.ping(),
-              new Promise((_, reject) => {
-                setTimeout(() => {
-                  reject(new Error("Ping timeout"));
-                }, 5000);
-              })
-            ]);
-            console.log("Client ping successful", url.href);
-
-            this.clientCache.set(cacheKey, {
-                  client: client,
-                  transport: transport,
-              lastUsed: Date.now(),
-              status: "connected"
-            }); 
-            return  this.clientCache.get(cacheKey)!;
-          } catch (error) {
-            console.error("Failed to initialize client:", error);
-            this.clientCache.delete(cacheKey);
-            try {
-              await transport.close();
-            } catch (closeError) {
-              console.error("Error closing transport:", closeError);
-            }
-            throw error;
-          }
-      }
-      // Check if we have a cached client
-      const cached = this.clientCache.get(cacheKey) || await newClient();
-      if(cached.status === "connecting"){
-         console.log("Waiting for client to connect...", url.href);
-         let waitTime = 0;
-         while(this.clientCache.get(cacheKey)?.status === "connecting" && waitTime < 15000) {
-           await new Promise((resolve) => setTimeout(resolve, 500));
-           waitTime += 500;
-         }
-         const currentStatus = this.clientCache.get(cacheKey)?.status;
-         if(currentStatus === "connecting"){
-            console.error("Client still connecting after timeout", url.href);
-            this.clientCache.delete(cacheKey);
-            throw new Error("Client connection timeout");
-         }
-         if(currentStatus === "disconnected"){
-            console.error("Client disconnected while waiting", url.href);
-            throw new Error("Client disconnected");
-         }
-      }
-      if(cached.status === "disconnected"){
-        console.error("Client is disconnected", url.href);
-        this.clientCache.delete(cacheKey);
-        throw new Error("Client is disconnected");
-      }
-      
-        try {
-          let timeoutId: NodeJS.Timeout | undefined;
-          const result = await Promise.race([
-            operation(cached.client).catch((error:any)=>{
-              console.error("operation failed", error);
-              throw error;
-            }),
-            new Promise<T>((_resolve, reject) => {
-              timeoutId = setTimeout(() => {
-                console.log("useServer.timeout");
-                reject(new Error("Operation timed out"));
-              }, 3000);
-            })
-          ]);
-          if(timeoutId) clearTimeout(timeoutId);
-          console.log("completed", result);
-        //   if (notifications.completed) {
-        //     notifications.completed({
-        //       server: url,
-        //       url: url,
-        //       result,
-        //       cached: true,
-        //     });
-        //   }
-  
-          return {
-            client: cached.client,
-            transport: cached.transport,
-            result,
-          };
-        } catch (error: any) {
-            console.error("error", error);
-          // If operation fails, remove from cache and recreate
-          console.log(`Cached client failed for ${cacheKey}, removing from cache`);
-          this.clientCache.delete(cacheKey);
-          try {
-            await cached.client.close();
-            await cached.transport.close();
-          } catch (closeError) {
-            console.error(`Error closing failed cached client:`, closeError);
-          }
-        //   if (notifications.disconnected) {
-        //     notifications.disconnected({
-        //       server: url,
-        //       url: url,
-        //       cached: true,
-        //       error: {
-        //         message: "message" in error ? error.message : error.toString(),
-        //         stack: "stack" in error ? error.stack : undefined,
-        //         code: "code" in error ? String(error.code) : undefined,
-        //       }
-        //     });
-        //   }
-          throw error;
-        }
-      }
-  }
-  const mcpSessions =new MCPSession();
+// Simplified version without MCPSession class and useServer pattern
 
 
   const mcpClientSetup = setup({
@@ -223,52 +48,74 @@ export type TransportFactory = () =>
       context: MCPClient.Context;
       events: MCPClient.Event;
       input: Optional<MCPClient.Input>;
-      actors: {
-        connection: ActorLogic<any, any, any, any, any>;
-        discovery: ActorLogic<any, any, any, any, any>;
-        notificationHandler: ActorLogic<any, any, any, any, any>;
-        resourceDataHandler: ActorLogic<any, any, any, any, any>;
-      };
+          actors: {
+      connection: ActorLogic<any, any, any, any, any>;
+      discovery: ActorLogic<any, any, any, any, any>;
+      notificationHandler: ActorLogic<any, any, any, any, any>;
+      resourceReader: ActorLogic<any, any, any, any, any>;
+    };
     },
     actors: {
       connection: fromPromise(
         async ({ input }: { input: MCPClient.ConnectionInput }) => {
           const { url, options } = input;
-          const {
-            info,
-            client: clientOptions,
-            transport: transportFactory,
-            auth: auth,
-            session: session,
-            ...transportOptions
-          } = options;
-          try  {
-             console.log("connecting to", url.toString(), "with options", options);
-           const {
-            client,
-            transport,
-            result:serverCapabilities
-           } = await mcpSessions.useServer({
-            url: url,
-            auth: auth,
-            session: session,
-           }, async(client)=>{
-            return await client.getServerCapabilities();
-          },{
-            started: ()=>{
-              console.log("started connecting to", url.toString());
-            },
-            connected: ()=>{
-              console.log("connected to", url.toString());
-            },
+          const { info, auth } = options;
+          
+          console.log("connecting to", url.toString());
+          
+          // Create transport
+          const transport = new StreamableHTTPClientTransport(new URL(url), {
+            requestInit: auth?.token
+              ? {
+                  headers: {
+                    Authorization: `Bearer ${auth.token}`,
+                  }
+                }
+              : undefined,
           });
-          return {
-            client,
-            transport,
-            serverCapabilities,
-          };
-          } catch (error: any) {
-            console.error("error connecting to", url.toString(), error);
+
+          // Create client
+          const client = new Client({
+            name: info.name || "mcp-client",
+            version: info.version || "1.0.0",
+          });
+
+          try {
+            // Connect with timeout
+            await Promise.race([
+              client.connect(transport),
+              new Promise((_, reject) => {
+                setTimeout(() => reject(new Error("Connection timeout")), 10000);
+              })
+            ]);
+            
+            console.log("Client connected, attempting ping", url.href);
+            
+            // Ping with timeout
+            await Promise.race([
+              client.ping(),
+              new Promise((_, reject) => {
+                setTimeout(() => reject(new Error("Ping timeout")), 5000);
+              })
+            ]);
+            
+            console.log("Client ping successful", url.href);
+            
+            // Get server capabilities
+            const serverCapabilities = await client.getServerCapabilities();
+            
+            return {
+              client,
+              transport,
+              serverCapabilities,
+            };
+          } catch (error) {
+            console.error("Failed to initialize client:", error);
+            try {
+              await transport.close();
+            } catch (closeError) {
+              console.error("Error closing transport:", closeError);
+            }
             if (error instanceof UnauthorizedError) {
               throw new Error("Authentication required");
             }
@@ -298,97 +145,53 @@ export type TransportFactory = () =>
           };
         }
       ),
-      resourceDataHandler: fromCallback<MCPClient.Event,MCPClient.ResourceDataHandlerInput,MCPClient.Updates.ResourceDataUpdate>(({
-        input,
-        receive,
-        sendBack
-      })=>{
-        const { auth, session, url } = input;
-  
-        
-        receive(async (event)=>{
-            if(event.type === "read-resource"){
-                const { uri, name, mimeType } = event;
-                try{
-                    const {result:{contents}} = await mcpSessions.useServer({
-                        url: new URL(url), 
-                        auth: auth,
-                        session: session,
-                    }, 
-                    async(client)=>{
-                        try{
-                        console.log("reading resource", uri);
-                        let timeoutId: NodeJS.Timeout | undefined;
-                        const result = await Promise.race([
-                          client.readResource({ uri }),
-                          new Promise((_, reject) => {
-                            timeoutId = setTimeout(() => {
-                              console.log("Resource read timeout for", uri);
-                              reject(new Error("Resource read timeout"));
-                            }, 5000);
-                          })
-                        ]) as { contents: any[] };
-                        if(timeoutId) clearTimeout(timeoutId);
-                        console.log("result", result);
-                        return result;
-                        }
-                        catch(error:any){
-                            console.error("error reading resource: ",error);
-                            throw error;
-                        }
-                    },{
-                    started: ()=>{
-                       console.log("started reading resource",url, uri);
-                    },
-                    connected: ()=>{
-                        console.log("connected to", uri);
-                    },
-                    completed: ()=>{
-                        console.log("completed reading resource", url, uri);
-                    },
-                    disconnected: ()=>{
-                        console.log("disconnected from", uri);
-                    }
-                })
-                if(mimeType==="application/json"){
-                    sendBack({
-                      type: "@updates.resources.data",
-                      name: name,
-                      uri: uri,
-                      mimeType:"application/json",
-                      contents: contents.map((content)=>content.text as string).filter(Boolean).map(e=>JSON.parse(e)),
-                    });
-                }
-                else if(mimeType==="text/plain"){
-                  sendBack({
-                    type: "@updates.resources.data",
-                    name: name,
-                    uri: uri,
-                    mimeType:"text/plain",
-                    contents: contents.map((content)=>content.text),
-                  });
-                }
-                else{
-                  sendBack({
-                    type: "@updates.resources.data",
-                    name: name,
-                    uri: uri,
-                    mimeType:mimeType,
-                    contents: contents,
-                  });
-                }
-              }
-              catch(error:any){
-                console.error("error reading resource: ",error);
-                sendBack({
-                  type: "@mcp.error",
-                  message: "message" in error ? error.message : "Unknown error",
-                  stack: "stack" in error ? error.stack : "",
-                  code: "code" in error ? error.code : -1,
-                 });
-              }
+      resourceReader: fromPromise(
+        async ({ input }: { input: MCPClient.ResourceReaderInput }) => {
+          const { client, resource } = input;
+          const { uri, name, mimeType } = resource;
+          
+          console.log("reading resource", uri);
+          
+          let timeoutId: NodeJS.Timeout | undefined;
+          try {
+            const result = await Promise.race([
+              client.readResource({ uri }),
+              new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(() => {
+                  console.log("Resource read timeout for", uri);
+                  reject(new Error("Resource read timeout"));
+                }, 5000);
+              })
+            ]) as { contents: any[] };
+            
+            if (timeoutId) clearTimeout(timeoutId);
+            
+            console.log("Resource read complete", uri);
+            
+            // Process contents based on MIME type
+            let processedContents;
+            if (mimeType === "application/json") {
+              processedContents = result.contents
+                .map((content) => content.text as string)
+                .filter(Boolean)
+                .map(e => JSON.parse(e));
+            } else if (mimeType === "text/plain") {
+              processedContents = result.contents.map((content) => content.text);
+            } else {
+              processedContents = result.contents;
             }
-          })
+            
+            return {
+              name,
+              uri,
+              mimeType,
+              contents: processedContents,
+            };
+          } catch (error) {
+            if (timeoutId) clearTimeout(timeoutId);
+            console.error("Error reading resource:", error);
+            throw error;
+          }
         }
       ),
         
@@ -490,6 +293,7 @@ export type TransportFactory = () =>
       client: undefined as Client | undefined,
       transport: undefined as ReturnType<TransportFactory> | undefined,
       retries: 0,
+      pendingResourceReads: new Set<string>(),
     }), 
     states: {
       connecting: {
@@ -567,7 +371,7 @@ export type TransportFactory = () =>
         },
       },
       ready: {
-        invoke: [{
+        invoke: {
           src: "notificationHandler",
           input: ({ context }) => ({
             client: context.client!,
@@ -577,11 +381,8 @@ export type TransportFactory = () =>
             resourceTemplates: context.resourceTemplates,
             tools: context.tools,
           }),
-        }], 
-        on: { 
-        //   cleanup: {
-        //     target: "cleaning",
-        //   },
+        },
+        on: {
           "@updates.tools": {
             actions: [
               assign({
@@ -593,42 +394,101 @@ export type TransportFactory = () =>
               },
             ],
           },
+          
           "@updates.resources": {
-            actions: enqueueActions(({ event, enqueue, context}) => {
-               const { resources } = event;
-               const { resourceData} = context;
-             
+            actions: enqueueActions(({ event, enqueue, context }) => {
+              const { resources } = event;
+              const { resourceData } = context;
+
+              // Update resources
+              enqueue.assign({
+                resources: resources,
+              });
+
+              // Trigger reads for new or changed resources
               for (const resource of resources) {
-                if(!resourceData[resource.name]?.uri || resourceData[resource.name]?.uri !== resource.uri){
-                   enqueue.emit({
+                if (!resourceData[resource.name]?.uri || resourceData[resource.name]?.uri !== resource.uri) {
+                  enqueue.emit({
                     type: "@updates.resource",
                     ...resource,
-                   });
-                   enqueue.raise({
-                    type: "@updates.resource",
-                    ...resource,
-                   });
-                
+                  });
+                  enqueue.raise({
+                    type: "read-resource",
+                    uri: resource.uri,
+                    name: resource.name,
+                    mimeType: resource.mimeType || "text/plain",
+                  });
                 }
               }
-              enqueue.assign({
-                resources: ({ event }) => event.resources,
-              }); 
-            
-            
             }),
           },
+          
+          "read-resource": {
+            actions: enqueueActions(({ event, enqueue, context, self }) => {
+              const resource = event as MCPClient.Event & { uri: string; name: string; mimeType: string };
+              
+              // Skip if already reading this resource
+              if (context.pendingResourceReads?.has(resource.uri)) {
+                console.log("Already reading resource", resource.uri);
+                return;
+              }
+              
+              // Mark as pending
+              enqueue.assign({
+                pendingResourceReads: new Set([...(context.pendingResourceReads || []), resource.uri]),
+              });
+              
+              // Use the resourceReader actor directly
+              enqueue(async ({ context }) => {
+                try {
+                  const result = await context.client!.readResource({ uri: resource.uri });
+                  
+                  // Process contents based on MIME type
+                  let processedContents;
+                  if (resource.mimeType === "application/json") {
+                    processedContents = result.contents
+                      .map((content) => content.text as string)
+                      .filter(Boolean)
+                      .map(e => JSON.parse(e));
+                  } else if (resource.mimeType === "text/plain") {
+                    processedContents = result.contents.map((content) => content.text);
+                  } else {
+                    processedContents = result.contents;
+                  }
+                  
+                  self.send({
+                    type: "@updates.resources.data",
+                    name: resource.name,
+                    uri: resource.uri,
+                    mimeType: resource.mimeType,
+                    contents: processedContents,
+                  });
+                } catch (error) {
+                  console.error("Error reading resource:", error);
+                } finally {
+                  // Clean up pending reads
+                  const newSet = new Set(context.pendingResourceReads);
+                  newSet.delete(resource.uri);
+                  self.send({
+                    type: "@updates.resources",
+                    resources: context.resources,
+                  });
+                }
+              });
+            }),
+          },
+          
           "@updates.resources.data": {
             actions: [
               assign({
-                resourceData: ({ event, context:{resourceData} }) => {
-                  const { type,name,...data } = event as MCPClient.Updates.ResourceDataUpdate;
+                resourceData: ({ event, context }) => {
+                  const { type, name, ...data } = event as MCPClient.Updates.ResourceDataUpdate;
                   return {
-                    ...resourceData,
+                    ...context.resourceData,
                     [name]: {
                       name,
                       ...data,
-                    }
+                    },
                   };
                 },
               }),
@@ -638,6 +498,7 @@ export type TransportFactory = () =>
               },
             ],
           },
+          
           "@updates.prompts": {
             actions: [
               assign({
@@ -649,6 +510,7 @@ export type TransportFactory = () =>
               },
             ],
           },
+          
           "@updates.resourceTemplates": {
             actions: [
               assign({
@@ -656,143 +518,23 @@ export type TransportFactory = () =>
               }),
             ],
           },
-        },
-        initial: "connected",
-        states:{
-            connecting:{
-                entry: [
-                    ({ context }) => {
-                        console.log("ready.connecting", context.url.toString());
-                    }, 
-                    assign({
-                        retries: ({ context:{retries} }) => retries + 1,
-                     })
-                ],
-                invoke: {
-                    src: "connection",
-                    input: ({ context }) => ({
-                        url: context.url,
-                        options: context.options,
-                    }),
-                    onDone: {
-                        target: "connected",
-                        actions: assign({
-                            client: ({ event }) => event.output.client,
-                            transport: ({ event }) => event.output.transport,
-                            serverCapabilities: ({ event }) => event.output.serverCapabilities,
-                        }),
-                    },
-                    onError: {
-                        target: "disconnected",
-                        actions: assign({
-                            error: ({ event }) => ({
-                                message: (event as any).error?.message || "Unknown error",
-                                stack: (event as any).error?.stack || "",
-                                code: (event as any).error?.code || -1,
-                              }),
-                        }),
-                    }
-                }
-            },
-            connected:{
-                entry: [
-                    ({ context }) => {
-                        console.log("ready.connected", context.url.toString());
-                    },
-                    assign({
-                        error: undefined,
-                    })
-                ],
-              invoke: {
-                src: "resourceDataHandler",
-                id: "@mcp/resource",
-                input: ({ context }) => ({
-                  client: context.client!,
-                  auth: context.options.auth,
-                  session: context.options.session,
-                  url: context.url,
-                }),
+          
+          retry: {
+            target: "connecting",
+            actions: [
+              assign({
+                error: undefined,
+                retries: ({ context }) => context.retries + 1,
+                client: undefined,
+                transport: undefined,
+                pendingResourceReads: new Set(),
+              }),
+              ({ context }) => {
+                console.log("Retrying connection:", context.retries);
               },
-              on:{
-                "@mcp.error": {
-                    target: "disconnected",
-                    actions: assign({
-                        error: ({ event }) => ({
-                            message: (event as any).error?.message || "Unknown error",
-                            stack: (event as any).error?.stack || "",
-                            code: (event as any).error?.code || -1,
-                        }),
-                    }),
-                },
-                "@updates.resource": {
-                    actions: enqueueActions(({ event, enqueue, context}) => {
-                        const { type,...resource } = event;
-                        enqueue.sendTo("@mcp/resource", {
-                            type: "read-resource",
-                            ...resource,
-                        });
-                    }),
-                },
-                "@updates.resources": {
-                    actions: enqueueActions(({ event, enqueue, context}) => {
-                       const { resources } = event;
-                       const {resourceData, resources:existingResources} = context;
-                       enqueue.assign({
-                            resources: ({ event }) => event.resources,
-                       });
-        
-                      for (const resource of event.resources) {
-                        if(resourceData[resource.name]?.uri !== resource.uri){
-                          enqueue.sendTo("@mcp/resource", {
-                            type: "read-resource",
-                             ...resource,
-                          });
-                        }
-                      }
-              
-                      for (const resource of resources) {
-                        if(!existingResources.some(r=>r.uri === resource.uri)){
-                           enqueue.emit({
-                            type: "@updates.resource",
-                            ...resource,
-                           });
-                        }
-                      }
-                    }),
-                  }
-              }
-            },
-        
-            disconnected:{
-                entry: [
-                    ({ context }) => {
-                        console.log("ready.disconnected", context.url.toString(), context.error?.message);
-                    },
-                    ({ context:{transport,client} }) => {
-                        if(transport){
-                            transport.close();
-                        }
-                        if(client){
-                            client.close();
-                        }
-                    }
-                ],
-                invoke: {
-                    src:fromPromise<void, { retries: number }>(async ({ input:{retries} }) => {
-                        //wait according to the retry count
-                        await new Promise(resolve => setTimeout(resolve, Math.min(retries * 1000, 10)));
-                    
-                    }),
-                    input: ({ context:{retries} }) => ({
-                        retries: retries,
-                    }),
-                    onDone: {
-                        target: "connecting",
-                    }
-                }
-            }   
-
-        }
+            ],
+          },
+        },
       },
       failed: {
         entry: ({ context:{error} }) =>  console.warn("failed connection: ",error),
@@ -1019,6 +761,15 @@ export namespace MCPClient {
     url: URL;
   };
 
+  export type ResourceReaderInput = {
+    client: Client;
+    resource: {
+      uri: string;
+      name: string;
+      mimeType: string;
+    };
+  };
+
   export namespace Updates {
     export type Tools = {
       type: "@updates.tools";
@@ -1111,5 +862,6 @@ export namespace MCPClient {
     client: Client | undefined;
     transport: ReturnType<TransportFactory> | undefined;
     retries: number;
+    pendingResourceReads: Set<string>;
   };
 }

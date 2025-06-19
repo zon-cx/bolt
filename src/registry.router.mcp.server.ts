@@ -78,14 +78,8 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
    const clientManagerActor = createActor(clientManagerMachine, {
     id:agent.id,
     input: {
-      session: {
-        store,
-        auth: sessionInfo.auth,
-        session: sessionInfo.session,
-        id: sessionInfo.id,
-        name: sessionInfo.id,
-        version: "1.0.0"
-      },
+      auth: sessionInfo.auth,
+      sessionId: sessionInfo.session,
       store
     }
   });

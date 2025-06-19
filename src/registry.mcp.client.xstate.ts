@@ -14,8 +14,6 @@ import {
   auth,
   OAuthClientProvider,
 } from "@modelcontextprotocol/sdk/client/auth.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import type { SSEClientTransportOptions } from "@modelcontextprotocol/sdk/client/sse.js";
 import type {
   RequestHandlerExtra,
   RequestOptions,
@@ -48,7 +46,6 @@ import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ListConnectionsResultSchema } from "./registry.mcp.server";
 import { z } from "zod";
-import EventEmitter from "node:events";
 import { createActor } from "xstate";
 
 type NamespacedSource = {
@@ -89,7 +86,6 @@ const clientManagerSetup = setup({
       mcpClient: typeof mcpClientMachine;
       connectionManager: ActorLogic<any, any, any, any, any>;
       registryUpdater: ActorLogic<any, any, any, any, any>;
-      cacheCleaner: ActorLogic<any, any, any, any, any>;
     };
   },
   actors: {
@@ -102,7 +98,7 @@ const clientManagerSetup = setup({
         sendBack: (event: any) => void;
         input: ClientManager.ConnectionManagerInput;
       }) => {
-        const { session, store } = input;
+        const { auth, sessionId, store } = input;
 
         // Observe store changes and manage connections
         const observer = (event: Y.YMapEvent<ServerConfig>) => {
@@ -111,6 +107,8 @@ const clientManagerSetup = setup({
             if (config && !config.status) {
               sendBack({
                 type: "connect",
+                auth,
+                sessionId,
                 ...config,
                 id: key,
               });
@@ -166,42 +164,6 @@ const clientManagerSetup = setup({
       
     
     ),
-    cacheCleaner: fromCallback(
-      ({
-        sendBack,
-        input,
-      }: {
-        sendBack: (event: any) => void;
-        input: ClientManager.CacheCleanerInput;
-      }) => {
-        const { clientCache, CACHE_TTL } = input;
-
-        const cleanup = () => {
-          const now = Date.now();
-          const expiredKeys: string[] = [];
-
-          for (const [key, cached] of clientCache.entries()) {
-            if (now - cached.lastUsed > CACHE_TTL) {
-              expiredKeys.push(key);
-            }
-          }
-
-          if (expiredKeys.length > 0) {
-            sendBack({
-              type: "cleanup",
-              expiredKeys,
-            });
-          }
-        };
-
-        // Run cleanup every minute
-        const interval = setInterval(cleanup, 60 * 1000);
-
-        return () => {
-          clearInterval(interval);
-        };
-      }
-    ),
   },
   actions: {
     emit: emit((_, e: ClientManager.EmittedEvent) => e),
@@ -212,34 +174,25 @@ const clientManagerMachine = clientManagerSetup.createMachine({
   id: "@manager/client",
   initial: "init",
   context: ({ input }) => ({
-    session: input.session,
+    auth: input.auth,
+    sessionId: input.sessionId,
     store: input.store,
     mcpActors: {} as Record<string, any>,
     tools: [] as NamespacedData["tools"],
     prompts: [] as NamespacedData["prompts"],
     resources: [] as NamespacedData["resources"],
     resourceTemplates: [] as NamespacedData["resourceTemplates"],
-    clientCache: new Map<
-      string,
-      {
-        client: Client;
-        transport: StreamableHTTPClientTransport;
-        lastUsed: number;
-      }
-    >(),
-    CACHE_TTL: 5 * 60 * 1000, // 5 minutes
-    connected: new EventEmitter(),
-    pendingConnection: undefined,
   }),
   states: {
     init: {
         entry:  enqueueActions(({ context, enqueue ,self}) => {
             const id= self.id;
-            const url= new URL(`${env.MCP_REGISTRY_URL!}/${id}`);
+            const registryUrl = env.MCP_REGISTRY_URL || "https://registry.cfapps.eu12.hana.ondemand.com/mcp";
+            const url= new URL(`${registryUrl}/${id}`);
             enqueue.assign({
-                mcpActors: ({ context: { mcpActors, session }, spawn }) => ({
+                mcpActors: ({ context: { mcpActors, sessionId }, spawn }) => ({
                   ["@registry"]: spawn("mcpClient", {
-                    systemId: `@registry:${session?.id}`,
+                    systemId: `@registry:${sessionId}`,
                     syncSnapshot: true,
                     input: {
                       url: url,
@@ -248,8 +201,8 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                           name: id,
                           version: version || "1.0.0",
                         },
-                        auth: context.session.auth,
-                        session: context.session.session,
+                        auth: context.auth,
+                        session: context.sessionId,
                       },
                     },
                   }),
@@ -294,178 +247,143 @@ const clientManagerMachine = clientManagerSetup.createMachine({
     },
 
     running: {
-      initial: "managing",
+      invoke: [
+        {
+          src: "connectionManager",
+          input: ({ context }) => ({
+            auth: context.auth,
+            sessionId: context.sessionId,
+            store: context.store,
+          }),
+        },
+        {
+          src: "registryUpdater",
+          input: ({ context: { mcpActors } }) => ({
+            registry: mcpActors["@registry"],
+            actors: mcpActors,
+          }),
+        },
+      ],
       on: {
+        // Handle tool updates from child actors
         "@updates.tools": {
           actions: [
             assign({
-              tools: ({ context, event }) =>
+              tools: ({ context }) =>
                 getNamespacedData(context.mcpActors, "tools"),
             }),
           ],
         },
-      },
-      states: {
-        managing: {
-          invoke: [
-            {
-              src: "connectionManager",
-              input: ({ context }) => ({
-                session: context.session,
-                store: context.store,
-              }),
-            },
-            {
-              src: "registryUpdater",
-              input: ({ context: { mcpActors } }) => ({
-                registry: mcpActors["@registry"],
-                actors: mcpActors,
-              }),
-            },
-            {
-              src: "cacheCleaner",
-              input: ({ context }) => ({
-                clientCache: context.clientCache,
-                CACHE_TTL: context.CACHE_TTL,
-              }),
-            },
+        
+        // Recalculate aggregated data
+        "recalculate-tools": {
+          actions: [
+            assign({
+              tools: ({ context }) =>
+                getNamespacedData(context.mcpActors, "tools"),
+            }),
           ],
-          on: {
-            cleanup: {
-              actions: [
-                assign({
-                  clientCache: ({ context, event }) => {
-                    const cleanupEvent = event as {
-                      type: "cleanup";
-                      expiredKeys: string[];
-                    };
-                    for (const key of cleanupEvent.expiredKeys) {
-                      const cached = context.clientCache.get(key);
-                      if (cached) {
-                        try {
-                          cached.client.close();
-                          cached.transport.close();
-                        } catch (error) {
-                          console.error(
-                            `Error closing cached client ${key}:`,
-                            error
-                          );
-                        }
-                        context.clientCache.delete(key);
-                      }
-                    }
-                    return context.clientCache;
-                  },
-                })
-              ],
-            },
-
-            "recalculate-tools": {
-              actions: [
-                assign({
-                  tools: ({ context }) =>
-                    getNamespacedData(context.mcpActors, "tools"),
-                }),
-              ],
-            },
-
-            disconnect: {
-              target: "disconnecting",
-            },
-            connect: {
-              target: "connecting",
-              actions: assign({
-                pendingConnection: ({ event }) => event,
-              }),
-            },
-          },
         },
-        connecting: {
-          entry: enqueueActions(({ context, enqueue }) => {
-            if (context.pendingConnection) {
-              const { url, name, version, id } = context.pendingConnection;
-              enqueue.emit({
-                type: `@connection.connecting.${id}`,
-                timestamp: Date.now(),
-                url,
-                name,
-                version,
-                id,
-                session: context.session,
-              });
-              if(!context.mcpActors[id]){
-                enqueue.assign({
-                  mcpActors: ({ context: { mcpActors, session }, spawn }) => ({
-                    [id]: spawn("mcpClient", {
-                      systemId: `${id}:${session?.id}`,
-                      syncSnapshot: true,
-                      input: {
-                        url: new URL(url),
-                        options: {
-                          info: {
-                            name: name || id,
-                            version: version || "1.0.0",
-                          },
-                          auth: context.session.auth,
-                          session: context.session.session,
+
+        // Handle new connections
+        connect: {
+          actions: enqueueActions(({ context, enqueue, event }) => {
+            const { url, name, version, id } = event;
+            
+            // Emit connecting event
+            enqueue.emit({
+              type: `@connection.connecting.${id}`,
+              timestamp: Date.now(),
+              url,
+              name,
+              version,
+              id,
+              auth: context.auth,
+              sessionId: context.sessionId,
+            });
+
+            // Spawn new MCP client if it doesn't exist
+            if (!context.mcpActors[id]) {
+              enqueue.assign({
+                mcpActors: ({ context: { mcpActors, sessionId }, spawn }) => ({
+                  ...mcpActors,
+                  [id]: spawn("mcpClient", {
+                    systemId: `${id}:${sessionId}`,
+                    syncSnapshot: true,
+                    input: {
+                      url: new URL(url),
+                      options: {
+                        info: {
+                          name: name || id,
+                          version: version || "1.0.0",
                         },
+                        auth: context.auth,
+                        session: context.sessionId,
                       },
-                    }),
-                    ...mcpActors,
+                    },
                   }),
-                });
-                
-                // After spawning, subscribe to tool updates
-                enqueue(({ context: { mcpActors }, self }) => {
-                  const actor = mcpActors[id];
-                  if (actor) {
-                    actor.subscribe((state) => {
-                      // When child's tools change, update manager's aggregated tools
-                      if (state.context.tools && state.matches("ready")) {
-                        self.send({ type: "recalculate-tools" });
-                      }
-                    });
-                  }
-                });
-              }
+                }),
+              });
+
+              // Subscribe to the new actor for tool updates
+              enqueue(({ context: { mcpActors }, self }) => {
+                const actor = mcpActors[id];
+                if (actor) {
+                  actor.subscribe((state) => {
+                    // When child's tools change, update manager's aggregated tools
+                    if (state.context.tools && state.matches("ready")) {
+                      self.send({ type: "recalculate-tools" });
+                    }
+                  });
+                }
+              });
             }
           }),
-          always: {
-            target: "managing",
-            actions: [
-              assign({
-                pendingConnection: undefined,
-              }),
-            ]
-          }
         },
-      
-        disconnecting: {
-          invoke: {
-            src: fromPromise(
-              async ({ input }: { input: { actors: Record<string, any> } }) => {
-                await Promise.all(
-                  Object.values(input.actors).map(async (actor) => {
-                    actor.send({ type: "cleanup" });
-                  })
-                );
-              }
-            ),
-            input: ({ context }) => ({ actors: context.mcpActors }),
-            onDone: {
-              target: "done",
-            },
-            onError: {
-              target: "done",
-            },
+
+        // Handle disconnections
+        disconnect: {
+          actions: ({ context, event }) => {
+            const actor = context.mcpActors[event.id];
+            if (actor) {
+              actor.send({ type: "cleanup" });
+            }
           },
         },
-        done: {
-          type: "final",
-          output: ({ context }) => context,
+
+        // Disconnect all and transition to final state
+        "disconnect-all": {
+          target: "disconnecting",
         },
       },
     },
+
+    disconnecting: {
+      invoke: {
+        src: fromPromise(
+          async ({ input }: { input: { actors: Record<string, any> } }) => {
+            await Promise.all(
+              Object.values(input.actors).map(async (actor) => {
+                actor.send({ type: "cleanup" });
+              })
+            );
+          }
+        ),
+        input: ({ context }) => ({ actors: context.mcpActors }),
+        onDone: {
+          target: "done",
+        },
+        onError: {
+          target: "done",
+        },
+      },
+    },
+
+    done: {
+      type: "final",
+      output: ({ context }) => context,
+    },
+
     error: {
       type: "final",
       output: ({ context }) => context,
@@ -530,14 +448,8 @@ type Optional<T> = {
 
 export namespace ClientManager {
   export type ConnectionManagerInput = {
-    session: {
-      store: Y.Map<ServerConfig>;
-      auth: AuthInfo;
-      session?: string;
-      id?: string;
-      name?: string;
-      version?: string;
-    };
+    auth: AuthInfo;
+    sessionId?: string;
     store: Y.Map<ServerConfig>;
   };
 
@@ -546,51 +458,15 @@ export namespace ClientManager {
     actors: Record<string, ActorRefFromLogic<typeof mcpClientMachine>>
   };
 
-  export type CacheCleanerInput = {
-    clientCache: Map<
-      string,
-      {
-        client: Client;
-        transport: StreamableHTTPClientTransport;
-        lastUsed: number;
-      }
-    >;
-    CACHE_TTL: number;
-  };
-
-  export type ConnectInput = {
-    config: ServerConfig;
-    session: {
-      store: Y.Map<ServerConfig>;
-      auth: AuthInfo;
-      session?: string;
-      id?: string;
-      name?: string;
-      version?: string;
-    };
-  };
-
   export type Input = {
-    session: {
-      store: Y.Map<ServerConfig>;
-      auth: AuthInfo;
-      session?: string;
-      id?: string;
-      name?: string;
-      version?: string;
-    };
+    auth: AuthInfo;
+    sessionId?: string;
     store: Y.Map<ServerConfig>;
   };
 
   export type Context = {
-    session: {
-      store: Y.Map<ServerConfig>;
-      auth: AuthInfo;
-      session?: string;
-      id?: string;
-      name?: string;
-      version?: string;
-    };
+    auth: AuthInfo;
+    sessionId?: string;
     error?: Error;
     store: Y.Map<ServerConfig>;
     mcpActors: Record<string, any>;
@@ -598,34 +474,18 @@ export namespace ClientManager {
     prompts: NamespacedData["prompts"];
     resources: NamespacedData["resources"];
     resourceTemplates: NamespacedData["resourceTemplates"];
-    clientCache: Map<
-      string,
-      {
-        client: Client;
-        transport: StreamableHTTPClientTransport;
-        lastUsed: number;
-      }
-    >;
-    CACHE_TTL: number;
-    connected: EventEmitter;
-    pendingConnection?: ServerConfig;
   };
 
   export type EmittedEvent = MCPClient.Event | Connection.Event;
 
   export type Event =
     | {
-        type: "cleanup";
-        expiredKeys: string[];
-      }
-    | ({
         type: "connect";
-        session: Context["session"];
-      } & ServerConfig)
-    | ({
+      } & ServerConfig
+    | {
         type: "disconnect";
         id: string;
-      } & ServerConfig)
+      } & ServerConfig
     | {
         type: "recalculate-tools";
       }
@@ -641,12 +501,14 @@ export namespace Connection {
     | ({
         type: `@connection.connecting.${string}`;
         timestamp: number;
-        session: ClientManager.Context["session"];
+        auth: AuthInfo;
+        sessionId?: string;
       } & ServerConfig)
     | ({
         type: `@connection.connected.${string}`;
         timestamp: number;
-        session: ClientManager.Context["session"];
+        auth: AuthInfo;
+        sessionId?: string;
       } & ServerConfig)
     | ({
         type: `@connection.failed.${string}`;
