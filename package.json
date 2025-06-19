@@ -6,7 +6,7 @@
   "bin": "./dist/chat.ui.slack.js",
   "packageManager": "yarn@1.22.22",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "dev": "tsx   --env-file=.env src/chat.ui.slack.ts",
     "web": "tsx --env-file=.env src/chat.ui.web.tsx",
     "simple": "tsx --env-file=.env src/simple.ts",

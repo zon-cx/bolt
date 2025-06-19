@@ -16,6 +16,8 @@ import {
 import { mcpAgentManager, MCPAgentManager } from "./registry.identity.store";
 import { env } from "node:process";
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
+import { createActor } from "xstate";
+import * as Y from "yjs";
 
 import {
   authRouter,
@@ -24,8 +26,9 @@ import {
 } from "./registry.mcp.server.auth";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { Subscription } from "@xstate/store";
-import { MCPClientConnection } from "./mcp.client";
+import clientManagerMachine,{  ServerConfig } from "./registry.mcp.client.xstate";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { connectYjs } from "./store.yjs";
 
 const app = express();
 app.use(express.json());
@@ -36,7 +39,10 @@ const transports = {
   streamable: {} as Record<string, StreamableHTTPServerTransport>,
   sse: {} as Record<string, SSEServerTransport>,
 };
+const doc = connectYjs("@mcp.registry");
 
+// Map to store client manager actors by session ID
+const clientManagers = {} as Record<string, any>;
 
 // Helper to create a new MCP server and transport for a session
 async function createSessionTransport(sessionInfo: {session?: string; auth: AuthInfo; id?: string}): Promise<StreamableHTTPServerTransport> {
@@ -64,69 +70,96 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
   );
 
   const agent = mcpAgentManager.init(sessionInfo);
-  const registry = new MCPClientConnection(new URL(`${env.MCP_REGISTRY_URL}/${agent.id}`), {
-    info: {
-      name: "registry",
-      version: "1.0.0",
-    },
-    client: {
-      capabilities: {
-        tools: true,
-        resources: true,
+  
+  // Create Yjs store for server configurations
+  const store = doc.getMap<ServerConfig>("servers");
+  
+  // Create XState-based client manager
+   const clientManagerActor = createActor(clientManagerMachine, {
+    id:agent.id,
+    input: {
+      session: {
+        store,
+        auth: sessionInfo.auth,
+        session: sessionInfo.session,
+        id: sessionInfo.id,
+        name: sessionInfo.id,
+        version: "1.0.0"
       },
-    },
-    transport: () =>
-      new StreamableHTTPClientTransport(new URL(`${env.MCP_REGISTRY_URL}/${agent.id}`), {
-        sessionId: sessionInfo.session,
-        requestInit: sessionInfo.auth?.token
-          ? {
-              headers: {
-                Authorization: `Bearer ${sessionInfo.auth.token}`,
-              },
-            }
-          : undefined,
-      })
+      store
+    }
+  });
+  
+  // Start the client manager
+  clientManagerActor.start();
+  
+  // Store the actor for cleanup
+  if (sessionInfo.session) {
+    clientManagers[sessionInfo.session] = clientManagerActor;
+  }
+  
+  // Add the registry connection to the store
+  store.set(sessionInfo.id || "registry", {
+    id: sessionInfo.id || "registry",
+    url: `${env.MCP_REGISTRY_URL}/${agent.id}`,
+    name: "registry",
+    version: "1.0.0"
   });
 
-  
-  await registry.init();
-   
- 
   // Register handlers to proxy requests to the agent
   mcpServer.setRequestHandler(
     ListToolsRequestSchema,
-    async (request, extra) => ({
-      tools: agent.listTools(),
-    })
+    async (request, extra) => {
+      const snapshot = clientManagerActor.getSnapshot();
+      return {
+        tools: snapshot.context.tools,
+      };
+    }
   );
-  mcpServer.setRequestHandler(ListPromptsRequestSchema, async (_, extra) => ({
-    prompts: agent.listPrompts(),
-  }));
-  mcpServer.setRequestHandler(ListResourcesRequestSchema, async (_, extra) => ({
-    resources: agent.listResources(),
-  }));
+  
+  mcpServer.setRequestHandler(ListPromptsRequestSchema, async (_, extra) => {
+    const snapshot = clientManagerActor.getSnapshot();
+    return {
+      prompts: snapshot.context.prompts,
+    };
+  });
+  
+  mcpServer.setRequestHandler(ListResourcesRequestSchema, async (_, extra) => {
+    const snapshot = clientManagerActor.getSnapshot();
+    return {
+      resources: snapshot.context.resources,
+    };
+  });
+  
   mcpServer.setRequestHandler(
     ListResourceTemplatesRequestSchema,
-    async (_, extra) => ({
-      resources: agent.listResources(),
-      resourceTemplates: agent.listResourceTemplates(),
-    })
+    async (_, extra) => {
+      const snapshot = clientManagerActor.getSnapshot();
+      return {
+        resources: snapshot.context.resources,
+        resourceTemplates: snapshot.context.resourceTemplates,
+      };
+    }
   );
+  
   mcpServer.setRequestHandler(
     GetPromptRequestSchema,
     async (request, extra) => {
       return agent.getPrompt(request.params, extra);
     }
   );
+  
   mcpServer.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     return agent.callTool(request.params, extra);
   });
+  
   mcpServer.setRequestHandler(
     ReadResourceRequestSchema,
     async (request, extra) => {
       return agent.readResource(request.params, extra);
     }
   );
+  
   mcpServer.setRequestHandler(CompleteRequestSchema, async (request, extra) => {
     return agent.complete(request.params, extra);
   });
@@ -138,8 +171,6 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
       transports.streamable[sessionId] = transport;
     },
   });
-
-
 
   // Connect the MCP server to the transport
   await mcpServer.connect(transport);
@@ -155,7 +186,8 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
       clearTimeout(resourceChangeTimeout);
     }
     resourceChangeTimeout = setTimeout(() => {
-      if (agent.resources.get()) {
+      const snapshot = clientManagerActor.getSnapshot();
+      if (snapshot.context.resources.length > 0) {
         console.log("Sending resource list changed notification");
         mcpServer.sendResourceListChanged();
       }
@@ -167,7 +199,8 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
       clearTimeout(toolChangeTimeout);
     }
     toolChangeTimeout = setTimeout(() => {
-      if (agent.tools.get()) {
+      const snapshot = clientManagerActor.getSnapshot();
+      if (snapshot.context.tools.length > 0) {
         console.log("Sending tool list changed notification");
         mcpServer.sendToolListChanged();
       }
@@ -179,31 +212,37 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
       clearTimeout(promptChangeTimeout);
     }
     promptChangeTimeout = setTimeout(() => {
-      if (agent.prompts.get()) {
+      const snapshot = clientManagerActor.getSnapshot();
+      if (snapshot.context.prompts.length > 0) {
         console.log("Sending prompt list changed notification");
         mcpServer.sendPromptListChanged();
       }
     }, 1000); // 1 second debounce
   };
   
-  const subscriptions: Subscription[] = [
-    await agent.updateFromRegistry(registry),
-    agent.tools.subscribe(debouncedToolChange),
-    agent.prompts.subscribe(debouncedPromptChange),
-    agent.resources.subscribe(debouncedResourceChange),
-    agent.resourceTemplates.subscribe(debouncedResourceChange),
-  ];
-
-  agent.onClose(() => {
-    subscriptions.forEach((sub) => {
-      sub.unsubscribe();
-    });
+  // Subscribe to client manager state changes
+  const clientManagerSubscription = clientManagerActor.subscribe((snapshot) => {
+    // React to state changes
+    if (snapshot.context.tools.length > 0) {
+      debouncedToolChange();
+    }
+    if (snapshot.context.resources.length > 0) {
+      debouncedResourceChange();
+    }
+    if (snapshot.context.prompts.length > 0) {
+      debouncedPromptChange();
+    }
   });
 
-    // Clean up transport when closed
+  agent.onClose(() => {
+    clientManagerSubscription.unsubscribe();
+  });
+
+  // Clean up transport when closed
   transport.onclose = () => {
     if (transport.sessionId) {
       delete transports[transport.sessionId];
+      delete clientManagers[transport.sessionId];
     }
     // Clear any pending timeouts
     if (resourceChangeTimeout) {
@@ -215,15 +254,12 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
     if (promptChangeTimeout) {
       clearTimeout(promptChangeTimeout);
     }
-    subscriptions.forEach((sub) => {
-      sub.unsubscribe();
-    });
+    clientManagerSubscription.unsubscribe();
+    clientManagerActor.stop();
   };
   
   return transport;
 }
-
-
 
 app.use(async (req, res, next) => {
   console.log(`[LOG] ${req.method} ${req.url}`);
