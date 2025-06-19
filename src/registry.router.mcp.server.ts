@@ -101,7 +101,7 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
   // Add the registry connection to the store
   store.set(sessionInfo.id || "registry", {
     id: sessionInfo.id || "registry",
-    url: `${env.MCP_REGISTRY_URL}/${agent.id}`,
+    url: `${env.MCP_REGISTRY_URL || "https://registry.cfapps.eu12.hana.ondemand.com/mcp"}/${agent.id}`,
     name: "registry",
     version: "1.0.0"
   });

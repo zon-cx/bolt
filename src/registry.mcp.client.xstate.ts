@@ -53,9 +53,10 @@ import { Atom, createAtom } from "@xstate/store";
 
 type NamespacedSource = {
   name: string;
+  uri?: string;
   source: {
     name: string;
-    url: string;
+    uri?: string;
     server: string;
   };
 };
@@ -137,21 +138,40 @@ export class NamespacedDataStore {
         return data.map((resource: any) => {
           const { name, uri, uriTemplate, ...item } = resource;
           let resourceUri: string | undefined = undefined;
+          let resourceUriTemplate: string | undefined = undefined;
+          
           if (typeof uri === "string") {
             resourceUri = uri;
-          } else if (typeof uriTemplate === "string") {
-            resourceUri = uriTemplate;
           }
-          return {
+          if (typeof uriTemplate === "string") {
+            resourceUriTemplate = uriTemplate;
+            // For resource templates, use uriTemplate as the uri if uri is not set
+            if (!resourceUri) {
+              resourceUri = uriTemplate;
+            }
+          }
+          
+          const result = {
             ...item,
             name: `${server}:${name}`,
-            uri: resourceUri ? `${server}:${resourceUri}` : undefined,
             source: {
               uri: resourceUri,
               name,
               server,
             },
           };
+          
+          // Add uri field if we have a resource URI
+          if (resourceUri) {
+            result.uri = `${server}:${resourceUri}`;
+          }
+          
+          // For resource templates, preserve the uriTemplate field
+          if (type === "resourceTemplates" && resourceUriTemplate) {
+            result.uriTemplate = `${server}:${resourceUriTemplate}`;
+          }
+          
+          return result;
         });
       } catch (error) {
         console.error(`Error getting ${type} data from client ${server}:`, error);
@@ -180,18 +200,19 @@ export class NamespacedDataStore {
     );
   }
 
-   public async readResource( { uri,name, ...params }: Zod.infer<typeof ReadResourceRequestSchema>["params"],
+   public async readResource( params: Zod.infer<typeof ReadResourceRequestSchema>["params"],
     {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<ReadResourceRequest, any>,
     options?: RequestOptions) {
 
+      const { uri, name, ...otherParams } = params;
       const searchKey = name || uri;
-      if (!searchKey) {
-        throw new Error("Either name or uri must be provided");
+      if (!searchKey || typeof searchKey !== 'string') {
+        throw new Error("Either name or uri must be provided as a string");
       }
       
       const {server, uri: resourceUri, name: resourceName} = await this.findSource(this.resources, searchKey);
       if(!resourceUri){
-        throw new Error(`Resource URI not found for ${uri}`);
+        throw new Error(`Resource URI not found for ${searchKey}`);
       }
       const mcpActor = this.mcpActors[server];
       if(!mcpActor){
@@ -202,7 +223,7 @@ export class NamespacedDataStore {
         throw new Error(`MCP client for server ${server} not ready`);
       }
       const client = mcpSnapshot.context.client;
-      const readResult = await client.readResource({uri: resourceUri, name: resourceName, ...params}, options);
+      const readResult = await client.readResource({uri: resourceUri, name: resourceName, ...otherParams}, options);
       return readResult;
     }
 
@@ -335,20 +356,20 @@ export class NamespacedDataStore {
 ): Promise<{ name: string; server: string; uri?: string }> {
   const result = await findAsync(
     atom,
-    (value) =>
-      (value && value.name === name) ||
-      value.uri === name ||
-      value.uriTemplate === name
+    (value: T) =>
+      (value && (value as any).name === name) ||
+      ((value as any).uri && (value as any).uri === name) ||
+      ((value as any).uriTemplate && (value as any).uriTemplate === name)
   );
-  if (!result || !result.source) {
+  if (!result || !(result as any).source) {
     throw new Error(
       `Resource with uri '${name}' not found in any MCP client connection.`
     );
   }
   return {
-    name: (result.source as any).name,
-    server: (result.source as any).server,
-    uri: (result.source as any).uri,
+    name: ((result as any).source as any).name,
+    server: ((result as any).source as any).server,
+    uri: ((result as any).source as any).uri,
   };
 
   async function findAsync<T extends any = any>(
