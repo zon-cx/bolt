@@ -7,7 +7,7 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { Hono } from "hono";
 import { html } from "hono/html";
-import { streamText } from "hono/streaming";
+import { streamSSE, streamText } from "hono/streaming";
 import {
   MCPAgentManager,
    serverConfig,
@@ -17,7 +17,7 @@ import { createServer } from "node:https";
 
 import { env } from "process";
 import { InMemoryOAuthClientProvider } from "./mcp.client.auth.ts";
-import { MCPClientConnection } from "./mcp.client.ts";
+import mcpClientMachine from "./mcp.client.ts";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { jwtDecode } from "jwt-decode";
 import { createMiddleware } from "hono/factory";
@@ -26,9 +26,11 @@ import {
   setCookie,
 } from "hono/cookie";
 import { readFileSync } from "fs";
+import { ActorRefFromLogic, createActor, waitFor } from "xstate";
+import { AuthorizationError } from "@slack/bolt";
 
 type Variables = {
-  connection: MCPClientConnection;
+  connection: ActorRefFromLogic<typeof mcpClientMachine>;
   oauthProvider: InMemoryOAuthClientProvider;
   agentId: string;
   agent: {
@@ -50,6 +52,18 @@ const app = new Hono<{ Variables: Variables }>();
 // Unwrap Hono errors to see original error details
 app.onError((err, c) => {
   console.error("Hono error:", err);
+  
+  // Check if it's an authorization error
+  if (err.message?.includes("Authentication required") || err.message?.includes("Unauthorized")) {
+    return c.json(
+      {
+        error: "Authentication required",
+        code: 401,
+      },
+      401
+    );
+  }
+  
   return c.json(
     {
       error: String(err),
@@ -59,47 +73,89 @@ app.onError((err, c) => {
   );
 });
 
-const connections = new Map<string, MCPClientConnection>();
+const connections = new Map<string, ReturnType<typeof createActor<typeof mcpClientMachine>>>();
 
 const agentMiddleware = createMiddleware(async (c, next) => {
-  const agentId =c.req.param("id") || c.var.auth?.id;
-  c.set("agentId", agentId);
+  const agentId = c.req.param("id") || c.var.auth?.id;
+  if(!agentId) {
+    return c.redirect("/login");
+  }
 
+  c.set("agentId", agentId); 
+  const authProvider = c.get("oauthProvider")!;
   console.log("agentId", agentId);
-  const url = agentId ? `${env.MCP_REGISTRY_URL}/${agentId}` : env.MCP_REGISTRY_URL!;
-  const connection =
-  agentId && connections.get(agentId)?.connectionState.get() === "ready"
-      ? connections.get(agentId)!
-      : new MCPClientConnection(new URL(url), {
-          id: agentId,
+  const url = agentId ? `${env.MCP_GATEWAY_URL}/${agentId}` : env.MCP_GATEWAY_URL!;
+
+  const connection = agentId && connections.has(agentId) ?  connections.get(agentId)! : connections.set(agentId,createActor(mcpClientMachine, {
+      input: {
+        url: new URL(url),
+        options: {
           info: {
             name: c.var.auth?.name || "me",
             version: "1.0.0",
           },
-          client: {
-            capabilities: {},
-          },
           transport: () =>
             new StreamableHTTPClientTransport(new URL(url), {
-              authProvider: c.get("oauthProvider")!,
+              authProvider: authProvider,
             }),
-        });
-  await connection.init();
-  if (connection.connectionState.get() == "authenticating") {
-    return c.redirect(
-      c.get("oauthProvider").authorizationUrl?.get()!.toString(),
-      302
-    );
+        },
+      },
+    } )).get(agentId)!.start();
+  
+  // Wait for connection to be ready, failed, or authenticating
+  await waitFor(connection, (state) => state.matches("ready") || state.matches("failed") || state.matches("authenticating") );
+  const snapshot = connection.getSnapshot();
+  
+  if(snapshot.matches("authenticating")) {
+    const authUrl = await new Promise<string | null>((resolve) => {
+      if(authProvider.authorizationUrl.get()) {
+        resolve(authProvider.authorizationUrl.get().toString());
+      }
+      const subscription = authProvider.authorizationUrl.subscribe((url) => {
+        subscription.unsubscribe();
+        resolve(url?.toString() || null);
+      });
+      
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        subscription.unsubscribe();
+        resolve(null);
+      }, 5000);
+    });
+    if(authUrl) {
+      return c.redirect(authUrl, 302);
+    } else {
+      return c.json({ error: snapshot.context.error?.message || "Authentication required", code: snapshot.context.error?.code || 401 }, snapshot.context.error?.code || 401);
+    }
   }
+  if(snapshot.matches("failed")) {
+    const error = snapshot.context.error;
+    return c.json(
+      {
+        error: error?.message || "Connection failed",
+        code: error?.code || 500,
+      },
+      500
+    );
+  } 
 
   agentId && connections.set(agentId, connection);
   c.set("connection", connection);
-  const info = await connection.client.callTool({
-    name: "info",
-    arguments: {},
-  });
-  console.log("agent info", info);
-  c.set("agent", info.structuredContent);
+  c.set("agent", { id: agentId, name: "Agent", version: "1.0.0", url });
+
+  try {
+    const info = await connection.getSnapshot().context.client?.callTool({
+      name: "@registry:info",
+      arguments: {},
+    });
+    console.log("agent info", info);
+    c.set("agent", info?.structuredContent || { id: agentId, name: "Agent", version: "1.0.0", url });
+  } catch (error: any) {
+    console.error("Failed to get agent info:", error);
+    throw error; 
+  }
+    
+  
   await next();
 });
 
@@ -151,8 +207,10 @@ app.get("/login", async (c) => {
         <title>Login - MCP Dashboard</title>
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
         <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+        <script src="https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.2" integrity="sha384-Y4gc0CK6Kg+hmulDc6rZPJu0tqvk7EWlih0Oh+2OkAi1ZDlCbBDCQEE2uVk472Ky" crossorigin="anonymous"></script>
+
       </head>
-      <body class="bg-gray-50">
+      <body class="bg-gray-50" hx-ext="sse">
         <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
           <div class="max-w-md w-full space-y-8">
             <div>
@@ -215,19 +273,32 @@ app.get("/oauth/callback", async function (c) {
       nickname: string;
       name: string;
     }; 
-    const connection = new MCPClientConnection(new URL(env.MCP_REGISTRY_URL!), {
-      id: oauthProvider.id,
-      info: {
-        name: nickname || name || sub!,
-        version: "1.0.0",
-      },
-      client: {
-        capabilities: {},
-      },
-      transport: () => transport,
-    });
-    await connection.init();
-    connections.set(sub!, connection);
+    
+    // Check if we already have a connection for this user
+    let connection = connections.get(sub!);
+    if (!connection) {
+      // Create new connection
+      connection = createActor(mcpClientMachine, {
+        input: {
+          url: new URL(env.MCP_REGISTRY_URL!),
+          options: {
+            info: {
+              name: nickname || name || sub!,
+              version: "1.0.0",
+            },
+            transport: () => transport,
+          },
+        },
+      });
+      connection.start();
+      connections.set(sub!, connection);
+    } else {
+      // If connection exists and is in authenticating state, trigger authenticate event
+      const snapshot = connection.getSnapshot();
+      if (snapshot.matches("authenticating")) {
+        connection.send({ type: "authenticate", authCode });
+      }
+    }
 
     await setCookie(c, "mcp-agent-id", sub!, {
       httpOnly: true,
@@ -250,21 +321,25 @@ app.get("/oauth/callback", async function (c) {
     console.log("redirecting to", `${targetUrl}`);
     return c.redirect(`${targetUrl}`, 302);
   }
+  
+  // If no tokens, redirect to login
+  return c.redirect("/login", 302);
 });
 
-const mcpAgentManager = new MCPAgentManager(null);
+const mcpAgentManager = new MCPAgentManager();
 
 // Agent management endpoints
 app.get("/agents", async (c) => {
-  const agents =await mcpAgentManager.listAgents();
+  const agents = await mcpAgentManager.listAgents();
   return c.html(
     <html>
       <head>
         <title>MCP Agents</title>
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
         <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+        <script src="https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.2"  crossorigin="anonymous"></script>
       </head>
-      <body>
+      <body hx-ext="sse">
         <div class="p-6 max-w-xl mx-auto">
           <h1 class="text-2xl font-bold mb-4">MCP Agents</h1>
 
@@ -312,17 +387,21 @@ app.get("/agents", async (c) => {
   );
 });
 
-app.post("/agents/create",  async (c) => {
-  const connection = new MCPClientConnection(new URL(env.MCP_MANAGER_URL!), {
-    id: "new",
-    info: {
-      name: "New Agent",
-      version: "1.0.0",
+app.post("/agents/create", async (c) => {
+  const connection = createActor(mcpClientMachine, {
+    input: {
+      url: new URL(env.MCP_MANAGER_URL!),
+      options: {
+        info: {
+          name: "New Agent",
+          version: "1.0.0",
+        },
+      },
     },
   });
-  await connection.init();
-  await connection.client.callTool({
-    name: "create-agent",
+  await connection.start();
+  await connection.getSnapshot().context.client?.callTool({
+    name: "@registry:create-agent",
     arguments: {
       name: "New Agent",
     },
@@ -337,7 +416,7 @@ app.get("/agents/me", oauthMiddleware, agentMiddleware, async (c) => {
 app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
   const connection = c.var.connection;
   const {auth, agent} = c.var;
-   if (connection.connectionState.get() != "ready") {
+   if (connection.getSnapshot().matches("connecting")) {
     return c.html(
       <html>
         <body>
@@ -346,8 +425,8 @@ app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
       </html>
     );
   }
-  const {isError, content, structuredContent:{connections}} = await connection.client.callTool({
-    name: "list-connections",
+  const {isError, content, structuredContent:{connections}} = await connection.getSnapshot().context.client?.callTool({
+    name: "@registry:list",
     arguments: {},
   }) as CallToolResult & {structuredContent:{connections:serverConfig[]}}
  
@@ -365,8 +444,9 @@ app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
         <title>MCP Agent: {agent?.name}</title>
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
         <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+        <script src="https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.2"  crossorigin="anonymous"></script>
       </head>
-      <body>
+      <body hx-ext="sse"  >
         <div class="p-6 max-w-xl mx-auto">
           <h1 class="text-2xl font-bold mb-4">
             Hello {auth?.name} 
@@ -449,8 +529,12 @@ app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
               id="tools-list"
               hx-get={`/agents/${agent?.id}/tools`}
               hx-trigger="load"
-            >
-              Loading tools...
+                // hx-ext="sse"
+              // hx-swap="beforeend"
+            
+              // sse-swap="tool"
+              class="flex flex-col gap-2"
+              >
             </div>
           </div>
         </div>
@@ -459,89 +543,157 @@ app.get("/agents/:id", oauthMiddleware, agentMiddleware, async (c) => {
   );
 });
 
+app.get("/agents/:id/sse", oauthMiddleware, agentMiddleware,  (c) => {
+  return   streamSSE(c, async (stream) => {
+    const agent = c.var.connection;
+    const returned = {} as Record<string, boolean>;
+
+    const snapshot = agent.getSnapshot();
+   const subscription = agent.on("@updates.tools", (event) => {
+      streamTools(agent.getSnapshot().context.tools);
+    });
+    subscription.unsubscribe();
+
+    await streamTools(snapshot.context.tools);
+  
+
+    await new Promise((resolve) => {
+      stream.onAbort(() => {
+        resolve(true);
+      });
+    });
+    subscription.unsubscribe();
+
+
+    async function streamTools(tools: Tool[]) {
+      for (const tool of tools) {
+        const source = tool.source as any;
+        if (!returned[tool.name]) {
+          await stream.writeSSE({
+            data: await html`<div class="py-2" id="${tool.name}">
+              <div class="font-medium">${tool.name}</div>
+              <div class="text-sm text-gray-500">${tool.description}</div>
+              <div class="text-xs text-gray-400">
+                Server: ${source?.server || 'unknown'} (${source?.name || tool.name})
+              </div>
+            </div>`,
+            event: "tool",
+            id: tool.name,
+          }); 
+          returned[tool.name] = true;
+        }
+      }
+    }
+  })
+});
 // Connect to a new MCP server
 app.post("/agents/:id/connect", oauthMiddleware, agentMiddleware, async (c) => {
   const connection = c.var.connection;
-  const agentId = c.var.connection?.id;
-  const agentName = c.var.connection?.name;
+  const agentId = c.req.param("id");
   const formData = await c.req.formData();
   const url = formData.get("url")?.toString();
   const id = formData.get("id")?.toString();
-  const response = await connection.client.callTool({
-    name: "connect",
-    arguments: {
-      url,
-      name: id,
-      id,
-    },
-  }) ;
-  if (response.isError) {
+  
+  const client = connection.getSnapshot().context.client;
+  if (!client) {
+    return c.json({ error: "Client not ready" }, 500);
+  }
+  
+  try {
+    const response = await client.callTool({
+      name: "@registry:connect",
+      arguments: {
+        url,
+        name: id,
+        id,
+      },
+    });
+    
+    if (response && response.isError) {
+      const content = response.content as any[];
+      return c.render(
+        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+          <p>
+            Failed to connect to MCP server:{" "}
+            {String(content?.map((e: any) => e.text).join(`\n`))}
+          </p>
+        </div>
+      );
+    }
+    
+    const {structuredContent:{connections}} = await client.callTool({
+      name: "@registry:list",
+      arguments: {},
+    }) as CallToolResult & {structuredContent:{connections:serverConfig[]}}
+   
+    return c.html(
+      <div id="servers-list">
+        <h2 class="text-xl font-semibold mb-2">Connected Servers</h2>
+        {connections.length === 0 ? (
+          <p class="text-gray-500">No servers connected</p>
+        ) : (
+          <ul class="divide-y">
+            {connections.map((server) => (
+              <li class="py-2 flex justify-between items-center">
+                <div>
+                  <div class="font-medium">{server.id}</div>
+                  <div class="text-sm text-gray-500">{server.url}</div>
+                </div>
+                <button
+                  class="bg-red-500 text-white px-3 py-1 rounded text-sm"
+                  hx-delete={`/agents/${agentId}/server/${server.id}`}
+                  hx-target="#servers-list"
+                  hx-swap="outerHTML"
+                >
+                  Disconnect
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  } catch (error) {
+    console.error("Error connecting to MCP server:", error);
     return c.render(
       <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-        <p>
-          Failed to connect to MCP server:{" "}
-          {String(response.content?.map((e) => e.text).join(`\n`))}
-        </p>
+        <p>Failed to connect to MCP server: {String(error)}</p>
       </div>
     );
   }
-  const {structuredContent:{connections}} = await connection.client.callTool({
-    name: "list-connections",
-    arguments: {},
-  }) as CallToolResult & {structuredContent:{connections:serverConfig[]}}
- 
-  return c.html(
-    <div id="servers-list">
-      <h2 class="text-xl font-semibold mb-2">Connected Servers</h2>
-      {connections.length === 0 ? (
-        <p class="text-gray-500">No servers connected</p>
-      ) : (
-        <ul class="divide-y">
-          {connections.map((server) => (
-            <li class="py-2 flex justify-between items-center">
-              <div>
-                <div class="font-medium">{server.id}</div>
-                <div class="text-sm text-gray-500">{server.url}</div>
-              </div>
-              <button
-                class="bg-red-500 text-white px-3 py-1 rounded text-sm"
-                hx-delete={`/agents/${agentId}/server/${server.id}`}
-                hx-target="#servers-list"
-                hx-swap="outerHTML"
-              >
-                Disconnect
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 });
 
 // Disconnect from an MCP server
 app.delete("/agents/:id/server/:server",  oauthMiddleware, agentMiddleware, async (c) => {
   const agentId = c.req.param("id");
   const serverId = c.req.param("server");
-  const agent = c.var.connection;
+  const connection = c.var.connection;
+  const client = connection.getSnapshot().context.client;
+
+  if (!client) {
+    return c.json({ error: "Client not ready" }, 500);
+  }
 
   try {
-    const result = await agent.client.callTool({
-      name: "disconnect",
+    const result = await client.callTool({
+      name: "@registry:disconnect",
       arguments: {
         id: serverId,
       },
     });
-    if(result.isError){
+    
+    if(result && result.isError){
+      const content = result.content as any[];
       return c.html(
         <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-          <p>Failed to disconnect from MCP server: {String(result.content?.map((e) => e.text).join(`\n`))}</p>
+          <p>Failed to disconnect from MCP server: {String(content?.map((e: any) => e.text).join(`\n`))}</p>
         </div>
       );
     }
+    
     // Get updated list of servers
-    const {structuredContent: {connections: servers}} = await agent.client.callTool({
-      name: "list-connections",
+    const {structuredContent: {connections: servers}} = await client.callTool({
+      name: "@registry:list",
       arguments: {},
     }) as  CallToolResult & {structuredContent:{connections:(serverConfig & {status:string})[]}}
  
@@ -584,35 +736,50 @@ app.delete("/agents/:id/server/:server",  oauthMiddleware, agentMiddleware, asyn
 
 // List tools for an agent
 app.get("/agents/:id/tools", oauthMiddleware, agentMiddleware, async (c) =>
-  streamText(c, async (stream) => {
-    const agent = c.var.connection;
-    // // Wait 1 second.
-    // await stream.sleep(1000);
-    const returned = {} as Record<string, boolean>;
 
+  await streamText(c, async (stream) => {
+    const agent = c.var.connection;
+    const returned = {} as Record<string, boolean>;
+    const snapshot = agent.getSnapshot();
     await stream.writeln(await html`<ul class="divide-y"></ul>`);
 
-    agent.tools.subscribe(() => {
-      streamTools(agent.tools.get());
+ 
+    const subscription = agent.on("@updates.tools", (event) => {
+      streamTools(agent.getSnapshot().context.tools);
     });
 
-    await streamTools(agent.tools.get());
+    await streamTools(snapshot.context.tools);
 
-    if (agent.tools.get().length === 0) {
+    if (snapshot.context.tools.length === 0) {
       await stream.writeln(
         await html`<p className="text-gray-500">Still loading tools...</p>`
       );
     }
+    await stream.sleep(100);
+    await Promise.race([
+      new Promise(async (resolve) => {
+        setTimeout(async () => {
+          stream.writeln(await html`</ul>`);
+          resolve(true);
+        }, 20_000);
+      }),
+      new Promise((resolve) => {
+        stream.onAbort(() => {
+          resolve(true);
+        });
+      })]);
+     subscription.unsubscribe();
+
     async function streamTools(tools: Tool[]) {
       for (const tool of tools) {
-        const { source } = tool;
+        const source = tool.source as any;
         if (!returned[tool.name]) {
           await stream.writeln(
             await html`<li class="py-2">
               <div class="font-medium">${tool.name}</div>
               <div class="text-sm text-gray-500">${tool.description}</div>
               <div class="text-xs text-gray-400">
-                Server: ${source?.server} (${source?.name})
+                Server: ${source?.server || 'unknown'} (${source?.name || tool.name})
               </div>
             </li>`
           );
@@ -620,11 +787,9 @@ app.get("/agents/:id/tools", oauthMiddleware, agentMiddleware, async (c) =>
         }
       }
     }
-    await stream.sleep(100);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    await stream.writeln(await html`</ul>`);
   })
+
+  
 );
 
 // Simple landing page
@@ -674,6 +839,7 @@ app.get("/", (c) => {
     </html>
   );
 });
+
 
 
 const https = process.env.KEY_PATH && process.env.CERT_PATH ? {
