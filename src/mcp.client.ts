@@ -59,12 +59,12 @@ export type TransportFactory = () =>
       connection: fromPromise(
         async ({ input }: { input: MCPClient.ConnectionInput }) => {
           const { url, options } = input;
-          const { info, auth } = options;
+          const { info, auth, transport:transportFactory } = options;
           
           console.log("connecting to", url.toString());
           
           // Create transport
-          const transport = new StreamableHTTPClientTransport(new URL(url), {
+          const transport =transportFactory? transportFactory() : new StreamableHTTPClientTransport(new URL(url), {
             requestInit: auth?.token
               ? {
                   headers: {
@@ -109,16 +109,18 @@ export type TransportFactory = () =>
               transport,
               serverCapabilities,
             };
-          } catch (error) {
+          } catch (error:any) {
+            if (error instanceof UnauthorizedError || error.message?.includes("Authorization") || error.message?.includes("HTTP 401")) {
+                throw error
+            }
             console.error("Failed to initialize client:", error);
+
             try {
               await transport.close();
             } catch (closeError) {
               console.error("Error closing transport:", closeError);
             }
-            if (error instanceof UnauthorizedError) {
-              throw new Error("Authentication required");
-            }
+           
             throw error;
           }
         },
@@ -130,10 +132,10 @@ export type TransportFactory = () =>
           const [instructions, tools, resources, prompts, resourceTemplates] =
             await Promise.all([
               client.getInstructions(),
-              fetchTools(client),
-              fetchResources(client),
-              fetchPrompts(client),
-              fetchResourceTemplates(client),
+              fetchTools(client).catch(capabilityErrorHandler([], "tools/list")),
+              fetchResources(client).catch(capabilityErrorHandler([], "resources/list")),
+              fetchPrompts(client).catch(capabilityErrorHandler([], "prompts/list")),
+              fetchResourceTemplates(client).catch(capabilityErrorHandler([], "resourceTemplates/list")),
             ]);
 
           return {
@@ -323,18 +325,36 @@ export type TransportFactory = () =>
               serverCapabilities: ({ event }) => event.output.serverCapabilities,
             }),
           },
-          onError: {
-            target: "failed",
-            actions: [
-              assign({
-                error: ({ event }) => ({
-                  message: (event as any).error?.message || "Unknown error",
-                  stack: (event as any).error?.stack || "",
-                  code: (event as any).error?.code || -1,
-                }),
-              })
-            ],
-          },
+          onError: [
+            {
+              target: "authenticating",
+              actions: [
+                assign({
+                  error: ({ event }) => ({
+                    message: (event as any).error?.message || "Authentication required",
+                    stack: (event as any).error?.stack || "",
+                    code: 401,
+                  }),
+                })
+              ],
+              guard: ({ event }) => {
+                const error = (event as any).error;
+                return error?.message?.includes("Unauthorized");
+              },
+            },
+            {
+              target: "failed",
+              actions: [
+                assign({
+                  error: ({ event }) => ({
+                    message: (event as any).error?.message || "Unknown error",
+                    stack: (event as any).error?.stack || "",
+                    code: (event as any).error?.code || -1,
+                  }),
+                })
+              ],
+            },
+          ],
         },
       },
       discovering: {
@@ -543,6 +563,10 @@ export type TransportFactory = () =>
                actions:raise({
                 type: "retry",
                }),
+               guard: ({ context }) => {
+                 // Don't retry if authentication is required
+                 return !context.error?.message?.includes("Authentication required");
+               },
             }
         },
         on: {
@@ -567,8 +591,60 @@ export type TransportFactory = () =>
               },
               ({ context:{retries} }) =>  console.log("retry connection:",retries)
             ],
+            guard: ({ context }) => {
+              // Don't retry if authentication is required
+              return !context.error?.message?.includes("Authentication required");
+            },
+          },
+          authenticate: {
+            target: "authenticating",
+            actions: [
+              assign({
+                error: undefined,
+              }),
+            ],
           },
         },
+      },
+      authenticating: {
+        entry: ({ context }) => {
+          console.log("Entering authenticating state", context.error);
+        },
+        on: {
+          authenticate: {
+            target: "connecting",
+            actions: [
+              assign({
+                error: undefined,
+                retries: ({ context }) => context.retries + 1,
+              }),
+            ],
+          },
+          retry: {
+            target: "connecting",
+            actions: [
+              assign({
+                error: undefined,
+                retries: ({ context }) => context.retries + 1,
+                client: undefined,
+                transport: undefined,
+                pendingResourceReads: new Set(),
+              }),
+            ],
+          },
+        },
+        // after: {
+        //   30000: {
+        //     target: "failed",
+        //     actions: assign({
+        //       error: {
+        //         message: "Authentication timeout",
+        //         stack: "",
+        //         code: 408,
+        //       },
+        //     }),
+        //   },
+        // },
       },
       cleaning: {
         invoke: {
@@ -714,7 +790,8 @@ export namespace MCPClient {
     | "discovering"
     | "ready"
     | "failed"
-    | "cleaning";
+    | "cleaning"
+    | "authenticating";
 
   export type Error = {
     message: string;
@@ -822,6 +899,10 @@ export namespace MCPClient {
       }
     | {
         type: "cleanup";
+      }
+    | {
+        type: "authenticate";
+        authCode?: string;
       }
     | {
         type: "@mcp.error";

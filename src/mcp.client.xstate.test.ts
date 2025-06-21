@@ -1,6 +1,6 @@
 import { jest } from '@jest/globals';
 import { createActor } from 'xstate';
-import mcpClientMachine from './mcp.client.xstate';
+import mcpClientMachine from './mcp.client';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 

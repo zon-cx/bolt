@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createActor } from "xstate";
-import mcpClientMachine from "./mcp.client.xstate.js";
+import mcpClientMachine from "./mcp.client";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { Resource } from "@modelcontextprotocol/sdk/types.js";
 
