@@ -26,9 +26,10 @@ import {
 } from "./registry.mcp.server.auth";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { Subscription } from "@xstate/store";
-import clientManagerMachine, { ServerConfig, NamespacedDataStore } from "./registry.mcp.client.xstate";
+import clientManagerMachine, { ServerConfig } from "./registry.mcp.client.xstate";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { connectYjs } from "./store.yjs";
+import { NamespacedDataStore } from "./registry.mcp.client.namespace";
 
 const app = express();
 app.use(express.json());
@@ -246,11 +247,11 @@ async function createSessionTransport(sessionInfo: {session?: string; auth: Auth
     debouncedPromptChange();
   });
 
-  agent.onClose(() => {
-    toolsSubscription.unsubscribe();
-    resourcesSubscription.unsubscribe();
-    promptsSubscription.unsubscribe();
-  });
+  // agent.onClose(() => {
+  //   toolsSubscription.unsubscribe();
+  //   resourcesSubscription.unsubscribe();
+  //   promptsSubscription.unsubscribe();
+  // });
 
   // Clean up transport when closed
   transport.onclose = () => {
@@ -323,7 +324,7 @@ app.all("/mcp", requireAuth, async (req, res) => {
   await transport.handleRequest(req, res, req.body);
 });
 
-const port = parseInt(env.MCP_SERVER_PORT || "8080", 10);
+const port = parseInt(env.PORT || "8080", 10);
 
 app.listen(port, () => {
   console.log(`MCP Gateway Server running on http://localhost:${port}`);

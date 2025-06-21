@@ -1,12 +1,13 @@
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { MCPClientManager } from "./registry.mcp.client";
 import { connectYjs } from "./store.yjs";
 import { yMapIterate } from "@cxai/stream";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import * as Y from "yjs";
 import { env } from "process";
+import { ActorRefFromLogic,createActor } from "xstate";
+import mcpAgent, { ServerConfig } from "./registry.mcp.client.xstate";
+import { NamespacedDataStore } from "./registry.mcp.client.namespace";
 
-export const mcpAgents: Record<string, MCPClientManager> = {};
 
 export type serverConfig = {
   id: string;
@@ -22,14 +23,11 @@ export type agentConfig = {
 };
 
 const doc = connectYjs("@mcp.registry");
-const agentServerStore = (agentId: string): Y.Map<serverConfig> => {
-  return doc.getMap<serverConfig>(`${agentId}`);
-};
 
 const agentsStore = doc.getMap<agentConfig>("agents");
 
 export class MCPAgentManager {
-  public mcpAgents: Record<string, MCPClientManager & agentConfig> = {};
+  public mcpAgents: Record<string, ActorRefFromLogic<typeof mcpAgent> & agentConfig> = {};
   constructor(public store: Y.Map<agentConfig> = agentsStore) {
     // this.initFromStore();
   }
@@ -65,33 +63,16 @@ export class MCPAgentManager {
     });
 
     if (!this.mcpAgents[agentId]) {
-      const mcpStore = doc.getMap<serverConfig>(agentId);
-
-      mcpStore.set("store", {
-        id: "store",
-        url: "https://store-mcp.val.run/mcp",
-        name: "store",
-        version: "1.0.0",
+      const mcpActor = createActor(mcpAgent, {
+        input: {
+           auth,
+           sessionId,
+           store:doc.getMap<ServerConfig>(agentId),
+           dataStore:new NamespacedDataStore()
+        },
       });
-
-      env.MCP_REGISTRY_URL &&
-        mcpStore.set("registry", {
-          id: "registry",
-          url: `${env.MCP_REGISTRY_URL}/${agentId}`,
-          name: "registry",
-          version: "1.0.0",
-        });
-
-      // @ts-ignore
-      const agent = new MCPClientManager({
-        auth,
-        session: sessionId,
-        // @ts-ignore
-        store: mcpStore,
-        ...this.store.get(agentId)!,
-      });
-
-      this.mcpAgents[agentId] = Object.assign(agent, agentsStore.get(agentId)!);
+      mcpActor.start();
+      this.mcpAgents[agentId] = Object.assign(mcpActor, agentsStore.get(agentId)!);
     }
 
     return this.mcpAgents[agentId]!;
