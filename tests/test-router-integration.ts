@@ -1,5 +1,5 @@
 import { createActor } from 'xstate';
-import mcpClientMachine from '../src/mcp.client.xstate.js';
+import mcpClientMachine from '../src/mcp.client.js';
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
 // Test configuration
