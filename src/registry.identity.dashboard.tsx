@@ -81,12 +81,10 @@ const agentMiddleware = createMiddleware(async (c, next) => {
     return c.redirect("/login");
   }
 
-  c.set("agentId", agentId); 
-  const authProvider = c.get("oauthProvider")!;
-  console.log("agentId", agentId);
   const url = agentId ? `${env.MCP_GATEWAY_URL}/${agentId}` : env.MCP_GATEWAY_URL!;
-
-  const connection = agentId && connections.has(agentId) ?  connections.get(agentId)! : connections.set(agentId,createActor(mcpClientMachine, {
+  
+  const authProvider = c.get("oauthProvider")!;
+  const connection = connections.has(authProvider.id) ?  connections.get(authProvider.id)! : connections.set(authProvider.id,createActor(mcpClientMachine, {
       input: {
         url: new URL(url),
         options: {
@@ -100,32 +98,17 @@ const agentMiddleware = createMiddleware(async (c, next) => {
             }),
         },
       },
-    } )).get(agentId)!.start();
+    } )).get(authProvider.id)!.start();
   
   // Wait for connection to be ready, failed, or authenticating
   await waitFor(connection, (state) => state.matches("ready") || state.matches("failed") || state.matches("authenticating") );
   const snapshot = connection.getSnapshot();
   
-  if(snapshot.matches("authenticating")) {
-    const authUrl = await new Promise<string | null>((resolve) => {
-      if(authProvider.authorizationUrl.get()) {
-        resolve(authProvider.authorizationUrl.get().toString());
-      }
-      const subscription = authProvider.authorizationUrl.subscribe((url) => {
-        subscription.unsubscribe();
-        resolve(url?.toString() || null);
-      });
-      
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        subscription.unsubscribe();
-        resolve(null);
-      }, 5000);
-    });
-    if(authUrl) {
-      return c.redirect(authUrl, 302);
+  if(snapshot.matches("authenticating")) { 
+    if(authProvider.authorizationUrl.get()) {
+      return c.redirect(authProvider.authorizationUrl.get(), 302);
     } else {
-      return c.json({ error: snapshot.context.error?.message || "Authentication required", code: snapshot.context.error?.code || 401 }, snapshot.context.error?.code || 401);
+      return c.json({ error: snapshot.context.error?.message || "Authentication required", code: snapshot.context.error?.code || 401 }, 401);
     }
   }
   if(snapshot.matches("failed")) {
@@ -139,22 +122,14 @@ const agentMiddleware = createMiddleware(async (c, next) => {
     );
   } 
 
-  agentId && connections.set(agentId, connection);
   c.set("connection", connection);
-  c.set("agent", { id: agentId, name: "Agent", version: "1.0.0", url });
-
-  try {
-    const info = await connection.getSnapshot().context.client?.callTool({
+  const info = await connection.getSnapshot().context.client?.callTool({
       name: "@registry:info",
       arguments: {},
     });
     console.log("agent info", info);
     c.set("agent", info?.structuredContent || { id: agentId, name: "Agent", version: "1.0.0", url });
-  } catch (error: any) {
-    console.error("Failed to get agent info:", error);
-    throw error; 
-  }
-    
+     
   
   await next();
 });
@@ -275,7 +250,7 @@ app.get("/oauth/callback", async function (c) {
     }; 
     
     // Check if we already have a connection for this user
-    let connection = connections.get(sub!);
+    let connection = connections.get(oauthProvider.id);
     if (!connection) {
       // Create new connection
       connection = createActor(mcpClientMachine, {
@@ -291,7 +266,7 @@ app.get("/oauth/callback", async function (c) {
         },
       });
       connection.start();
-      connections.set(sub!, connection);
+      connections.set(oauthProvider.id!, connection);
     } else {
       // If connection exists and is in authenticating state, trigger authenticate event
       const snapshot = connection.getSnapshot();
