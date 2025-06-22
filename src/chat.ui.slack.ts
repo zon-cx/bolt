@@ -265,8 +265,12 @@ const app = new App({
       method: "GET",
       handler: async (req, res) => {
         res.writeHead(200, { "Content-Type": "text/html" });
-        res.end(
-          "<h1>Slack MCP Chat</h1><p>Install application <a>https://api.slack.com/apps/A08RC4RM7JN</a></p>"
+        res.end(`<div >
+          <h1>Slack MCP Chat</h1>
+          <a href="https://slack.com/oauth/v2/authorize?client_id=${env.SLACK_BOT_CLIENT_ID}&scope=app_mentions:read,assistant:write,bookmarks:read,calls:read,calls:write,canvases:read,canvases:write,channels:history,channels:join,channels:read,channels:write.invites,chat:write,chat:write.customize,commands,dnd:read,emoji:read,files:read,files:write,groups:history,groups:read,groups:write,groups:write.invites,groups:write.topic,im:history,im:read,im:write,im:write.topic,incoming-webhook,links:read,metadata.message:read,mpim:history,mpim:read,mpim:write,mpim:write.topic,pins:read,reactions:read,reactions:write,users:read,users:write,workflow.steps:execute,workflows.templates:read,workflows.templates:write,links.embed:write,links:write,usergroups:write&user_scope=">
+            <img alt="Add to Slack" height="40" width="139" src="https://platform.slack-edge.com/img/add_to_slack.png" srcSet="https://platform.slack-edge.com/img/add_to_slack.png 1x, https://platform.slack-edge.com/img/add_to_slack@2x.png 2x" />
+            </a>
+            </div>`
         );
       },
     },
