@@ -8,6 +8,12 @@ import { ActorRefFromLogic,createActor } from "xstate";
 import mcpAgent, { ServerConfig } from "./registry.mcp.client";
 import { NamespacedDataStore } from "./registry.mcp.client.namespace";
 
+export type AuthConfig = {
+  type: "none" | "passthrough" | "bearer" | "basic";
+  token?: string;
+  clientId?: string;
+  clientSecret?: string;
+};
 
 export type serverConfig = {
   id: string;
@@ -15,6 +21,7 @@ export type serverConfig = {
   name?: string;
   version: string;
   type?: "streamable" | "sse";
+  auth?: AuthConfig;
 };
 
 export type agentConfig = {

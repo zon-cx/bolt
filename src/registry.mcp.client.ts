@@ -16,6 +16,7 @@ import mcpClientMachine, { MCPClient } from "./mcp.client.js";
 import { env, version } from "node:process";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { NamespacedDataStore } from "./registry.mcp.client.namespace.js";
+import { AuthConfig } from "./registry.identity.store.js";
  
 
 export type ServerConfig = {
@@ -24,6 +25,7 @@ export type ServerConfig = {
   name?: string;
   version?: string;
   type?: "streamable" | "sse";
+  auth?: AuthConfig;
   status?: string;
   error?: {
     message: string;
@@ -70,7 +72,6 @@ const clientManagerSetup = setup({
                 id: key,
                 transportType: config.type || "streamable",
                 type: "connect"
-
               });
             }
           }
@@ -118,6 +119,7 @@ const clientManagerSetup = setup({
               name: contents[0].name,
               version: contents[0].version,
               type: contents[0].type || "streamable",
+              auth: contents[0].auth,
             });
           }
         }); 
@@ -237,7 +239,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
         // Handle new connections
         connect: {
           actions: enqueueActions(({ context, enqueue, event }) => {
-            const { url, name, version, id, type , transportType} = event as any;
+            const { url, name, version, id, type , transportType, auth} = event as any;
             
             // Emit connecting event
             enqueue.emit({
@@ -269,6 +271,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                         auth: context.auth,
                         session: context.sessionId,
                         transportType: transportType || "streamable",
+                        authConfig: auth,
                       },
                     },
                   });

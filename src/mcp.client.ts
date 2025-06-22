@@ -36,6 +36,8 @@ import {
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { createAuthProvider } from "./mcp.client.auth.js";
+import { AuthConfig } from "./registry.identity.store.js";
 
 export type TransportFactory = () =>
   | StreamableHTTPClientTransport
@@ -60,7 +62,7 @@ export type TransportFactory = () =>
       connection: fromPromise(
         async ({ input }: { input: MCPClient.ConnectionInput }) => {
           const { url, options } = input;
-          const { info, auth, transport:transportFactory, authProvider, transportType } = options;
+          const { info, auth, transport:transportFactory, authProvider, transportType, authConfig } = options;
           
           console.log("connecting to", url.toString(), "with transport type:", transportType || "streamable");
           
@@ -81,10 +83,13 @@ export type TransportFactory = () =>
                 : undefined,
             });
           } else {
+            // Create auth provider based on config
+            const resolvedAuthProvider = authProvider || createAuthProvider(authConfig, auth);
+            
             // Default to streamable transport
             transport = new StreamableHTTPClientTransport(new URL(url), {
-              authProvider: authProvider,
-              requestInit: auth?.token
+              authProvider: resolvedAuthProvider,
+              requestInit: auth?.token && !authConfig
                 ? {
                     headers: {
                       Authorization: `Bearer ${auth.token}`,
@@ -835,6 +840,7 @@ export namespace MCPClient {
       session?: string;
       authProvider?: OAuthClientProvider;
       transportType?: string;
+      authConfig?: AuthConfig;
     };
   };
 
@@ -943,6 +949,7 @@ export namespace MCPClient {
       auth?: AuthInfo;
       session?: string;
       transportType?: string;
+      authConfig?: AuthConfig;
     };
   };
 
@@ -956,6 +963,7 @@ export namespace MCPClient {
       session?: string;
       authProvider?: OAuthClientProvider;
       transportType?: string;
+      authConfig?: AuthConfig;
     };
     instructions: string | undefined;
     tools: Tool[];

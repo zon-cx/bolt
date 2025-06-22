@@ -238,6 +238,12 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
                         code: z.number().optional(),
                         stack: z.string().optional(),
                     }).optional(),
+                    auth: z.object({
+                        type: z.enum(["none", "passthrough", "bearer", "basic"]),
+                        token: z.string().optional(),
+                        clientId: z.string().optional(),
+                        clientSecret: z.string().optional(),
+                    }).optional(),
                     type: z.enum(["streamable", "sse", "stdio"]).optional(),
                     status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ]).optional(),
                 }))},
@@ -287,12 +293,23 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
             url: z.string().url(),
             name: z.string().optional(),
             type: z.enum(["streamable", "sse"]).default("streamable"),
+            auth_type: z.enum(["none", "passthrough", "bearer", "basic"]).default("passthrough").optional(),
+            auth_token: z.string().optional(),
+            auth_clientId: z.string().optional(),   
+            auth_clientSecret: z.string().optional(),
+         
         },
         outputSchema: {
             name: z.string(),
             url: z.string(),
             version: z.string().optional(),
             type: z.enum(["streamable", "sse"]).optional(),
+            auth: z.object({
+                type: z.enum(["none", "passthrough", "bearer", "basic"]),
+                token: z.string().optional(),
+                clientId: z.string().optional(),
+                clientSecret: z.string().optional(),
+            }).optional(),
             error: z.object({
                 message: z.string(),
                 code: z.string().optional(),
@@ -308,18 +325,22 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
             name: params.name || params.url,
             version: "1.0.0",
             type: params.type || "streamable",
+            auth:  {
+                type: params.auth_type || "passthrough",
+                token: params.auth_token,
+                clientId: params.auth_clientId,
+                clientSecret: params.auth_clientSecret,
+            }
         });
          
         return {
-            content: [{
+            content: [{ 
                 type: "text",
-                text: `Connected to MCP server ${params.url} with id ${connection.id} using ${params.type} transport`,
+                text: `Connected to MCP server ${params.url} with id ${connection.id} using ${params.type} transport${params.auth ? ` and ${params.auth.type} auth` : ''}`,
             }],
-            structuredContent: {
-                name: params.name || connection.id,
-                url: params.url,
-                version: connection.version,
-                type: params.type,
+            structuredContent:{
+                ...connection,
+                id: undefined,
             }
         }
     });
@@ -404,7 +425,13 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
             tools: z.number().optional(),
             prompts: z.number().optional(),
             resources: z.number().optional(),
-            resourceTemplates: z.number().optional()
+            resourceTemplates: z.number().optional(),
+            auth: z.object({
+                type: z.enum(["none", "passthrough", "bearer", "basic"]),
+                token: z.string().optional(),
+                clientId: z.string().optional(),
+                clientSecret: z.string().optional(),
+            }).optional(),
         },
         description: "Get information about a specific MCP connection",
     }, async function (args: { [x: string]: any }, extra: RequestHandlerExtra<any,any>) {
@@ -429,7 +456,7 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
             return {
                 content: [{
                     type: "text",
-                    text: `MCP server info for ${args.id}: ${connection.name} (${connection.url})`,
+                    text: `MCP server info for ${args.id}: ${connection.name} (${connection.url})${connection.auth ? ` with ${connection.auth.type} auth` : ''}`,
                 }],
                 structuredContent: connection
             }
