@@ -24,7 +24,14 @@ export type agentConfig = {
 
 const doc = connectYjs("@mcp.registry");
 
+type Session = {
+  id: string;
+  created: string;
+  auth: AuthInfo;
+};
+
 const agentsStore = doc.getMap<agentConfig>("agents");
+const sessionsStore = doc.getMap<Session>("sessions");
 
 export class MCPAgentManager {
   public mcpAgents: Record<string, ActorRefFromLogic<typeof mcpAgent> & agentConfig> = {};
@@ -53,29 +60,26 @@ export class MCPAgentManager {
   }) {
     const agentId = id || (auth?.extra?.sub as string) || "default";
     const agentName = (auth?.extra?.name as string) || agentId;
-    const sessionId = session || agentId;
     const agentData = this.store.get(agentId) || {};
-    agentsStore.set(agentId, {
+
+    const agent = agentsStore.set(agentId, {
       id: agentId,
       name: agentName,
       created: new Date().toISOString(),
       ...agentData,
+    }); 
+
+    const sessionData = sessionsStore.set(session || agentId, {
+      id: session || agentId,
+      auth,
+      created: new Date().toISOString(),
     });
 
-    if (!this.mcpAgents[agentId]) {
-      const mcpActor = createActor(mcpAgent, {
-        input: {
-           auth,
-           sessionId,
-           store:doc.getMap<ServerConfig>(agentId),
-           dataStore:new NamespacedDataStore()
-        },
-      });
-      mcpActor.start();
-      this.mcpAgents[agentId] = Object.assign(mcpActor, agentsStore.get(agentId)!);
+    return {
+      ...agent,
+      session: sessionData,
     }
 
-    return this.mcpAgents[agentId]!;
   }
 
   async listAgents() {
