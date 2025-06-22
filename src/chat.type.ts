@@ -35,12 +35,16 @@ export namespace Chat {
     blocks: Block[]; 
   };
 
+  export type ErrorEvent = {
+      "type": "@error.message-handler";
+      "error": Error;
+    }
  
   export type Title = { type: "@chat.title"; title: string };
 
   export type Status = { type: "@chat.status"; status: string };
-
-  export type Event = Prompts | Message | Blocks | Title | Status;
+  
+  export type Event = Prompts | Message | Blocks | Title | Status | ErrorEvent;
   }
   export namespace Messages {
     export type ToolMessageEvent = {
@@ -69,14 +73,15 @@ export namespace Chat {
       content: string;
       timestamp: string;
       user: string;
-    } 
+    }
 
     export type Event =
       | ToolMessageEvent
       | AssistantMessageEvent
       | SystemMessageEvent
       | UserMessgeEvent
-      | InteruptMessageEvent;
+      | InteruptMessageEvent
+        | ErrorEvent;
 
     export type Details = {
       type: `@message.${string}`;
@@ -89,6 +94,8 @@ export namespace Chat {
       messages: [Messages.Event, ...Messages.Event[]];
       context: Omit<Session.Context, "messages">;
     };
+
+   
 
     export type Handler = ActorLogic<any, Chat.Messages.Event, Input, any, Chat.Say.Event>;
   }

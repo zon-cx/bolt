@@ -2,13 +2,13 @@ import { fromEventAsyncGenerator } from "@cxai/stream";
 import { jsonSchema, generateObject, streamText, smoothStream } from "ai";
 import { azure } from "@ai-sdk/azure";
 import {  ActorLogic, waitFor } from "xstate";
-import { Chat } from "./chat";
+import { Chat } from "./chat.type";
 import { Session } from "./chat.handler.thread";
 import { Tools } from "./chat.handler.thread";
 import { aiTools } from "./chat.handler.tools";
- import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
+import { MCPClient } from "./mcp.client";
 
-export function fromMcpBootstrap(client:McpClient){
+export function fromMcpBootstrap(client:MCPClient){
  return fromEventAsyncGenerator(async function* ({
   input,
   system

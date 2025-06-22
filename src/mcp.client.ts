@@ -10,6 +10,7 @@ import {
   fromCallback,
   sendTo,
   raise,
+  ActorRefFromLogic,
 } from "xstate";
 import {
   ToolListChangedNotificationSchema,
@@ -59,12 +60,13 @@ export type TransportFactory = () =>
       connection: fromPromise(
         async ({ input }: { input: MCPClient.ConnectionInput }) => {
           const { url, options } = input;
-          const { info, auth, transport:transportFactory } = options;
+          const { info, auth, transport:transportFactory, authProvider } = options;
           
           console.log("connecting to", url.toString());
           
           // Create transport
           const transport =transportFactory? transportFactory() : new StreamableHTTPClientTransport(new URL(url), {
+            authProvider: authProvider,
             requestInit: auth?.token
               ? {
                   headers: {
@@ -293,7 +295,6 @@ export type TransportFactory = () =>
       serverCapabilities: undefined as ServerCapabilities | undefined,
       error: undefined as MCPClient.Error | undefined,
       client: undefined as Client | undefined,
-      transport: undefined as ReturnType<TransportFactory> | undefined,
       retries: 0,
       pendingResourceReads: new Set<string>(),
     }), 
@@ -814,6 +815,7 @@ export namespace MCPClient {
       transport?: TransportFactory;
       auth?: AuthInfo;
       session?: string;
+      authProvider?: OAuthClientProvider;
     };
   };
 
@@ -915,6 +917,7 @@ export namespace MCPClient {
   export type Input = {
     url: URL;
     options?: {
+      authProvider?: OAuthClientProvider;
       info: ConstructorParameters<typeof Client>[0];
       client?: ConstructorParameters<typeof Client>[1];
       transport?: TransportFactory;
@@ -931,6 +934,7 @@ export namespace MCPClient {
       transport?: TransportFactory;
       auth?: AuthInfo;
       session?: string;
+      authProvider?: OAuthClientProvider;
     };
     instructions: string | undefined;
     tools: Tool[];
@@ -939,10 +943,12 @@ export namespace MCPClient {
     resourceData: Record<string, ResourceData>;
     resourceTemplates: ResourceTemplate[];
     serverCapabilities: ServerCapabilities | undefined;
-    error: Error | undefined;
+    error?: Error | undefined;
     client: Client | undefined;
-    transport: ReturnType<TransportFactory> | undefined;
+    transport?: ReturnType<TransportFactory> | undefined;
     retries: number;
     pendingResourceReads: Set<string>;
   };
 }
+
+export type MCPClient = ActorRefFromLogic<typeof mcpClientMachine>;

@@ -7,6 +7,7 @@ import {
   CallToolRequest,
   CallToolResult,
   CompleteRequestSchema,
+  GetPromptRequestSchema,
   ReadResourceRequestSchema,
   ResourceUpdatedNotificationSchema,
   type CallToolRequestSchema,
@@ -197,6 +198,24 @@ export class NamespacedDataStore {
       const readResult = await client.readResource({uri: resourceUri, name: resourceName, ...otherParams}, options);
       return readResult;
     }
+
+  public async getPrompt( { name, ...params }: Zod.infer<typeof GetPromptRequestSchema>["params"], 
+    {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<GetPromptRequest, any>,
+    options?: RequestOptions) {
+      const {server, name: promptName} = await this.findSource(this.prompts, name);
+      const mcpActor = this.mcpActors[server];
+      if(!mcpActor){
+        throw new Error(`MCP client for server ${server} not found`);
+      }
+      const mcpSnapshot = mcpActor.getSnapshot();
+      if(!mcpSnapshot.matches("ready") || !mcpSnapshot.context.client){
+        throw new Error(`MCP client for server ${server} not ready`);
+      }
+      const client = mcpSnapshot.context.client;
+      const getPromptResult = await client.getPrompt({name: promptName, ...params}, options);
+      return getPromptResult;
+    }
+    
 
  public async complete( { ref, ...params }: Zod.infer<typeof CompleteRequestSchema>["params"],
     {authInfo, sendRequest, sendNotification, signal, requestId, sessionId, _meta}: RequestHandlerExtra<CompleteRequest, any>,
