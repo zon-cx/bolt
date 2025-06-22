@@ -388,7 +388,8 @@ export namespace ClientManager {
   export type Event =
     | {
         type: "connect";
-      } & ServerConfig
+        transport: string;
+      } & Omit<ServerConfig, "type">
     | {
         type: "disconnect";
         id: string;

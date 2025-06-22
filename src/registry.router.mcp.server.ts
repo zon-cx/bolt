@@ -20,7 +20,7 @@ import {createActor} from "xstate";
 
 import {authRouter, requireAuth,} from "./registry.mcp.server.auth";
 import {AuthInfo} from "@modelcontextprotocol/sdk/server/auth/types.js";
-import clientManagerMachine, {ServerConfig,} from "./registry.mcp.client.xstate";
+import clientManagerMachine, {ServerConfig,} from "./registry.mcp.client";
 import {connectYjs} from "./store.yjs";
 import {NamespacedDataStore} from "./registry.mcp.client.namespace";
 

@@ -2,10 +2,11 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createActor } from "xstate";
 import { Map as YMap } from "yjs";
-import clientManagerMachine, { type ServerConfig, NamespacedDataStore } from "./registry.mcp.client.xstate.js";
+import clientManagerMachine, { type ServerConfig } from "./registry.mcp.client.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import * as dotenv from "dotenv";
 import { connectYjs } from "./store.yjs.js";
+import {NamespacedDataStore} from "@/registry.mcp.client.namespace.ts";
 
 dotenv.config();
 

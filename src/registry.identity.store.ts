@@ -5,7 +5,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import * as Y from "yjs";
 import { env } from "process";
 import { ActorRefFromLogic,createActor } from "xstate";
-import mcpAgent, { ServerConfig } from "./registry.mcp.client.xstate";
+import mcpAgent, { ServerConfig } from "./registry.mcp.client";
 import { NamespacedDataStore } from "./registry.mcp.client.namespace";
 
 
