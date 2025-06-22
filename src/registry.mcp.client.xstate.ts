@@ -23,6 +23,7 @@ export type ServerConfig = {
   url: string;
   name?: string;
   version?: string;
+  type?: "streamable" | "sse";
   status?: string;
   error?: {
     message: string;
@@ -63,11 +64,13 @@ const clientManagerSetup = setup({
             const config = store.get(key);
             if (config && !config.status) {
               sendBack({
-                type: "connect",
                 auth,
                 sessionId,
                 ...config,
                 id: key,
+                transportType: config.type || "streamable",
+                type: "connect"
+
               });
             }
           }
@@ -99,9 +102,7 @@ const clientManagerSetup = setup({
               // Add to store instead of sending connect event
               store.set(id, {
                 id,
-                url: contents[0].url,
-                name: contents[0].name,
-                version: contents[0].version,
+                ...contents[0]
               });
             }
           }
@@ -116,6 +117,7 @@ const clientManagerSetup = setup({
               url: contents[0].url,
               name: contents[0].name,
               version: contents[0].version,
+              type: contents[0].type || "streamable",
             });
           }
         }); 
@@ -158,6 +160,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                         },
                         auth: context.auth,
                         session: context.sessionId,
+                        transportType: "streamable",
                       },
                     },
                   });
@@ -234,7 +237,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
         // Handle new connections
         connect: {
           actions: enqueueActions(({ context, enqueue, event }) => {
-            const { url, name, version, id } = event;
+            const { url, name, version, id, type , transportType} = event as any;
             
             // Emit connecting event
             enqueue.emit({
@@ -244,9 +247,10 @@ const clientManagerMachine = clientManagerSetup.createMachine({
               name,
               version,
               id,
+              transportType,
               auth: context.auth,
               sessionId: context.sessionId,
-            });
+            } as any);
 
             // Spawn new MCP client if it doesn't exist
             if (!context.mcpActors[id]) {
@@ -264,6 +268,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                         },
                         auth: context.auth,
                         session: context.sessionId,
+                        transportType: transportType || "streamable",
                       },
                     },
                   });

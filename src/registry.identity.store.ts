@@ -14,6 +14,7 @@ export type serverConfig = {
   url: string;
   name?: string;
   version: string;
+  type?: "streamable" | "sse";
 };
 
 export type agentConfig = {
@@ -36,17 +37,8 @@ const sessionsStore = doc.getMap<Session>("sessions");
 export class MCPAgentManager {
   public mcpAgents: Record<string, ActorRefFromLogic<typeof mcpAgent> & agentConfig> = {};
   constructor(public store: Y.Map<agentConfig> = agentsStore) {
-    // this.initFromStore();
   }
 
-  async initFromStore() {
-    const iterator = yMapIterate<agentConfig>(this.store);
-    for await (const [id] of iterator) {
-      const config = this.store.get(id);
-      // if (!config) continue;
-      // this.init(config);
-    }
-  }
 
   init({
     session,

@@ -60,21 +60,39 @@ export type TransportFactory = () =>
       connection: fromPromise(
         async ({ input }: { input: MCPClient.ConnectionInput }) => {
           const { url, options } = input;
-          const { info, auth, transport:transportFactory, authProvider } = options;
+          const { info, auth, transport:transportFactory, authProvider, transportType } = options;
           
-          console.log("connecting to", url.toString());
+          console.log("connecting to", url.toString(), "with transport type:", transportType || "streamable");
           
           // Create transport
-          const transport =transportFactory? transportFactory() : new StreamableHTTPClientTransport(new URL(url), {
-            authProvider: authProvider,
-            requestInit: auth?.token
-              ? {
-                  headers: {
-                    Authorization: `Bearer ${auth.token}`,
+          let transport: StreamableHTTPClientTransport | SSEClientTransport;
+          
+          if (transportFactory) {
+            transport = transportFactory();
+          } else if (transportType === "sse") {
+            // Create SSE transport
+            transport = new SSEClientTransport(new URL(url), {
+              requestInit: auth?.token
+                ? {
+                    headers: {
+                      Authorization: `Bearer ${auth.token}`,
+                    }
                   }
-                }
-              : undefined,
-          });
+                : undefined,
+            });
+          } else {
+            // Default to streamable transport
+            transport = new StreamableHTTPClientTransport(new URL(url), {
+              authProvider: authProvider,
+              requestInit: auth?.token
+                ? {
+                    headers: {
+                      Authorization: `Bearer ${auth.token}`,
+                    }
+                  }
+                : undefined,
+            });
+          }
 
           // Create client
           const client = new Client({
@@ -816,6 +834,7 @@ export namespace MCPClient {
       auth?: AuthInfo;
       session?: string;
       authProvider?: OAuthClientProvider;
+      transportType?: string;
     };
   };
 
@@ -923,6 +942,7 @@ export namespace MCPClient {
       transport?: TransportFactory;
       auth?: AuthInfo;
       session?: string;
+      transportType?: string;
     };
   };
 
@@ -935,6 +955,7 @@ export namespace MCPClient {
       auth?: AuthInfo;
       session?: string;
       authProvider?: OAuthClientProvider;
+      transportType?: string;
     };
     instructions: string | undefined;
     tools: Tool[];

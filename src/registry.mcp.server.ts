@@ -219,12 +219,7 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
             return {
                 contents: [{
                     uri: uri.href,
-                    text: JSON.stringify({
-                        ...server,
-                        id: serverId,
-                        url: server.url,
-                        name: server.name
-                    }, null, 2),
+                    text: JSON.stringify(server, null, 2),
                     mimeType: "application/json"
                 }]
             };
@@ -243,6 +238,7 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
                         code: z.number().optional(),
                         stack: z.string().optional(),
                     }).optional(),
+                    type: z.enum(["streamable", "sse", "stdio"]).optional(),
                     status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ]).optional(),
                 }))},
         description: "List all available MCP servers",
@@ -290,12 +286,13 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
         inputSchema: {
             url: z.string().url(),
             name: z.string().optional(),
-            type: z.enum(["streamable"]).default("streamable"),
+            type: z.enum(["streamable", "sse"]).default("streamable"),
         },
         outputSchema: {
             name: z.string(),
             url: z.string(),
             version: z.string().optional(),
+            type: z.enum(["streamable", "sse"]).optional(),
             error: z.object({
                 message: z.string(),
                 code: z.string().optional(),
@@ -310,17 +307,19 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
             url: params.url,
             name: params.name || params.url,
             version: "1.0.0",
+            type: params.type || "streamable",
         });
          
         return {
             content: [{
                 type: "text",
-                text: `Connected to MCP server ${params.url} with id ${connection.id}`,
+                text: `Connected to MCP server ${params.url} with id ${connection.id} using ${params.type} transport`,
             }],
             structuredContent: {
                 name: params.name || connection.id,
                 url: params.url,
                 version: connection.version,
+                type: params.type,
             }
         }
     });

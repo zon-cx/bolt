@@ -51,6 +51,7 @@ export type serverConfig = {
   url: string;
   name?: string;
   version?: string;
+  type?: "streamable" | "sse";
 };
 
 // Separate stores for namespaced data management
