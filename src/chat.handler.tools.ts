@@ -1,9 +1,9 @@
 import { jsonSchema,  Schema,  tool, ToolExecutionOptions } from "ai";
-import {CallToolRequestSchema, CallToolResult, CallToolResultSchema, Tool as McpTool} from "@modelcontextprotocol/sdk/types.js";
+import {  CallToolResult, CallToolResultSchema, Tool as McpTool} from "@modelcontextprotocol/sdk/types.js";
 import { MCPClient } from "./mcp.client";
- 
+import {z} from "zod";
 export async function aiTools<TOOLS extends McpTool[]>(client:MCPClient) {
-    const {tools}= await client.getSnapshot().context;
+    const {tools}= client.getSnapshot().context;
     return tools.reduce(
       (acc, t) => ({
         ...acc,

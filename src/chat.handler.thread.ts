@@ -10,8 +10,7 @@ import {
 } from "xstate";
 import{ fromMcpMessageHandler } from "./chat.handler.message.ts";
 import { Bootstrap, fromMcpBootstrap } from "./chat.handler.bootstrap.ts";
-import { Chat } from "./chat.type";
-import { Tool, ToolCall, ToolResult } from "ai";
+import {Chat, Session, Tools} from "./chat.type";
 import { MCPClient } from "./mcp.client.ts";
 
 // type McpClient = ReturnType<typeof experimental_createMCPClient>;
@@ -20,7 +19,7 @@ export function fromMcpSession(client:MCPClient) {
     types: {} as {
       context: Session.Context;
       events: Session.Event;
-      input?: Optional<Session.Input>;
+      input?: Session.Input;
       actors: {
         message: Chat.Messages.Handler;
         bootstrap: Bootstrap;
@@ -34,7 +33,7 @@ export function fromMcpSession(client:MCPClient) {
       emit: emit(
         (_, e: Chat.Messages.Event | Chat.Say.Event | Tools.Event) => e
       ),
-      reportError:  emit((_e, error:Error)=>({
+      reportError:  emit((_e, error:Session.ErrorEvent["error"])=>({
           type:"@chat.blocks",
           "blocks": [
             {
@@ -123,7 +122,11 @@ export function fromMcpSession(client:MCPClient) {
             target: "listening",
             actions:[({event})=>console.log("bootstrap error",event),{
               type: "reportError",
-              params: ({ event: { error } }) => error,
+              params: ({ event: { error } }) => ({
+                stack: error instanceof Object && "stack" in error ? error.stack as string : undefined,
+                message: error instanceof Object && "message" in error ? error.message as string  : String(error),
+                code:  error instanceof Object && "code" in error ? error.code as number : undefined,
+              }),
             }]
           },
         },
@@ -193,7 +196,11 @@ export function fromMcpSession(client:MCPClient) {
           onError: {
             target: "error",
             actions: assign({
-              error: ({ event: { error } }) => error,
+              error: ({ event: { error } }) => ({
+                stack: error instanceof Object && "stack" in error ? error.stack as string : undefined,
+                message: error instanceof Object && "message" in error ? error.message as string  : String(error),
+                code:  error instanceof Object && "code" in error ? error.code as number : undefined,
+              }),
             }),
           },
         },
@@ -217,7 +224,7 @@ export function fromMcpSession(client:MCPClient) {
 
         entry: {
           type: "reportError",
-          params: ({ event: { error } }) => error,
+          params: ({ context:{error} }) => error,
         },
       },
     },
@@ -237,51 +244,3 @@ declare type NotEmpty<T> = T extends [infer U, ...infer V]
   ? T & [U, ...U[]]
   : never;
 
-export namespace Session {
-  export type Event =
-    | {
-        type: `@session.${string}`;
-      }
-    | {
-        type: "@error.*";
-        error: Error;
-      }
-    | Chat.Messages.Event
-    | Chat.Say.Event
-    | Tools.Event;
-
-  export type Input = {
-    bot?: Record<string, unknown>;
-    thread?: Record<string, unknown>;
-  } & Record<string, unknown>;
-
-  export type Context = {
-    messages: Chat.Messages.Details[];
-    summary?: string;
-    error?: any;
-    thread?: Record<string, unknown>;
-    bot?: Record<string, unknown>;
-    current?: Chat.Messages.Details;
-    session?: string;
-  };
-}
-
-type Optional<T> = {
-  [K in keyof T]?: T[K];
-};
-
-
-export namespace Tools {
-  export type ToolAvailableEvent = {
-    type: "@tool.available";
-    tools: { [key: string]: Tool };
-  };
-  export type ToolCallEvent = {
-    type: "@tool.call";
-  } & ToolCall<string, unknown>;
-  export type ToolResultEvent = {
-    type: "@tool.result";
-  } & ToolResult<string, unknown, unknown>;
-
-  export type Event = ToolAvailableEvent | ToolCallEvent | ToolResultEvent;
-}

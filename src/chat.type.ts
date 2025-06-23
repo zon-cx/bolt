@@ -2,11 +2,10 @@ import {
   CoreAssistantMessage,
   CoreSystemMessage,
   CoreToolMessage,
-  CoreUserMessage,
+  CoreUserMessage, Tool, ToolCall, ToolResult,
 } from "ai";
 import { ActorLogic } from "xstate";
-import { Session } from "./chat.handler.thread";
- 
+  
 export namespace Chat {
   export namespace Say {
 
@@ -35,16 +34,13 @@ export namespace Chat {
     blocks: Block[]; 
   };
 
-  export type ErrorEvent = {
-      "type": "@error.message-handler";
-      "error": Error;
-    }
+
  
   export type Title = { type: "@chat.title"; title: string };
 
   export type Status = { type: "@chat.status"; status: string };
   
-  export type Event = Prompts | Message | Blocks | Title | Status | ErrorEvent;
+  export type Event = | Prompts | Message | Blocks | Title | Status 
   }
   export namespace Messages {
     export type ToolMessageEvent = {
@@ -55,41 +51,37 @@ export namespace Chat {
     export type AssistantMessageEvent = {
       type: "@message.assistant";
     } & CoreAssistantMessage &
-      Details;
+        Details;
 
     export type SystemMessageEvent = {
       type: "@message.system";
     } & CoreSystemMessage &
       Details;
 
-    export type UserMessgeEvent = {
+    export type UserMessageEvent = {
       type: "@message.user";
     } & CoreUserMessage &
       Details;
 
-    export type InteruptMessageEvent = {
-      type: "@message.interupt";
+    export type InterruptMessageEvent = {
+      type: "@message.interrupt";
       role: "system";
-      content: string;
-      timestamp: string;
-      user: string;
-    }
+    } & CoreUserMessage & Details;
 
     export type Event =
       | ToolMessageEvent
       | AssistantMessageEvent
       | SystemMessageEvent
-      | UserMessgeEvent
-      | InteruptMessageEvent
-        | ErrorEvent;
+      | UserMessageEvent
+      | InterruptMessageEvent
 
     export type Details = {
-      type: `@message.${string}`;
-      timestamp: string;
+      type: "@message.user" | "@message.assistant" | "@message.system" | "@message.tool" | "@message.interrupt";
+      timestamp?: string;
       user: string;
       role: "user" | "assistant" | "system" | "tool";
       content: unknown;
-    };
+    }
     export type Input = {
       messages: [Messages.Event, ...Messages.Event[]];
       context: Omit<Session.Context, "messages">;
@@ -100,4 +92,58 @@ export namespace Chat {
     export type Handler = ActorLogic<any, Chat.Messages.Event, Input, any, Chat.Say.Event>;
   }
 
+}
+
+
+export namespace Session {
+  export type Event =   
+      | Chat.Messages.Event
+      | Chat.Say.Event
+      | Tools.Event
+      | ErrorEvent
+
+  export type ErrorEvent = {
+    "type": "@error.message-handler";
+    "error":  {
+      message: string;
+      stack?: string;
+      code?: number;
+    }
+  }
+      
+
+  export type Input = {
+    bot?: Record<string, unknown>;
+    thread?: Record<string, unknown>;
+  } & Record<string, unknown>;
+
+  export type Context = {
+    messages: Chat.Messages.Event[];
+    summary?: string;
+    error?: any;
+    thread?: Record<string, unknown>;
+    bot?: Record<string, unknown>;
+    current?: Chat.Messages.Event;
+    session?: string;
+  };
+}
+
+export type Optional<T> = {
+  [K in keyof T]?: T[K];
+};
+
+
+export namespace Tools {
+  export type ToolAvailableEvent = {
+    type: "@tool.available";
+    tools: { [key: string]: Tool };
+  };
+  export type ToolCallEvent = {
+    type: "@tool.call";
+  } & ToolCall<string, unknown>;
+  export type ToolResultEvent = {
+    type: "@tool.result";
+  } & ToolResult<string, unknown, unknown>;
+
+  export type Event = ToolAvailableEvent | ToolCallEvent | ToolResultEvent;
 }

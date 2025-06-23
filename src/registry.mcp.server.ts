@@ -336,7 +336,7 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
         return {
             content: [{ 
                 type: "text",
-                text: `Connected to MCP server ${params.url} with id ${connection.id} using ${params.type} transport${params.auth ? ` and ${params.auth.type} auth` : ''}`,
+                text: `Connected to MCP server ${params.url} with id ${connection.id} using ${params.type} transport${params.auth_type ? ` and ${params.auth_type} auth` : ''}`,
             }],
             structuredContent:{
                 ...connection,
