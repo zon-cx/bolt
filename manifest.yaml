@@ -128,6 +128,8 @@ applications:
   - name: inspector
     routes:
       - route: 'https://inspector.cfapps.eu12.hana.ondemand.com'
+      - route: 'https://inspector-proxy.cfapps.eu12.hana.ondemand.com'
+        port: 8081
     command: npm run inspector
     stack: cflinuxfs4
     memory: 256M
@@ -137,7 +139,9 @@ applications:
       NODE_OPTIONS: --max-http-header-size=80000
       NODE_ENV: production
       CLIENT_PORT: 8080
-      MCP_PROXY_FULL_ADDRESS: 'https://inspector-server.cfapps.eu12.hana.ondemand.com'
+      SERVER_PORT: 8081
+
+      MCP_PROXY_FULL_ADDRESS: 'https://inspector-proxy.cfapps.eu12.hana.ondemand.com:8081'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
 
@@ -145,8 +149,11 @@ applications:
     routes:
       - route: 'https://inspector-server.cfapps.eu12.hana.ondemand.com'
     command: npm run inspector
+    readiness-health-check-type: none
+    health-check-type: none
+
     stack: cflinuxfs4
-    memory: 256M
+    memory: 524M
     instances: 1
     version: 0.0.2
     env:
