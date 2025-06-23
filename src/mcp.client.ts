@@ -27,6 +27,10 @@ import {
   type ResourceTemplate,
   type ListResourceTemplatesResult,
   type Notification,
+  type Request as McpRequest,
+  CallToolRequest,
+  CallToolResult,
+  CallToolResultSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
@@ -38,7 +42,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { createAuthProvider } from "./mcp.client.auth.js";
 import { AuthConfig } from "./registry.identity.store.js";
-
+import {z, ZodType} from "zod"
 export type TransportFactory = () =>
   | StreamableHTTPClientTransport
   | SSEClientTransport;
@@ -63,7 +67,7 @@ export type TransportFactory = () =>
         async ({ input }: { input: MCPClient.ConnectionInput }) => {
           const { url, options } = input;
           const { info, auth, transport:transportFactory, authProvider, transportType, authConfig } = options;
-          
+
           console.log("connecting to", url.toString(), "with transport type:", transportType || "streamable");
           
           // Create transport
@@ -74,6 +78,7 @@ export type TransportFactory = () =>
           } else if (transportType === "sse") {
             // Create SSE transport
             transport = new SSEClientTransport(new URL(url), {
+              authProvider: authProvider || createAuthProvider(authConfig, auth),
               requestInit: auth?.token
                 ? {
                     headers: {
@@ -84,11 +89,10 @@ export type TransportFactory = () =>
             });
           } else {
             // Create auth provider based on config
-            const resolvedAuthProvider = authProvider || createAuthProvider(authConfig, auth);
             
             // Default to streamable transport
             transport = new StreamableHTTPClientTransport(new URL(url), {
-              authProvider: resolvedAuthProvider,
+              authProvider: authProvider || createAuthProvider(authConfig, auth),
               requestInit: auth?.token && !authConfig
                 ? {
                     headers: {
@@ -128,8 +132,7 @@ export type TransportFactory = () =>
             
             // Get server capabilities
             const serverCapabilities = await client.getServerCapabilities();
-            
-            return {
+             return {
               client,
               transport,
               serverCapabilities,
@@ -221,6 +224,21 @@ export type TransportFactory = () =>
           }
         }
       ),
+
+      requestHandler: fromCallback< MCPClient.Request<ZodType<object>>,  {client:Client } , {type: "@mcp.response"} >(({sendBack, receive, input}) => {
+        const { client } = input;
+        receive(async ({ type, request, resultSchema, options ,onResponse}) => {
+          if (type === "request") {
+            const response = await client.request(request, resultSchema, options);
+            if (onResponse) {
+              await onResponse(response);
+            }
+            sendBack({ type: "@mcp.response", response: response });
+          }
+        });
+      } ),
+        
+     
         
       notificationHandler: fromCallback(
         ({
@@ -562,8 +580,14 @@ export type TransportFactory = () =>
               }),
             ],
           },
-          
-          retry: {
+          "@mcp.error": {
+            actions: [
+              assign({
+                error: ({ event }) => event,
+              }),
+            ],
+          },
+          "reconnect": {
             target: "connecting",
             actions: [
               assign({
@@ -578,6 +602,33 @@ export type TransportFactory = () =>
               },
             ],
           },
+
+
+
+          "ping": {
+            actions: enqueueActions(({ event, enqueue, context }) => {
+              enqueue(async ({ context }) => {
+                try {
+                  const result = await context.client!.ping();
+                  console.log("Ping response:", result);
+                } catch (error:any) { 
+                  enqueue.raise({
+                    type: "@mcp.error",
+                    // @ts-ignore
+                    message: "message" in error ? error.message as string : "Ping failed",
+                    stack: "stack" in error ? error.stack as string : undefined,
+                    code: "code" in error ? (error as any).code as number : 500,
+                  });  
+                  
+                  enqueue.raise({
+                    type: "reconnect", 
+                  });
+               
+                }
+              });
+            }),
+          },
+         
         },
       },
       failed: {
@@ -809,6 +860,8 @@ type Optional<T> = {
 };
 
 export namespace MCPClient {
+
+
   export type ConnectionState =
     | "connecting"
     | "discovering"
@@ -902,7 +955,7 @@ export namespace MCPClient {
       type: "@updates.resources.data";
     } & ResourceData;
 
-    export type Event =
+    export type EmittedEvent =
       | Tools
       | Resources
       | Prompts
@@ -910,14 +963,48 @@ export namespace MCPClient {
       | Notifications
       | ResourceDataUpdate
       | ResourceUpdate;
+
+      export type Event = EmittedEvent 
   }
 
+  export namespace Request {
+    export type Event<T extends ZodType<object> = ZodType<object>, Method extends string = string> = {
+      type: `request`,
+      request: McpRequest & {method: Method},
+      resultSchema: T,
+      options?: IdleRequestOptions,
+      onResponse?: (response: z.infer<T>) => void | Promise<void>
+    }
+ 
+    export type ToolRequest<T extends typeof CallToolResultSchema = typeof CallToolResultSchema> = Event<T, "tools/call">
+    
+
+    export type ToolResponse<ToolResult extends typeof CallToolResultSchema> = {
+      type: "@mcp.response.tool",
+      request: CallToolRequest,
+    }
+  }
+  export type Request<T extends ZodType<object> = ZodType<object>> = {
+    type: "request",
+    request: McpRequest,
+    resultSchema: T,
+    options?: IdleRequestOptions,
+    onResponse?: (response: z.infer<T>) => void | Promise<void>
+  }
+
+  export type Response<T extends ZodType<object> = ZodType<object>> = {
+    type: "@mcp.response",
+    response: z.infer<T>
+  }
+  
   export type Event = |{
     type: "read-resource"; 
     uri: string;
     name: string;
     mimeType: string;
-  }
+  } | {
+    type: "ping";
+  } 
     | {
         type: "reconnect";
       }
@@ -934,8 +1021,8 @@ export namespace MCPClient {
     | {
         type: "@mcp.error";
         message: string;
-        stack: string;
-        code: number;
+        stack?: string;
+        code?: number;
       }
     | Updates.Event;
 
@@ -972,11 +1059,16 @@ export namespace MCPClient {
     resourceData: Record<string, ResourceData>;
     resourceTemplates: ResourceTemplate[];
     serverCapabilities: ServerCapabilities | undefined;
-    error?: Error | undefined;
+    error?: {
+      message: string;
+      stack?: string;
+      code?: number;
+    } | undefined;
     client: Client | undefined;
     transport?: ReturnType<TransportFactory> | undefined;
     retries: number;
     pendingResourceReads: Set<string>;
+    
   };
 }
 
