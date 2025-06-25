@@ -16,23 +16,25 @@ import mcpClientMachine, { MCPClient } from "./mcp.client.js";
 import { env, version } from "node:process";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { NamespacedDataStore } from "./registry.mcp.client.namespace.js";
-import { AuthConfig } from "./registry.identity.store.js";
- 
+import { AuthConfig, AuthSchema } from "./registry.mcp.client.auth.js";
+import { RemoteOAuthClientProvider } from "./registry.mcp.client.auth.js";
+import { z } from "zod";
 
-export type ServerConfig = {
-  id: string;
-  url: string;
-  name?: string;
-  version?: string;
-  type?: "streamable" | "sse";
-  auth?: AuthConfig;
-  status?: string;
-  error?: {
-    message: string;
-    stack?: string;
-    code?: string;
-  };
-};
+export type ServerConfig = z.output<typeof ServerSchema>
+
+export const ServerSchema = z.object({
+  url: z.string().url(),
+  name: z.string(),
+  type: z.enum(["streamable", "sse"]).default("streamable"),
+  version: z.string().optional(),
+  error: z.object({
+    message: z.string(),
+    code: z.string().optional(),
+    stack: z.string().optional(),
+  }).optional(),
+  status: z.enum(["ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected", "initializing"]).optional(),
+  auth: AuthSchema.optional(),
+}).catchall(z.unknown());
 
 
 
@@ -147,10 +149,23 @@ const clientManagerMachine = clientManagerSetup.createMachine({
             const id = self.id;
             const registryUrl = env.MCP_REGISTRY_URL || "https://registry.cfapps.eu12.hana.ondemand.com/mcp";
             const url = new URL(`${registryUrl}/${id}`);
-            
+            const authProvider = new RemoteOAuthClientProvider(id, "@registry", context.sessionId)
+            authProvider.setAuth(context.auth)
+            authProvider.configStore.set("@registry", {
+              id:"@registry",
+              url: url.toString(),
+              name: "@registry",
+              version: version || "1.0.0",
+              type: "streamable",
+              auth:{
+                type: "passthrough",
+                scopes: ["openid", "profile", "email"]
+              }
+            })
             enqueue.assign({
                 mcpActors: ({ context: { mcpActors, sessionId }, spawn }) => {
                   const registryActor = spawn("mcpClient", {
+                    id: "@registry",
                     systemId: `@registry:${sessionId}`,
                     syncSnapshot: true,
                     input: {
@@ -163,6 +178,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                         auth: context.auth,
                         session: context.sessionId,
                         transportType: "streamable",
+                        authProvider: authProvider,
                       },
                     },
                   });
@@ -181,10 +197,10 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                 context.dataStore.registerClient("@registry", registryActor);
               }
             });
-        }),
+         }),
         invoke: {
           src: fromPromise(async ({ input }) => {
-            const { registry } = input;
+            const { registry, store } = input;
             return new Promise((resolve, reject) => {
               const snapshot = registry.getSnapshot();
               if(snapshot.context.client && snapshot.matches("ready")){
@@ -192,6 +208,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
               }
               // Subscribe to resource changes for updates
               const subscription = registry.subscribe((state) => {
+             
                 if(state.matches("ready") ){
                   resolve(state.context);
                 }
@@ -203,6 +220,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
           }),
           input: ({ context }) => ({
             registry: context.mcpActors["@registry"],
+            store: context.store,
           }),
           onDone: {
             target: "running",
@@ -238,7 +256,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
       on: {
         // Handle new connections
         connect: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
+          actions: enqueueActions(({ context, enqueue, event,self }) => {
             const { url, name, version, id, type , transportType, auth} = event as any;
             
             // Emit connecting event
@@ -256,6 +274,9 @@ const clientManagerMachine = clientManagerSetup.createMachine({
 
             // Spawn new MCP client if it doesn't exist
             if (!context.mcpActors[id]) {
+              const authProvider = new RemoteOAuthClientProvider(self.id, id, context.sessionId)
+              authProvider.sessionStore.set("auth", context.auth)
+
               enqueue.assign({
                 mcpActors: ({ context: { mcpActors, sessionId }, spawn }) => {
                   const newActor = spawn("mcpClient", {
@@ -271,7 +292,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                         auth: context.auth,
                         session: context.sessionId,
                         transportType: transportType || "streamable",
-                        authConfig: auth,
+                        authProvider: authProvider
                       },
                     },
                   });
@@ -282,13 +303,26 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                   };
                 },
               });
-              
+    
               // Register with data store after assignment
               enqueue(({ context }) => {
-                const newActor = context.mcpActors[id];
-                if (newActor) {
+                const newActor = context.mcpActors[id]; 
                   context.dataStore.registerClient(id, newActor);
+              });
+
+              enqueue(({ context }) => {
+                const newActor = context.mcpActors[id];
+                function updateStatus(status: ServerConfig["status"]){
+                  const serverConfig = context.store.get(id)!;
+                  context.store.set(id, {
+                    ...serverConfig,
+                    status: status
+                  }); 
                 }
+                updateStatus(newActor.getSnapshot().value);
+                newActor.subscribe((state) => {
+                  updateStatus(state.value);
+                });
               });
             }
           }),
@@ -372,14 +406,14 @@ export namespace ClientManager {
 
   export type Input = {
     auth: AuthInfo;
-    sessionId?: string;
+    sessionId: string;
     store: Y.Map<ServerConfig>;
     dataStore: NamespacedDataStore;
   };
 
   export type Context = {
     auth: AuthInfo;
-    sessionId?: string;
+    sessionId: string;
     error?: Error;
     store: Y.Map<ServerConfig>;
     dataStore: NamespacedDataStore;

@@ -20,7 +20,7 @@ applications:
       MCP_INSPECTOR_URL: 'https://inspector.cfapps.eu12.hana.ondemand.com'
       MCP_REGISTRY_URL: 'https://registry.cfapps.eu12.hana.ondemand.com/mcp'
       MCP_GATEWAY_URL: 'https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp'
-      BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com' 
+      BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
   - name: registry

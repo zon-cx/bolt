@@ -7,22 +7,13 @@ import { env } from "process";
 import { ActorRefFromLogic,createActor } from "xstate";
 import mcpAgent, { ServerConfig } from "./registry.mcp.client";
 import { NamespacedDataStore } from "./registry.mcp.client.namespace";
+import { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import {z} from "zod"
+import { ServerSchema } from "./registry.mcp.client";
 
-export type AuthConfig = {
-  type: "none" | "passthrough" | "bearer" | "basic";
-  token?: string;
-  clientId?: string;
-  clientSecret?: string;
-};
 
-export type serverConfig = {
-  id: string;
-  url: string;
-  name?: string;
-  version: string;
-  type?: "streamable" | "sse";
-  auth?: AuthConfig;
-};
+
+export type serverConfig = z.output<typeof ServerSchema>
 
 export type agentConfig = {
   id: string;
@@ -92,3 +83,5 @@ export class MCPAgentManager {
 }
 
 export const mcpAgentManager = new MCPAgentManager();
+
+

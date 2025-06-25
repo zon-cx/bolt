@@ -15,6 +15,9 @@ import { authRouter, requireAuth, getAgentAuthInfo } from "./registry.mcp.server
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { connectYjs } from "./store.yjs";
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {OAuthTokensSchema} from "@modelcontextprotocol/sdk/shared/auth.js";
+import { ServerConfig } from "./registry.mcp.client";
+import { AuthSchema } from "./registry.mcp.client.auth";
 
 // Add cleanup tracking
 const cleanupTimeouts = new Map<string, NodeJS.Timeout>();
@@ -142,8 +145,26 @@ app.all("/mcp/:id", requireAuth, async (req, res, next) => {
 const port = parseInt(env.PORT || "8080", 10);
 
 app.listen(port  , () => {
-    console.log(`MCP Gateway Server running on http://localhost:${port}`);
+    console.log(`MCP Registry Server running on http://localhost:${port}` );
 });
+
+
+ 
+
+const ServerSchema =z.object({
+    url: z.string().url(),
+    name: z.string(),
+    transport_type: z.enum(["streamable", "sse"]).default("streamable"),
+    version: z.string().optional(),
+    type: z.enum(["streamable", "sse"]).optional(),
+    error: z.object({
+        message: z.string(),
+        code: z.string().optional(),
+        stack: z.string().optional(),
+    }).optional(),
+    status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ,"initializing"]).optional(),
+    auth: AuthSchema.optional(), 
+}) .catchall(z.unknown())
 
 async function createServerManager( {session, auth, id}:{session?: string, auth: AuthInfo, id?: string}): Promise<StreamableHTTPServerTransport> {
     const mcpServer = new McpServer({
@@ -174,7 +195,7 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
       ... agentsStore.get(agentId) || {}
     });
     
-    const store = doc.getMap<serverConfig>(agentId)
+    const store = doc.getMap<ServerConfig>(agentId)
      const connectionCallback = () => {
         mcpServer.sendResourceListChanged()
     }
@@ -227,26 +248,7 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
     );
 
     mcpServer.registerTool("list", {
-        outputSchema:
-            {connections:z.array(z.object({
-                    id: z.string(),
-                    url: z.string(),
-                    version: z.string().optional(),
-                    name: z.string().optional(),
-                    error: z.object({
-                        message: z.string(),
-                        code: z.number().optional(),
-                        stack: z.string().optional(),
-                    }).optional(),
-                    auth: z.object({
-                        type: z.enum(["none", "passthrough", "bearer", "basic"]),
-                        token: z.string().optional(),
-                        clientId: z.string().optional(),
-                        clientSecret: z.string().optional(),
-                    }).optional(),
-                    type: z.enum(["streamable", "sse", "stdio"]).optional(),
-                    status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ]).optional(),
-                }))},
+        outputSchema: {connections:z.array(ServerSchema)},
         description: "List all available MCP servers",
     },
     // @ts-ignore when no args, extra is first argument but typescript is not aware of that
@@ -292,56 +294,150 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
         inputSchema: {
             url: z.string().url(),
             name: z.string().optional(),
-            type: z.enum(["streamable", "sse"]).default("streamable"),
-            auth_type: z.enum(["none", "passthrough", "bearer", "basic"]).default("passthrough").optional(),
-            auth_token: z.string().optional(),
-            auth_clientId: z.string().optional(),   
-            auth_clientSecret: z.string().optional(),
-         
+            transport_type: z.enum(["streamable", "sse"]).default("streamable"),
+            auth_type: z.enum(["none", "passthrough", "bearer", "basic", "oauth2"]).default("passthrough"),
         },
-        outputSchema: {
-            name: z.string(),
-            url: z.string(),
-            version: z.string().optional(),
-            type: z.enum(["streamable", "sse"]).optional(),
-            auth: z.object({
-                type: z.enum(["none", "passthrough", "bearer", "basic"]),
-                token: z.string().optional(),
-                clientId: z.string().optional(),
-                clientSecret: z.string().optional(),
-            }).optional(),
-            error: z.object({
-                message: z.string(),
-                code: z.string().optional(),
-                stack: z.string().optional(),
-            }).optional(),
-            status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ,"initializing"]).optional(),
-        },
-        description: "Connect to a new MCP server",
+        outputSchema: ServerSchema.shape,
+        description: "Connect to a new MCP server with basic configuration",
     }, async function (params, extra) { 
+        const existingConnection = store.get(params.name || params.url);
          const connection = store.set(params.name || params.url, {
             id: params.name || params.url,
             url: params.url,
             name: params.name || params.url,
             version: "1.0.0",
-            type: params.type || "streamable",
+            type: params.transport_type || "streamable",
             auth:  {
-                type: params.auth_type || "passthrough",
-                token: params.auth_token,
-                clientId: params.auth_clientId,
-                clientSecret: params.auth_clientSecret,
+                type: "passthrough",
+                ...existingConnection?.auth,
+                ...(params.auth_type ? {type: params.auth_type} : {}),
+            }
+        });
+         
+        return {
+            structuredContent:connection,
+            content: [{ 
+                type: "text",
+                text: `Connected to MCP server ${params.url} with id ${connection.id} using ${params.type} transport`,
+            }],
+        }
+    });
+
+
+
+    mcpServer.registerTool("auth-settings", {
+        inputSchema: {
+            id: z.string(),
+            type: z.enum(["none", "passthrough", "bearer", "basic", "oauth2"]).default("passthrough"),
+            scopes: z.array(z.string()).optional(),
+             inheritance: z.enum(["agent", "session"]).optional(),
+        },
+        outputSchema: ServerSchema.shape,
+        description: "Update authentication settings for an MCP server connection",
+    }, async function (params, extra) { 
+        const connection = store.get(params.id);
+        if (!connection) {
+            return {
+                content: [{
+                    type: "text",
+                    text: `No MCP server found with id ${params.id}`,
+                    isError: true,
+                }],
+            };
+        }
+
+        // Update auth settings
+        const updatedConnection = store.set(params.id, {
+            ...connection,
+            auth: {
+                ...connection.auth || {},
+                type: params.type,
+                scopes: params.scopes,
+                inheritance: params.inheritance,
             }
         });
          
         return {
             content: [{ 
                 type: "text",
-                text: `Connected to MCP server ${params.url} with id ${connection.id} using ${params.type} transport${params.auth_type ? ` and ${params.auth_type} auth` : ''}`,
+                text: `Updated auth settings for MCP server ${params.id} to use ${params.auth_type} authentication`,
             }],
-            structuredContent:{
-                ...connection,
-                id: undefined,
+            structuredContent:updatedConnection,
+        }
+    });
+    mcpServer.registerTool("credentials", {
+        inputSchema: {
+            server: z.string().describe("The name of the server to update"),
+            client_id: z.string().describe("The client id to use for the server"),
+            client_secret: z.string().describe("The client secret to use for the server"),
+          },
+          outputSchema: ServerSchema.shape,
+          description: "Update authentication credentials for an MCP server connection",
+        }, async function (params, extra) { 
+            const connection = store.get(params.server);
+            if (!connection) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `No MCP server found  ${params.server}`,  
+                        isError: true,
+                    }],
+                };
             }
+            const updatedConnection = store.set(params.server, {
+                ...connection, 
+                auth: {
+                    ...connection.auth || {},
+                    tokens: {
+                        access_token: Buffer.from(`${params.client_id}:${params.client_secret}`).toString('base64'),
+                        token_type: "Basic",
+                    }
+                }
+            });
+            return {
+                content: [{
+                    type: "text",
+                    text: `Updated authentication credentials for MCP server ${params.server}`,
+                }],
+                structuredContent:updatedConnection,
+            }
+        }
+    );
+    
+    mcpServer.registerTool("auth", {
+        inputSchema: {
+            server: z.string().describe("The name of the server to update"),
+            ...OAuthTokensSchema.shape,
+          },
+        outputSchema: ServerSchema.shape, 
+        description: "Update authentication tokens for an MCP server connection",
+    }, async function ({server, ...tokens}, extra) { 
+        const connection = store.get(server);
+        if (!connection) {
+            return {
+                content: [{
+                    type: "text",
+                    text: `No MCP server found  ${server}`,
+                    isError: true,
+                }],
+            };
+        } 
+        
+        const updatedConnection = store.set(server, {
+            ...connection,
+            auth: {
+                type: connection.auth?.type || "oauth2",
+                ...connection.auth || {},
+                tokens: tokens
+            }
+        });
+         
+        return {
+            content: [{ 
+                type: "text",
+                text: `Updated authentication tokens for MCP server ${server}`,
+            }],
+            structuredContent:updatedConnection,
         }
     });
 
@@ -363,7 +459,7 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
     );
 
     mcpServer.registerTool("info", {
-        outputSchema: {
+        outputSchema: { 
             id: z.string(),
             url: z.string(),
             name: z.string().optional(),
@@ -411,28 +507,7 @@ async function createServerManager( {session, auth, id}:{session?: string, auth:
         inputSchema: {
             id: z.string()
         },
-        outputSchema: {
-            id: z.string(),
-            url: z.string(),
-            version: z.string().optional(),
-            name: z.string().optional(),
-            status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ,"initializing"]).optional(),
-            error: z.object({
-                message: z.string(),
-                code: z.string().optional(),
-                stack: z.string().optional(),
-            }).optional(),
-            tools: z.number().optional(),
-            prompts: z.number().optional(),
-            resources: z.number().optional(),
-            resourceTemplates: z.number().optional(),
-            auth: z.object({
-                type: z.enum(["none", "passthrough", "bearer", "basic"]),
-                token: z.string().optional(),
-                clientId: z.string().optional(),
-                clientSecret: z.string().optional(),
-            }).optional(),
-        },
+        outputSchema:    ServerSchema.shape,
         description: "Get information about a specific MCP connection",
     }, async function (args: { [x: string]: any }, extra: RequestHandlerExtra<any,any>) {
         try {
@@ -517,3 +592,38 @@ export const ListConnectionsResultSchema = CallToolResultSchema.extend({
         status: z.enum([ "ready", "authenticating", "connecting", "discovering", "failed", "disconnected", "connected" ]).optional(),
     })),
   });
+
+
+  export function collectExtraKeys<
+  Shape extends z.ZodRawShape,
+  Catchall extends z.ZodTypeAny,
+  const K extends string
+>(
+  obj: z.ZodObject<Shape, "strip", Catchall>,
+  extrasKey: K
+): z.ZodEffects<
+  typeof obj,
+  z.output<z.ZodObject<Shape, "strict">> & {
+    [k in K]: Record<string, z.output<Catchall>>;
+  }
+> {
+  return obj.transform((val) => {
+    const extras: Record<string, z.output<Catchall>> = {};
+    const { shape } = obj;
+    for (const [key] of Object.entries(val)) {
+      if (key in shape) {
+        continue;
+      }
+
+      const v = val[key];
+      if (typeof v === "undefined") {
+        continue;
+      }
+
+      extras[key] = v;
+      delete val[key];
+    }
+
+    return { ...val, [extrasKey]: extras };
+  });
+}

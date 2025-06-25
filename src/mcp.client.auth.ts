@@ -28,10 +28,10 @@ import { randomFill, randomFillSync, randomUUID } from "node:crypto";
 import { createAtom } from "@xstate/store";
 import { jwtDecode } from "jwt-decode";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { AuthConfig } from "./registry.identity.store.js";
+import { AuthConfig } from "./registry.mcp.client.auth.js";
+import { env } from "node:process";
+import { ServerConfig } from "./registry.mcp.client.js";
 // Configuration
-const CALLBACK_PORT = 8090; // Use different port than auth server (3001)
-const CALLBACK_URL = `http://localhost:${CALLBACK_PORT}/oauth/callback`;
 
 const authState =  connectYjs("@mcp.auth");
 
@@ -50,7 +50,6 @@ function getCode(length = 4) {
  */
 export class InMemoryOAuthClientProvider implements OAuthClientProvider {
   public authorizationUrl = createAtom<URL | undefined>(undefined);
-
   constructor(
     redirectUrl: string | URL,
     clientMetadata: OAuthClientMetadata,
@@ -66,17 +65,19 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
     authState.getMap(this.id).set("redirectUrl", redirectUrl);
     authState.getMap(this.id).set("clientMetadata", clientMetadata);
     authState.getMap(this.id).set("id", id);
+   }
+
+  get store(): Y.Map<any> {
+    return authState.getMap<any>(this.id);
   }
 
   static fromState(
     id: string,
-    onRedirect: (url: URL) => void | Promise<void> = logRedirect
   ): InMemoryOAuthClientProvider {
     return new InMemoryOAuthClientProvider(
       authState.getMap<string>(id).get("redirectUrl")!,
       authState.getMap<OAuthClientMetadata>(id).get("clientMetadata")!,
-      id,
-      onRedirect
+      id
     );
   }
 
@@ -163,18 +164,18 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
   }
 
   saveCodeVerifier(codeVerifier: string): void {
-    authState.getMap<string>(this.id).set("codeVerifier", codeVerifier);
+    this.store.set("codeVerifier", codeVerifier);
   }
 
   codeVerifier(): string {
-    if (!authState.getMap<string>(this.id).get("codeVerifier"))
+    if (!this.store.get("codeVerifier"))
       throw new Error("No code verifier saved");
-    return authState.getMap<string>(this.id).get("codeVerifier")!;
+    return this.store.get("codeVerifier")!;
   }
  
    
   public async waitForCode(): Promise<string> {
-    const state= authState.getMap<string>(this.id);
+    const state= this.store;
     return await new Promise((resolve) => {
       checkCode();
       function checkCode(){
@@ -190,7 +191,7 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
   }
 
   public async tokensAsync(): Promise<OAuthTokens> {
-    const state= authState.getMap<OAuthTokens>(this.id); 
+    const state= this.store; 
       return await new Promise((resolve) => {
         function checkTokens(){
           if(state.get("tokens")){
@@ -205,88 +206,8 @@ export class InMemoryOAuthClientProvider implements OAuthClientProvider {
 }
 
  
-
-// // Run if this file is executed directly
-// main().catch((error) => {
-//   console.error('Unhandled error:', error);
-//   process.exit(1);
-// });
-
-
-export class PassThroughOAuthClientProvider implements OAuthClientProvider {
-  constructor(public auth: AuthInfo) {
-  }
-  get redirectUrl(): string | globalThis.URL {
-    throw new Error("Method not implemented.");
-  }
-  get clientMetadata(): { redirect_uris: string[]; jwks_uri?: string | undefined; scope?: string | undefined; token_endpoint_auth_method?: string | undefined; grant_types?: string[] | undefined; response_types?: string[] | undefined; client_name?: string | undefined; client_uri?: string | undefined; logo_uri?: string | undefined; contacts?: string[] | undefined; tos_uri?: string | undefined; policy_uri?: string | undefined; jwks?: any; software_id?: string | undefined; software_version?: string | undefined; } {
-    throw new Error("Method not implemented.");
-  }
-  state?(): string | Promise<string> {
-    throw new Error("Method not implemented.");
-  }
-  clientInformation(): OAuthClientInformation | undefined | Promise<OAuthClientInformation | undefined> {
-    throw new Error("Method not implemented.");
-  }
-  saveClientInformation?(clientInformation: OAuthClientInformationFull): void | Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  tokens(): OAuthTokens | undefined | Promise<OAuthTokens | undefined> {
-     return {
-       access_token: this.auth.token,
-       token_type: "Bearer",
-       scope: this.auth.scopes?.join(" "),
-     };
-  }
-  saveTokens(tokens: OAuthTokens): void | Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  redirectToAuthorization(authorizationUrl: globalThis.URL): void | Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  saveCodeVerifier(codeVerifier: string): void | Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  codeVerifier(): string | Promise<string> {
-    throw new Error("Method not implemented.");
-  }
-
+/*
  
-}
-
-export class NoneAuthProvider implements OAuthClientProvider {
-  get redirectUrl(): string | globalThis.URL {
-    throw new Error("Method not implemented.");
-  }
-  get clientMetadata(): { redirect_uris: string[]; jwks_uri?: string | undefined; scope?: string | undefined; token_endpoint_auth_method?: string | undefined; grant_types?: string[] | undefined; response_types?: string[] | undefined; client_name?: string | undefined; client_uri?: string | undefined; logo_uri?: string | undefined; contacts?: string[] | undefined; tos_uri?: string | undefined; policy_uri?: string | undefined; jwks?: any; software_id?: string | undefined; software_version?: string | undefined; } {
-    throw new Error("Method not implemented.");
-  }
-  state?(): string | Promise<string> {
-    throw new Error("Method not implemented.");
-  }
-  clientInformation(): OAuthClientInformation | undefined | Promise<OAuthClientInformation | undefined> {
-    throw new Error("Method not implemented.");
-  }
-  saveClientInformation?(clientInformation: OAuthClientInformationFull): void | Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  tokens(): OAuthTokens | undefined | Promise<OAuthTokens | undefined> {
-    return undefined;
-  }
-  saveTokens(tokens: OAuthTokens): void | Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  redirectToAuthorization(authorizationUrl: globalThis.URL): void | Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  saveCodeVerifier(codeVerifier: string): void | Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  codeVerifier(): string | Promise<string> {
-    throw new Error("Method not implemented.");
-  }
-}
-
 export class BearerAuthProvider implements OAuthClientProvider {
   constructor(private token: string) {}
   
@@ -363,29 +284,7 @@ export class BasicAuthProvider implements OAuthClientProvider {
     throw new Error("Method not implemented.");
   }
 }
+**/
 
-export function createAuthProvider(authConfig: AuthConfig | undefined, passthroughAuth?: AuthInfo): OAuthClientProvider | undefined {
-  if (!authConfig) {
-    // Default to passthrough if no auth config provided
-    return passthroughAuth ? new PassThroughOAuthClientProvider(passthroughAuth) : new NoneAuthProvider();
-  }
 
-  switch (authConfig.type) {
-    case "none":
-      return new NoneAuthProvider();
-    case "passthrough":
-      return passthroughAuth ? new PassThroughOAuthClientProvider(passthroughAuth) : new NoneAuthProvider();
-    case "bearer":
-      if (!authConfig.token) {
-        throw new Error("Bearer auth requires a token");
-      }
-      return new BearerAuthProvider(authConfig.token);
-    case "basic":
-      if (!authConfig.clientId || !authConfig.clientSecret) {
-        throw new Error("Basic auth requires both clientId and clientSecret");
-      }
-      return new BasicAuthProvider(authConfig.clientId, authConfig.clientSecret);
-    default:
-      throw new Error(`Unsupported auth type: ${(authConfig as any).type}`);
-  }
-}
+ 

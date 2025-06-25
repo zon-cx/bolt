@@ -36,6 +36,7 @@ type NamespacedSource = {
     name: string;
     uri?: string;
     server: string;
+    execute?: (params: any) => Promise<any>;
   };
 };
 
@@ -61,7 +62,7 @@ export class NamespacedDataStore {
   public resources = createAtom<NamespacedData["resources"]>([]);
   public resourceTemplates = createAtom<NamespacedData["resourceTemplates"]>([]);
   public aiTools = createAtom<ToolSet>({});
-
+  public authTools = createAtom<Record<string, NamespacedData["tools"][number]>>({});
   private mcpActors: Record<string, ActorRefFromLogic<typeof mcpClientMachine>> = {};
 
   constructor() {
@@ -76,9 +77,9 @@ export class NamespacedDataStore {
     
     // Subscribe to client updates
     actor.subscribe((snapshot) => {
-      if (snapshot.matches("ready")) {
+      if (snapshot.matches("ready")||snapshot.matches("authenticating")  ) {
         this.updateAggregatedData();
-      }
+      } 
     });
     
     this.updateAggregatedData();
@@ -90,10 +91,48 @@ export class NamespacedDataStore {
   }
 
   private updateAggregatedData() {
-    this.tools.set(this.getNamespacedData("tools"));
+    this.authTools.set(this.getAuthTools());
+    this.tools.set(this.getNamespacedData("tools").concat(Object.values(this.authTools.get())));
     this.prompts.set(this.getNamespacedData("prompts"));
     this.resources.set(this.getNamespacedData("resources"));
     this.resourceTemplates.set(this.getNamespacedData("resourceTemplates"));
+  }
+
+  private getAuthTools(): Record<string, NamespacedData["tools"][number]> {
+    return  Object.fromEntries(
+      Object.entries(this.mcpActors).filter(([_, actor]) => actor.getSnapshot().matches("authenticating")).map(([name, actor]) => 
+        [name, {
+          name: `@auth:${name}`,
+          description: `Authenticate with the MCP server ${name} `,
+          inputSchema: {
+            type: "object",
+              properties: {
+                reason: { type: "string", description: "The reason for authentication" },
+              },
+            },
+            outputSchema: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                authorizationUrl: { type: "string" , format: "uri"},
+              },
+            },
+            source: {
+              name: name,
+              server: name,
+              execute: async (args) => {
+                const url = actor.getSnapshot().context.options.authProvider?.authorizationUrl.get();
+                return {
+                  content: [{text:url, type: "text"}],
+                  structuredContent: {
+                    authorizationUrl: url || "auth.example.com"
+                  }
+                };
+              },
+              uri: actor.getSnapshot().context.url?.toString()
+            },
+          }])
+      )
   }
 
   private getNamespacedData<T extends keyof NamespacedData>(type: T): NamespacedData[T] {
@@ -325,7 +364,10 @@ export class NamespacedDataStore {
       | typeof CompatibilityCallToolResultSchema,
     options?: RequestOptions) {
 
-      const {server,  name: toolName} = await this.findSource(this.tools, name);
+      const {server,  name: toolName, execute} = await this.findSource(this.tools, name);
+      if(execute){
+        return execute(params);
+      }
       const mcpActor = this.mcpActors[server];
       if(!mcpActor){
         throw new Error(`MCP client for server ${server} not found`);
@@ -344,7 +386,7 @@ export class NamespacedDataStore {
 >(
   atom: Atom<T[]>,
   name: string
-): Promise<{ name: string; server: string; uri?: string }> {
+): Promise<NamespacedSource["source"]> {
   const result = await findAsync(
     atom,
     (value: T) =>
@@ -357,11 +399,7 @@ export class NamespacedDataStore {
       `Resource with uri '${name}' not found in any MCP client connection.`
     );
   }
-  return {
-    name: ((result as any).source as any).name,
-    server: ((result as any).source as any).server,
-    uri: ((result as any).source as any).uri,
-  };
+  return result.source;
 
   async function findAsync<T extends any = any>(
     atom: Atom<T[]>,

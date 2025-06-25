@@ -100,6 +100,7 @@ export const authRouter = mcpAuthRouter({
   issuerUrl: new URL("https://mcp-auth.val.run"),
   baseUrl: new URL("https://mcp-auth.val.run"),
   serviceDocumentationUrl: new URL("https://docs.example.com/"),
+  scopesSupported: ["openid", "profile", "email"],
 });
 
 export const requireAuth = requireBearerAuth({
@@ -111,7 +112,7 @@ export function getAgentAuthInfo(
   auth: AuthInfo,
   id?: string
 ): { id: string; name: string } & Partial<AuthInfo> {
-  id = id || (auth?.extra?.sub as string) || "default";
+  id = id || (auth?.extra?.sub as string) ;
   const name = (auth?.extra?.name as string) || id;
 
   return {

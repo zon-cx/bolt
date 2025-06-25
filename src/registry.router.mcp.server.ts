@@ -7,6 +7,7 @@ import {
   CallToolRequestSchema,
   CompleteRequestSchema,
   GetPromptRequestSchema,
+  InitializeRequestSchema,
   ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ListResourceTemplatesRequestSchema,
@@ -16,184 +17,210 @@ import {
 import {mcpAgentManager} from "./registry.identity.store";
 import {env} from "node:process";
 import {InMemoryEventStore} from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
-import {createActor} from "xstate";
+import {ActorRefFromLogic, createActor} from "xstate";
 
 import {authRouter, requireAuth,} from "./registry.mcp.server.auth";
 import {AuthInfo} from "@modelcontextprotocol/sdk/server/auth/types.js";
 import clientManagerMachine, {ServerConfig,} from "./registry.mcp.client";
 import {connectYjs} from "./store.yjs";
 import {NamespacedDataStore} from "./registry.mcp.client.namespace";
-
+import { jwtDecode } from "jwt-decode";
+import { InMemoryOAuthClientProvider, RemoteOAuthClientProvider } from "./mcp.client.auth";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+ 
 const app = express();
 app.use(express.json());
 app.use(authRouter);
 
+const doc = connectYjs("@mcp.registry");
+const store = doc.getMap<ServerConfig>("servers");
+const mcpSessions =  new Map<string, ActorRefFromLogic<typeof clientManagerMachine>>();
+const clientManagers = {} as Record<string, any>;
+const dataStores = {} as Record<string, NamespacedDataStore>;
+
+
+app.get("/oauth/callback", async function (req,res) {
+  const url = new URLSearchParams(req.url!.split("?")[1]);
+  const state = url.get("state")!
+  const authCode =url.get("code")!;
+  // const oauthProvider = RemoteOAuthClientProvider.fromState(state);
+  // const {url:serverUrl, type:transportType} = store.get(oauthProvider.server) || {url:oauthProvider.serverUrl, type:"streamable"}
+  // const transport =  transportType === "streamable" ? 
+  //    new StreamableHTTPClientTransport(new URL(serverUrl), {authProvider: oauthProvider}) 
+  //    : new SSEClientTransport(new URL(serverUrl), {authProvider: oauthProvider})
+  // await transport.finishAuth(authCode); 
+
+  InMemoryOAuthClientProvider.finishAuth(state, authCode)
+  res.send(`Successfully authenticated. You can close this window.`);
+  // console.log("OAuth callback ", oauthProvider.serverUrl);
+  //  console.log("OAuth callback successful");
+  // if (oauthProvider.tokens()) {
+  //   const { access_token } = oauthProvider.tokens()!;
+  //   const { sub, email, nickname, name } = jwtDecode(access_token) as {
+  //     sub: string;
+  //     email: string;
+  //     nickname: string;
+  //     name: string;
+  //   }; 
+  //   res.send(`Successfully authenticated ${oauthProvider.server}. You can close this window.`);
+  // } else {
+  //   res.send(`Failed to authenticate ${oauthProvider.server}. You can close this window.`);
+  // }
+})
+    
 // Map to store transports by session ID
 const transports = {
   streamable: {} as Record<string, StreamableHTTPServerTransport>,
   sse: {} as Record<string, SSEServerTransport>,
 };
-const doc = connectYjs("@mcp.registry");
 
 // Map to store client manager actors and data stores by session ID
-const clientManagers = {} as Record<string, any>;
-const dataStores = {} as Record<string, NamespacedDataStore>;
+const mcpServer = new Server(
+  {
+    name: "mcp-gateway-server",
+    version: "1.0.0",
+  },
+  {
+    capabilities: {
+      prompts: {
+        listChanged: true,
+      },
+      resources: {
+        listChanged: true,
+        subscribe: true,
+      },
+      tools: {
+        listChanged: true,
+      },
+      completions: {},
+      logging: {},
+    },
+  }
+);
+
+mcpServer.setRequestHandler(
+  ListToolsRequestSchema,
+  async (request, extra) => {
+    const sessionId = extra.sessionId || "can_session_be_empty?"
+    return {
+      tools: dataStores[sessionId]?.tools.get(),
+    };
+  }
+);
+
+mcpServer.setRequestHandler(
+  ListPromptsRequestSchema,
+  async (request, extra) => {
+    const sessionId = extra.sessionId || "can_session_be_empty?"
+    return {
+      prompts: dataStores[sessionId]?.prompts.get(),
+    };
+  }
+);
+
+mcpServer.setRequestHandler(
+  ListResourcesRequestSchema,
+  async (request, extra) => {
+    const sessionId = extra.sessionId || "can_session_be_empty?"
+    return {
+      resources: dataStores[sessionId]?.resources.get(),
+    };
+  }
+);
+
+mcpServer.setRequestHandler(
+  ListResourceTemplatesRequestSchema,
+  async (request, extra) => {
+    const sessionId = extra.sessionId || "can_session_be_empty?"
+    return {
+      resources: dataStores[sessionId]?.resources.get(),
+      resourceTemplates: dataStores[sessionId]?.resourceTemplates.get(),
+    };
+  }
+);
+
+mcpServer.setRequestHandler(
+  GetPromptRequestSchema,
+  async (request, extra) => {
+    const sessionId = extra.sessionId || "can_session_be_empty?"
+    return dataStores[sessionId]?.getPrompt(request.params, extra);
+  }
+);
+ 
+mcpServer.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  const { name, arguments: args } = request.params;
+  const sessionId = extra.sessionId || "can_session_be_empty?"
+  try {
+    return await dataStores[sessionId].callTool({name, arguments: args}, extra);
+  } catch (error) {
+    return {
+      isError: true,
+      content: {
+        text: error instanceof Error ? error.message : String(error),
+      }
+    };
+  }
+});
+
+mcpServer.setRequestHandler(
+  ReadResourceRequestSchema,
+  async (request, extra) => {
+    try {
+      const sessionId = extra.sessionId || "can_session_be_empty?"
+      return await dataStores[sessionId].readResource(request.params, extra);
+    } catch (error) {
+      throw new Error(
+        `Resource read failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+);
+
+mcpServer.setRequestHandler(CompleteRequestSchema, async (request, extra) => {
+  try {
+    const sessionId = extra.sessionId || "can_session_be_empty?"
+    return await dataStores[sessionId].complete(request.params, extra);
+  } catch (error) {
+    throw new Error(
+      `Completion failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+});
 
 
 
 // Helper to create a new MCP server and transport for a session
 async function connectSession(
-  sessionInfo: { session?: string; auth: AuthInfo; id?: string },
+  sessionId: string,
+  sessionInfo: { auth: AuthInfo; id?: string },
   transport: StreamableHTTPServerTransport | SSEServerTransport
 ): Promise<void> {
-  const mcpServer = new Server(
-    {
-      name: "mcp-gateway-server",
-      version: "1.0.0",
-    },
-    {
-      capabilities: {
-        prompts: {
-          listChanged: true,
-        },
-        resources: {
-          listChanged: true,
-          subscribe: true,
-        },
-        tools: {
-          listChanged: true,
-        },
-        completions: {},
-        logging: {},
-      },
-    }
-  );
 
-  const agent = mcpAgentManager.init(sessionInfo);
 
-  // Create Yjs store for server configurations
-  const store = doc.getMap<ServerConfig>("servers");
-
-  // Create data store for namespaced data
-  const dataStore = new NamespacedDataStore();
-
-  // Create XState-based client manager
+  const agent = mcpAgentManager.init(sessionInfo); 
+  const dataStore = new NamespacedDataStore(); 
   const clientManagerActor = createActor(clientManagerMachine, {
     id: agent.id,
     input: {
       auth: sessionInfo.auth,
-      sessionId: sessionInfo.session,
-      store,
+      sessionId: sessionId,
+      store:doc.getMap<ServerConfig>(agent.id),
       dataStore,
     },
-  });
+  }); 
 
-  // Start the client manager
   clientManagerActor.start();
+  clientManagers[sessionId] = clientManagerActor;
+  dataStores[sessionId] = dataStore;
 
-  // Store the actor and data store for cleanup
-  if (sessionInfo.session) {
-    clientManagers[sessionInfo.session] = clientManagerActor;
-    dataStores[sessionInfo.session] = dataStore;
-  }
-
-  // Add the registry connection to the store
-  store.set(sessionInfo.id || "registry", {
-    id: sessionInfo.id || "registry",
-    url: `${
-      env.MCP_REGISTRY_URL ||
-      "https://registry.cfapps.eu12.hana.ondemand.com/mcp"
-    }/${agent.id}`,
-    name: "registry",
-    version: "1.0.0",
-  });
-
-  // Register handlers to proxy requests to the agent
-  mcpServer.setRequestHandler(
-    ListToolsRequestSchema,
-    async (request, extra) => {
-      return {
-        tools: dataStore.tools.get(),
-      };
-    }
-  );
-
-  mcpServer.setRequestHandler(ListPromptsRequestSchema, async (_, extra) => {
-    return {
-      prompts: dataStore.prompts.get(),
-    };
-  });
-
-  mcpServer.setRequestHandler(ListResourcesRequestSchema, async (_, extra) => {
-    return {
-      resources: dataStore.resources.get(),
-    };
-  });
-
-  mcpServer.setRequestHandler(
-    ListResourceTemplatesRequestSchema,
-    async (_, extra) => {
-      return {
-        resources: dataStore.resources.get(),
-        resourceTemplates: dataStore.resourceTemplates.get(),
-      };
-    }
-  );
-
-  mcpServer.setRequestHandler(
-    GetPromptRequestSchema,
-    async (request, extra) => {
-      return dataStore.getPrompt(request.params, extra);
-    }
-  );
-
-  mcpServer.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    const { name, arguments: args } = request.params;
-
-    try {
-      // Use the data store's callTool method directly
-      return await dataStore.callTool({name, arguments: args}, extra);
-    } catch (error) {
-      throw new Error(
-        `Tool call failed for "${name}": ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  });
-
-  mcpServer.setRequestHandler(
-    ReadResourceRequestSchema,
-    async (request, extra) => {
-      try {
-        return await dataStore.readResource(request.params, extra);
-      } catch (error) {
-        throw new Error(
-          `Resource read failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-      }
-    }
-  );
-
-  mcpServer.setRequestHandler(CompleteRequestSchema, async (request, extra) => {
-    try {
-      return await dataStore.complete(request.params, extra);
-    } catch (error) {
-      throw new Error(
-        `Completion failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  });
-
-  // Connect the MCP server to the transport
   await mcpServer.connect(transport);
   mcpServer.onerror = console.error.bind(console);
 
-  // Add debouncing to prevent infinite loops
   let resourceChangeTimeout: NodeJS.Timeout | null = null;
   let toolChangeTimeout: NodeJS.Timeout | null = null;
   let promptChangeTimeout: NodeJS.Timeout | null = null;
@@ -312,15 +339,17 @@ app.all("/mcp/:id", requireAuth, async (req, res) => {
   if (session && transports.streamable[session]) {
     transport = transports.streamable[session];
   } else {
+    const sessionId = session || randomUUID();
     transport =new StreamableHTTPServerTransport({
       eventStore: new InMemoryEventStore(),
-      sessionIdGenerator: () => randomUUID(),
+      sessionIdGenerator: () => sessionId,
       onsessioninitialized: (sessionId) => {
         transports.streamable[sessionId] = transport;
       },
     })
      await connectSession(
-      { session, auth: req.auth as AuthInfo, id },
+      sessionId,
+      { auth: req.auth as AuthInfo, id },
          transport
     );
   }
@@ -334,15 +363,17 @@ app.all("/mcp", requireAuth, async (req, res) => {
   if (session && transports.streamable[session]) {
     transport = transports.streamable[session];
   } else {
+    const sessionId = session || randomUUID();
     transport = new StreamableHTTPServerTransport({ 
         eventStore: new InMemoryEventStore(),
-        sessionIdGenerator: () => randomUUID(),
+        sessionIdGenerator: () => sessionId,
         onsessioninitialized: (sessionId) => {
             transports.streamable[sessionId] = transport;
         },
      }); 
      await connectSession(
-      { auth: req.auth as AuthInfo, session },
+      sessionId,
+      { auth: req.auth as AuthInfo, id: req.params.id },
       transport
     );
   }
@@ -351,23 +382,22 @@ app.all("/mcp", requireAuth, async (req, res) => {
 
 app.get("/sse",requireAuth, async (req, res) => {
   // Create SSE transport for legacy clients
-  const session = req.header("mcp-session-id") as string | undefined;
   const transport = new SSEServerTransport("/messages", res);
   transports.sse[transport.sessionId] = transport;
 
   await connectSession(
-    { auth: req.auth as AuthInfo, session },
+    transport.sessionId,
+    { auth: req.auth as AuthInfo, id: req.params.id },
     transport
   );
 });
 app.get("/sse/:id",requireAuth, async (req, res) => {
-  // Create SSE transport for legacy clients
-  const session = req.header("mcp-session-id") as string | undefined;
-  const transport = new SSEServerTransport(`/messages/${req.params.id}`, res);
+   const transport = new SSEServerTransport(`/messages/${req.params.id}`, res);
   transports.sse[transport.sessionId] = transport;
 
   await connectSession(
-    { auth: req.auth as AuthInfo, session, id: req.params.id },
+    transport.sessionId,
+    { auth: req.auth as AuthInfo, id: req.params.id },
     transport
   );
 });
@@ -394,5 +424,5 @@ app.post("/messages", requireAuth, async (req, res) => {
 const port = parseInt(env.PORT || "8080", 10);
 
 app.listen(port, () => {
-  console.log(`MCP Gateway Server running on http://localhost:${port}`);
+  console.log(`MCP Router Server running on http://localhost:${port}`);
 });

@@ -104,6 +104,8 @@ const assistant = new Assistant({
   }) => {
     const userId = event.assistant_thread.user_id;
     const id = event.assistant_thread.thread_ts;
+    await setStatus("connecting...");
+
     const ctx = await getThreadContext();
     console.log("thread context", ctx, context);
     const oauthProvider = slackOAuthProvider(userId);
@@ -290,6 +292,10 @@ const app = new App({
   ],
 });
 
+app.event("message", async ({ event, client, logger }) => {
+  console.log("message!#", event);
+});
+
 app.assistant(assistant);
 
 app.action("connect", async ({ ack, client, logger, body, action }) => {
@@ -453,16 +459,7 @@ async function mcpConnection({
   if (
     connections.has(user)
   ) {
-    const snapshot = connections.get(user)!.getSnapshot();
-    if (snapshot.matches("ready")) {
-        connections.get(user)!.send({type: "ping"});
-      return connections.get(user)!;
-    } else {
-      if (snapshot.matches("authenticating") || snapshot.matches("failed")) {
-        connections.get(user)!.send({type: "reconnect"});
-        return connections.get(user)!;
-      }
-    }
+    return connections.get(user)!;
   }
 
   const connection = createActor(mcpClientMachine, {
@@ -507,24 +504,20 @@ async function mcpConnection({
     }
   });
   connection.subscribe(async (state) => {
+    console.log("connection state", state.value);
     if(state.matches("authenticating")){
+      console.log("authenticating");
       const authCode = await oauthProvider.waitForCode();
-      await new StreamableHTTPClientTransport(new URL(env.MCP_GATEWAY_URL!), {
-        authProvider: oauthProvider,
-      }).finishAuth(authCode);
+      // await new StreamableHTTPClientTransport(new URL(env.MCP_GATEWAY_URL!), {
+      //   authProvider: oauthProvider,
+      // }).finishAuth(authCode);
       await oauthProvider.tokensAsync();
       connection.send({type:"reconnect"});
 
     }
   });
   
-  connection.subscribe(async (state) => {
-    if(state.matches("ready")){
-      connections.set(user, connection);
-      return connection;
-    }
-  });
-
+ 
 
   connection.start();
   connections.set(user, connection);
