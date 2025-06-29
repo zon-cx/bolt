@@ -152,11 +152,12 @@ app.listen(port  , () => {
  
 
 const ServerSchema =z.object({
-    url: z.string().url(),
-    name: z.string(),
-    transport_type: z.enum(["streamable", "sse"]).default("streamable"),
-    version: z.string().optional(),
-    type: z.enum(["streamable", "sse"]).optional(),
+    id: z.string().describe("The id of the server").optional(),
+    url: z.string().url().describe("The url of the server").optional(),
+    name: z.string().describe("The name of the server").optional(),
+    transport_type: z.enum(["streamable", "sse"]).default("streamable").describe("The transport type of the server").optional(),
+    version: z.string().describe("The version of the server").optional(),
+    type: z.enum(["streamable", "sse"]).describe("The transport type of the server").optional(),
     error: z.object({
         message: z.string(),
         code: z.string().optional(),
