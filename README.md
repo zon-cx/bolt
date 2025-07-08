@@ -30,7 +30,7 @@ The system implements a **personal MCP server network** where each user gets the
                                  │
                     ┌─────────────▼─────────────┐
                     │      MCP Router           │
-                    │   (Personal MCP Workspace)      │
+                    │   (Personal MCP Workspace)│
                     │   https://mcp-router.     │
                     │   cfapps.eu12.hana.       │
                     │   ondemand.com/mcp        │
