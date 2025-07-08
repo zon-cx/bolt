@@ -12,3 +12,4 @@ env
 /node-http/
 /ref/
 /keys/
+.env.local
