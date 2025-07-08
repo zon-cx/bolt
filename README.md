@@ -1,4 +1,4 @@
-# Agent MCP Identity System
+# MCP Identity Gate
 
 A comprehensive Model Context Protocol (MCP) implementation featuring Slack integration, identity management, and a web-based dashboard for managing AI agents and their connections.
 
