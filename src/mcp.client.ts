@@ -1,4 +1,19 @@
 import {
+  enqueueActions,
+  setup,
+  assign,
+  ActorLogic,
+  Values,
+  emit,
+  spawnChild,
+  fromPromise,
+  fromCallback,
+  sendTo,
+  raise,
+  ActorRefFromLogic,
+  AnyEventObject,
+} from "xstate";
+import {
   ToolListChangedNotificationSchema,
   type ClientCapabilities,
   type Resource,
@@ -13,303 +28,907 @@ import {
   type ResourceTemplate,
   type ListResourceTemplatesResult,
   type Notification,
+  type Request as McpRequest,
+  CallToolRequest,
+  CallToolResult,
+  CallToolResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import {
+  OAuthClientProvider,
+  UnauthorizedError,
+} from "@modelcontextprotocol/sdk/client/auth.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import  {SSEClientTransport} from "@modelcontextprotocol/sdk/client/sse.js";
-import { createAtom, Atom } from "@xstate/store";
-import * as Y from "yjs";
-import {randomUUID} from "node:crypto";
-export type  TransportFactory = () => StreamableHTTPClientTransport | SSEClientTransport;
-export class MCPClientConnection {
-  public client: Client;
-  public connectionState: Atom<
-    | "authenticating"
-    | "connecting"
-    | "ready"
-    | "discovering"
-    | "failed"
-  >;
-  public instructions: Atom<string | undefined>;
-  public tools: Atom<Tool[]>;
-  public prompts: Atom<Prompt[]>;
-  public resources: Atom<Resource[]>;
-  public resourceTemplates: Atom<ResourceTemplate[]>;
-  public serverCapabilities: Atom<ServerCapabilities | undefined>;
-  public  error: Atom<Error | undefined> = createAtom<Error | undefined>(undefined);
-  public transportFactory: TransportFactory;
-  public transport: ReturnType<TransportFactory>;
-  
-  public name: string;
-  public id: string | undefined;
-  constructor(
-    public url: URL,
-    public options: {
-      id?: string;
-      info: ConstructorParameters<typeof Client>[0];
-      client?: ConstructorParameters<typeof Client>[1] ;
-      transport?:TransportFactory
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { AuthConfig } from "./registry.mcp.client.auth.js";
+import { z, ZodType } from "zod";
+import { InMemoryOAuthClientProvider, RemoteOAuthClientProvider } from "./mcp.client.auth.js";
+export type TransportFactory = () =>
+  | StreamableHTTPClientTransport
+  | SSEClientTransport;
+
+// Simplified version without MCPSession class and useServer pattern
+
+const mcpClientSetup = setup({
+  types: {} as {
+    context: MCPClient.Context;
+    events: MCPClient.Event;
+    input: Optional<MCPClient.Input>;
+    actors: {
+      connection: ActorLogic<any, any, any, any, any>;
+      discovery: ActorLogic<any, any, any, any, any>;
+      notificationHandler: ActorLogic<any, any, any, any, any>;
+      resourceReader: ActorLogic<any, any, any, any, any>;
+    };
+  },
+  actors: {
+    connection: fromPromise(
+      async ({ input }: { input: MCPClient.ConnectionInput }) => {
+        const { url, options } = input;
+        const {
+          info,
+          auth,
+          transport: transportFactory,
+          authProvider,
+          transportType,
+          authConfig,
+        } = options;
+
+        console.log(
+          "connecting to",
+          url.toString(),
+          "with transport type:",
+          transportType || "streamable"
+        );
+
+        // Create transport
+        let transport: StreamableHTTPClientTransport | SSEClientTransport;
+
+        if (transportFactory) {
+          transport = transportFactory();
+        } else if (transportType === "sse") {
+          // Create SSE transport
+          transport = new SSEClientTransport(new URL(url), {
+            authProvider: authProvider,
+            // requestInit: auth?.token
+            //   ? {
+            //       headers: {
+            //         Authorization: `Bearer ${auth.token}`,
+            //       },
+            //     }
+            //   : undefined,
+          });
+        } else {
+          transport = new StreamableHTTPClientTransport(new URL(url), {
+            authProvider: authProvider,
+            // requestInit: auth?.token
+            //   ? {
+            //       headers: {
+            //         Authorization: `Bearer ${auth.token}`,
+            //       },
+            //     }
+            //   : undefined,
+          });
+        }
+
+        // Create client
+        const client = new Client({
+          name: info.name || "mcp-client",
+          version: info.version || "1.0.0",
+        });
+
+        try {
+          // Connect with timeout
+          await Promise.race([
+            client.connect(transport),
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error("Connection timeout")), 10000);
+            }),
+          ]);
+
+          console.log("Client connected, attempting ping", url.href);
+
+          // Ping with timeout
+          await Promise.race([
+            client.ping(),
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error("Ping timeout")), 5000);
+            }),
+          ]);
+
+          console.log("Client ping successful", url.href);
+
+          // Get server capabilities
+          const serverCapabilities = await client.getServerCapabilities();
+          return {
+            client,
+            transport,
+            serverCapabilities,
+          };
+        } catch (error: any) {
+          if (
+            error instanceof UnauthorizedError ||
+            error.message?.includes("Authorization") ||
+            error.message?.includes("HTTP 401")
+          ) {
+            console.log("Unauthorized error", error);
+            return {
+              client,
+              transport,
+              serverCapabilities: undefined,
+              unauthorized: error,
+            };
+          }
+          console.error("Failed to initialize client:", error);
+
+          try {
+            await transport.close();
+          } catch (closeError) {
+            console.error("Error closing transport:", closeError);
+          }
+
+          throw error;
+        }
+      }
+    ),
+    discovery: fromPromise(
+      async ({ input }: { input: MCPClient.DiscoveryInput }) => {
+        const { client, serverCapabilities } = input;
+
+        const [instructions, tools, resources, prompts, resourceTemplates] =
+          await Promise.all([
+            client.getInstructions(),
+            fetchTools(client).catch(capabilityErrorHandler([], "tools/list")),
+            fetchResources(client).catch(
+              capabilityErrorHandler([], "resources/list")
+            ),
+            fetchPrompts(client).catch(
+              capabilityErrorHandler([], "prompts/list")
+            ),
+            fetchResourceTemplates(client).catch(
+              capabilityErrorHandler([], "resourceTemplates/list")
+            ),
+          ]);
+
+        return {
+          instructions,
+          tools,
+          resources,
+          prompts,
+          resourceTemplates,
+        };
+      }
+    ),
+    resourceReader: fromPromise(
+      async ({ input }: { input: MCPClient.ResourceReaderInput }) => {
+        const { client, resource } = input;
+        const { uri, name, mimeType } = resource;
+
+        console.log("reading resource", uri);
+
+        let timeoutId: NodeJS.Timeout | undefined;
+        try {
+          const result = (await Promise.race([
+            client.readResource({ uri }),
+            new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => {
+                console.log("Resource read timeout for", uri);
+                reject(new Error("Resource read timeout"));
+              }, 5000);
+            }),
+          ])) as { contents: any[] };
+
+          if (timeoutId) clearTimeout(timeoutId);
+
+          console.log("Resource read complete", uri);
+
+          // Process contents based on MIME type
+          let processedContents;
+          if (mimeType === "application/json") {
+            processedContents = result.contents
+              .map((content) => content.text as string)
+              .filter(Boolean)
+              .map((e) => JSON.parse(e));
+          } else if (mimeType === "text/plain") {
+            processedContents = result.contents.map((content) => content.text);
+          } else {
+            processedContents = result.contents;
+          }
+
+          return {
+            name,
+            uri,
+            mimeType,
+            contents: processedContents,
+          };
+        } catch (error) {
+          if (timeoutId) clearTimeout(timeoutId);
+          console.error("Error reading resource:", error);
+          throw error;
+        }
+      }
+    ),
+
+    requestHandler: fromCallback<
+      MCPClient.Request<ZodType<object>>,
+      { client: Client },
+      { type: "@mcp.response" }
+    >(({ sendBack, receive, input }) => {
+      const { client } = input;
+      receive(async ({ type, request, resultSchema, options, onResponse }) => {
+        if (type === "request") {
+          const response = await client.request(request, resultSchema, options);
+          if (onResponse) {
+            await onResponse(response);
+          }
+          sendBack({ type: "@mcp.response", response: response });
+        }
+      });
+    }),
+
+    notificationHandler: fromCallback(
+      ({
+        sendBack,
+        input,
+      }: {
+        sendBack: (event: MCPClient.Updates.Event) => void;
+        input: MCPClient.NotificationHandlerInput;
+      }) => {
+        const { client, serverCapabilities } = input;
+        const { resources, prompts, resourceTemplates, tools } = input;
+        console.log(
+          "first init",
+          "\nresources:",
+          resources.map((r) => r.name),
+          "\nprompts:",
+          prompts.map((p) => p.name),
+          "\nresourceTemplates:",
+          resourceTemplates.map((r) => r.name),
+          "\ntools:",
+          tools.map((t) => t.name)
+        );
+        tools.length &&
+          sendBack({
+            type: "@updates.tools",
+            tools,
+          });
+        resources.length &&
+          sendBack({
+            type: "@updates.resources",
+            resources,
+          });
+        prompts.length &&
+          sendBack({
+            type: "@updates.prompts",
+            prompts,
+          });
+        resourceTemplates.length &&
+          sendBack({
+            type: "@updates.resourceTemplates",
+            resourceTemplates,
+          });
+
+        // Register notification handlers that send events back to parent
+        if (serverCapabilities?.tools?.listChanged !== false) {
+          client.setNotificationHandler(
+            ToolListChangedNotificationSchema,
+            async (_notification) => {
+              const tools = await fetchTools(client);
+              sendBack({
+                type: "@updates.tools",
+                tools,
+              });
+            }
+          );
+        }
+
+        if (serverCapabilities?.resources?.listChanged !== false) {
+          client.setNotificationHandler(
+            ResourceListChangedNotificationSchema,
+            async (_notification) => {
+              const resources = await fetchResources(client);
+              sendBack({
+                type: "@updates.resources",
+                resources,
+              });
+              const resourceTemplates = await fetchResourceTemplates(client);
+              sendBack({
+                type: "@updates.resourceTemplates",
+                resourceTemplates,
+              });
+            }
+          );
+        }
+        if (serverCapabilities?.prompts?.listChanged !== false) {
+          client.setNotificationHandler(
+            PromptListChangedNotificationSchema,
+            async (_notification) => {
+              const prompts = await fetchPrompts(client);
+              sendBack({
+                type: "@updates.prompts",
+                prompts,
+              });
+            }
+          );
+        }
+      }
+    ),
+  },
+  actions: {
+    emit: emit((_, e: MCPClient.Event) => e),
+  },
+});
+
+const mcpClientMachine = mcpClientSetup.createMachine({
+  id: "@mcp/client",
+  initial: "connecting",
+  context: ({ input }) => ({
+    url: input.url!,
+    options: input.options!,
+    instructions: undefined as string | undefined,
+    tools: [] as Tool[],
+    prompts: [] as Prompt[],
+    resourceData: {} as Record<string, MCPClient.ResourceData>,
+    resources: [] as Resource[],
+    resourceTemplates: [] as ResourceTemplate[],
+    serverCapabilities: undefined as ServerCapabilities | undefined,
+    error: undefined as MCPClient.Error | undefined,
+    client: undefined as Client | undefined,
+    retries: 0,
+    pendingResourceReads: new Set<string>(),
+  }),
+  states: {
+    connecting: {
+      entry: [
+        ({ context }) => {
+          // Clean up any existing transport
+          if (context.transport) {
+            try {
+              context.transport.close();
+            } catch (e) {
+              console.warn("Error closing transport:", e);
+            }
+          }
+        },
+      ],
+      invoke: {
+        src: "connection",
+        input: ({ context }) => ({
+          url: context.url,
+          options: context.options,
+        }),
+        onDone: [
+          {
+          target: "discovering",
+          actions: assign({
+            client: ({ event }) => event.output.client,
+            transport: ({ event }) => event.output.transport,
+            serverCapabilities: ({ event }) => event.output.serverCapabilities,
+          }),
+          guard: ({ event }) => {
+            return event.output.unauthorized === undefined;
+          },
+        },
+        {
+          target: "authenticating",
+          actions: assign({
+            error: ({ event }) => event.output.unauthorized,
+            transport: ({ event }) => event.output.transport,
+            client: ({ event }) => event.output.client,
+          }),
+          guard: ({ event }) => {
+            return event.output.unauthorized !== undefined;
+          },
+        },
+        ],
+        onError: [ 
+          {
+            target: "failed",
+            actions: [
+              assign({
+                error: ({ event }) => ({
+                  message: (event as any).error?.message || "Unknown error",
+                  stack: (event as any).error?.stack || "",
+                  code: (event as any).error?.code || -1,
+                }),
+              }),
+            ],
+          },
+        ],
+      },
     },
-  ) {
-    const { info, client, transport, id } = this.options || {};
-    this.transportFactory = transport ?? (()=> new StreamableHTTPClientTransport(url, {
-      sessionId: id,
-    }));
-    this.transport = this.transportFactory();
-    this.name = info?.name;
-    this.connectionState = createAtom<
-      | "authenticating"
-      | "connecting"
-      | "ready"
-      | "discovering"
-      | "failed"
-    >("connecting");
-    this.instructions = createAtom<string | undefined>(undefined);
-    this.tools = createAtom<Tool[]>([]);
-    this.prompts = createAtom<Prompt[]>([]);
-    this.resources = createAtom<Resource[]>([]);
-    this.resourceTemplates = createAtom<ResourceTemplate[]>([]);
-    this.serverCapabilities = createAtom<ServerCapabilities | undefined>(undefined);
-    this.client = new Client(info, client);
-    this.id = options?.id ??
-        randomUUID({
-      disableEntropyCache: true, // Disable entropy cache for better performance in tests
-    })
-     
-      // authState.getMap<string>(this.id).observe(this.authCallback.bind(this)); 
-    }
-    
-    // async authCallback (event: Y.YMapEvent<string>) {
-    //   const { info, client, transport } = this.options || {};
-    //
-    //   console.log(`🔐 Ymap event received:`, Array.from(event.keysChanged.keys()));
-    //   if (event.keysChanged.has('code')) {
-    //     const code = authState.getMap<string>(this.id).get('code');
-    //     if (code) {
-    //       console.log(`🔐 Authorization code received: ${code.substring(0, 10)}...`);
-    //       // authState.getMap<string>(this.id).unobserve(callback);
-    //       this.transport.finishAuth(code);
-    //       // await this.init(new Client(info, client));
-    //     } else {
-    //       console.error('❌ No authorization code found in session state');
-    //     }
-    //   }
-    // }
-    
-    async  waitForAuth(transport: ReturnType<TransportFactory>, authState:Y.Map<string>): Promise<void> { 
-      return new Promise<void>((resolve, reject) => {
-            const callback = async (event: Y.YMapEvent<string>) => {
-              console.log(`🔐 Ymap event received:`, Array.from(event.keysChanged.keys()));
-              if (event.keysChanged.has('code')) {
-                const code = authState.get('code');
-                if (code) {
-                  console.log(`🔐 Authorization code received: ${code.substring(0, 10)}...`);
-                  authState.unobserve(callback);
-                  await transport.finishAuth(code);
-                  resolve();
+    discovering: {
+      invoke: {
+        src: "discovery",
+        input: ({ context }) => ({
+          client: context.client!,
+          serverCapabilities: context.serverCapabilities!,
+        }),
+        onDone: {
+          target: "ready",
+          actions: [
+            assign({
+              instructions: ({ event }) => event.output.instructions,
+              tools: ({ event }) => event.output.tools,
+              resources: ({ event }) => event.output.resources,
+              prompts: ({ event }) => event.output.prompts,
+              resourceTemplates: ({ event }) => event.output.resourceTemplates,
+            }),
+          ],
+        },
+        onError: {
+          target: "failed",
+          actions: [
+            assign({
+              error: ({ event }) => ({
+                message: (event as any).error?.message || "Unknown error",
+                stack: (event as any).error?.stack || "",
+                code: (event as any).error?.code || -1,
+              }),
+            }),
+          ],
+        },
+      },
+    },
+    ready: {
+      invoke: {
+        src: "notificationHandler",
+        input: ({ context }) => ({
+          client: context.client!,
+          serverCapabilities: context.serverCapabilities!,
+          resources: context.resources,
+          prompts: context.prompts,
+          resourceTemplates: context.resourceTemplates,
+          tools: context.tools,
+        }),
+      },
+      on: {
+        "@updates.tools": {
+          actions: [
+            assign({
+              tools: ({ event }) => event.tools,
+            }),
+            {
+              type: "emit",
+              params: ({ event }) => event,
+            },
+          ],
+        },
+
+        "@updates.resources": {
+          actions: enqueueActions(({ event, enqueue, context }) => {
+            const { resources } = event;
+            const { resourceData } = context;
+
+            // Update resources
+            enqueue.assign({
+              resources: resources,
+            });
+
+            // Trigger reads for new or changed resources
+            for (const resource of resources) {
+              if (
+                !resourceData[resource.name]?.uri ||
+                resourceData[resource.name]?.uri !== resource.uri
+              ) {
+                enqueue.emit({
+                  type: "@updates.resource",
+                  ...resource,
+                });
+                enqueue.raise({
+                  type: "read-resource",
+                  uri: resource.uri,
+                  name: resource.name,
+                  mimeType: resource.mimeType || "text/plain",
+                });
+              }
+            }
+          }),
+        },
+
+        "read-resource": {
+          actions: enqueueActions(({ event, enqueue, context, self }) => {
+            const resource = event as MCPClient.Event & {
+              uri: string;
+              name: string;
+              mimeType: string;
+            };
+
+            // Skip if already reading this resource
+            if (context.pendingResourceReads?.has(resource.uri)) {
+              console.log("Already reading resource", resource.uri);
+              return;
+            }
+
+            // Mark as pending
+            enqueue.assign({
+              pendingResourceReads: new Set([
+                ...(context.pendingResourceReads || []),
+                resource.uri,
+              ]),
+            });
+
+            // Use the resourceReader actor directly
+            enqueue(async ({ context }) => {
+              try {
+                const result = await context.client!.readResource({
+                  uri: resource.uri,
+                });
+
+                // Process contents based on MIME type
+                let processedContents;
+                if (resource.mimeType === "application/json") {
+                  processedContents = result.contents
+                    .map((content) => content.text as string)
+                    .filter(Boolean)
+                    .map((e) => JSON.parse(e));
+                } else if (resource.mimeType === "text/plain") {
+                  processedContents = result.contents.map(
+                    (content) => content.text
+                  );
+                } else {
+                  processedContents = result.contents;
+                }
+
+                self.send({
+                  type: "@updates.resources.data",
+                  name: resource.name,
+                  uri: resource.uri,
+                  mimeType: resource.mimeType,
+                  contents: processedContents,
+                });
+              } catch (error) {
+                console.error("Error reading resource:", error);
+              } finally {
+                // Clean up pending reads
+                const newSet = new Set(context.pendingResourceReads);
+                newSet.delete(resource.uri);
+                self.send({
+                  type: "@updates.resources",
+                  resources: context.resources,
+                });
+              }
+            });
+          }),
+        },
+
+        "@updates.resources.data": {
+          actions: [
+            assign({
+              resourceData: ({ event, context }) => {
+                const { type, name, ...data } =
+                  event as MCPClient.Updates.ResourceDataUpdate;
+                return {
+                  ...context.resourceData,
+                  [name]: {
+                    name,
+                    ...data,
+                  },
+                };
+              },
+            }),
+            {
+              type: "emit",
+              params: ({ event }) => event,
+            },
+          ],
+        },
+
+        "@updates.prompts": {
+          actions: [
+            assign({
+              prompts: ({ event }) => event.prompts,
+            }),
+            {
+              type: "emit",
+              params: ({ event }) => event,
+            },
+          ],
+        },
+
+        "@updates.resourceTemplates": {
+          actions: [
+            assign({
+              resourceTemplates: ({ event }) => event.resourceTemplates,
+            }),
+          ],
+        },
+        "@mcp.error": {
+          actions: [
+            assign({
+              error: ({ event }) => event,
+            }),
+          ],
+        },
+        reconnect: {
+          target: "connecting",
+          actions: [
+            assign({
+              error: undefined,
+              retries: ({ context }) => context.retries + 1,
+              client: undefined,
+              transport: undefined,
+              pendingResourceReads: new Set(),
+            }),
+            ({ context }) => {
+              console.log("Retrying connection:", context.retries);
+            },
+          ],
+        },
+
+        ping: {
+          actions: enqueueActions(({ event, enqueue, context }) => {
+            enqueue(async ({ context }) => {
+              try {
+                const result = await context.client!.ping();
+                console.log("Ping response:", result);
+              } catch (error: any) {
+                enqueue.raise({
+                  type: "@mcp.error",
+                  // @ts-ignore
+                  message:
+                    "message" in error
+                      ? (error.message as string)
+                      : "Ping failed",
+                  stack: "stack" in error ? (error.stack as string) : undefined,
+                  code: "code" in error ? ((error as any).code as number) : 500,
+                });
+
+                enqueue.raise({
+                  type: "reconnect",
+                });
+              }
+            });
+          }),
+        },
+      },
+    },
+    failed: {
+      entry: ({ context: { error } }) =>
+        console.warn("failed connection: ", error),
+      after: {
+        20_0000: {
+          actions: raise({
+            type: "retry",
+          }),
+          guard: ({ context }) => {
+            // Don't retry if authentication is required
+            return !context.error?.message?.includes("Authentication required");
+          },
+        },
+      },
+      on: {
+        retry: {
+          target: "connecting",
+          actions: [
+            assign({
+              error: undefined,
+              retries: ({ context: { retries } }) => retries + 1,
+              client: undefined,
+              transport: undefined,
+            }),
+            ({ context }) => {
+              // Ensure old transport is cleaned up
+              if (context.transport) {
+                try {
+                  context.transport.close();
+                } catch (e) {
+                  console.warn("Error closing transport:", e);
                 }
               }
-            };
-            authState.observe(callback);
-        });
-    }
-
-  /**
-   * Initialize a client connection
-   */
-  async init( ) {
-     let client = this.client;
-     const transport = this.transport;
-
-    if (this.connectionState.get() !== "ready") {
-      try {
-        await this.client.connect(transport);
-       } catch (error: any) {
-        this.transport = this.transportFactory(); 
-        if (error instanceof UnauthorizedError) {
-           this.connectionState.set("authenticating");
-            } else { 
-            console.error(`❌ Error connecting to MCP server at ${this.url}:`, error, "\n", error.stack); 
-           this.connectionState.set("failed");
-            this.error.set(error);
-        }
-        return this.connectionState.get(); 
-      }
-      
-      console.log(`🔐 ping  ${JSON.stringify(await this.client.ping())} `);
-
-      this.connectionState.set("discovering");
-
-      const serverCapabilities = await this.client.getServerCapabilities();
-      if (!serverCapabilities) {
-        throw new Error("The MCP Server failed to return server capabilities");
-      }
-      this.serverCapabilities.set(serverCapabilities);
-
-      const [instructions, tools, resources, prompts, resourceTemplates] = await Promise.all([
-        client.getInstructions(),
-        this.registerTools(),
-        this.registerResources(),
-        this.registerPrompts(),
-        this.registerResourceTemplates(),
-      ]);
-
-      this.instructions.set(instructions);
-      this.tools.set(tools);
-      this.resources.set(resources);
-      this.prompts.set(prompts);
-      this.resourceTemplates.set(resourceTemplates);
-
-      this.connectionState.set("ready");
-    }
-  }
-
-  /**
-   * Notification handler registration
-   */
-  async registerTools(): Promise<Tool[]> {
-    const serverCapabilities = this.serverCapabilities.get();
-    if (!serverCapabilities || !serverCapabilities.tools) {
-      return [];
-    }
-
-    if (serverCapabilities.tools.listChanged) {
-      this.client.setNotificationHandler(
-        ToolListChangedNotificationSchema,
-        async (_notification) => {
-          const tools = await this.fetchTools();
-          this.tools.set(tools);
+            },
+            ({ context: { retries } }) =>
+              console.log("retry connection:", retries),
+          ],
+          guard: ({ context }) => {
+            // Don't retry if authentication is required
+            return !context.error?.message?.includes("Authentication required");
+          },
         },
-      );
-    }
-
-    return this.fetchTools();
-  }
-
-  async registerResources(): Promise<Resource[]> {
-    const serverCapabilities = this.serverCapabilities.get();
-    if (!serverCapabilities || !serverCapabilities.resources) {
-      return [];
-    }
-
-    if (serverCapabilities.resources.listChanged) {
-      this.client.setNotificationHandler(
-        ResourceListChangedNotificationSchema,
-        async (_notification) => {
-          const resources = await this.fetchResources();
-          this.resources.set(resources);
+        authenticate: {
+          target: "authenticating",
+          actions: [
+            assign({
+              error: undefined,
+            }),
+          ],
         },
-      );
-    }
+      },
+    },
+    authenticating: {
+      entry: ({ context }) => {
+        console.log("Entering authenticating state", context.error);
+      },
+      invoke: {
+        src: fromCallback<
+          AnyEventObject,
+          { authProvider: InMemoryOAuthClientProvider , transport: SSEClientTransport | StreamableHTTPClientTransport},
+          { type: "retry" }
+        >(({ input, sendBack }) => {
+         async function codeFlow() {
+           const code = await  input.authProvider?.waitForCode()
+           const transport = input.transport;
+           await transport.finishAuth(code);
+           sendBack({
+            type: "authenticate",
+          });
+         }
+         codeFlow();
 
-    return this.fetchResources();
-  }
-
-  async registerPrompts(): Promise<Prompt[]> {
-    const serverCapabilities = this.serverCapabilities.get();
-    if (!serverCapabilities || !serverCapabilities.prompts) {
-      return [];
-    }
-
-    if (serverCapabilities.prompts.listChanged) {
-      this.client.setNotificationHandler(
-        PromptListChangedNotificationSchema,
-        async (_notification) => {
-          const prompts = await this.fetchPrompts();
-          this.prompts.set(prompts);
+          async function authenticate() {
+            const tokens = await 
+              input.authProvider .tokensAsync();
+            console.log("tokens", tokens);
+            sendBack({
+              type: "authenticate",
+            });
+          }
+          // authenticate();
+        }),
+        input: ({ context }) => ({
+          authProvider: context.options.authProvider!,
+          transport: context.transport!,
+        }),
+      },
+      on: {
+        authenticate: {
+          target: "connecting",
+          actions: [
+            assign({
+              error: undefined,
+              retries: ({ context }) => context.retries + 1,
+            }),
+          ],
         },
+        retry: {
+          target: "connecting",
+          actions: [
+            assign({
+              error: undefined,
+              retries: ({ context }) => context.retries + 1,
+              client: undefined,
+              transport: undefined,
+              pendingResourceReads: new Set(),
+            }),
+          ],
+        },
+      },
+      // after: {
+      //   30000: {
+      //     target: "failed",
+      //     actions: assign({
+      //       error: {
+      //         message: "Authentication timeout",
+      //         stack: "",
+      //         code: 408,
+      //       },
+      //     }),
+      //   },
+      // },
+    },
+    cleaning: {
+      invoke: {
+        src: fromPromise(
+          async ({
+            input,
+          }: {
+            input: { transport: ReturnType<TransportFactory> };
+          }) => {
+            if (input.transport) {
+              await input.transport.close();
+            }
+          }
+        ),
+        input: ({ context }) => ({ transport: context.transport! }),
+        //   onDone: {
+        //     target: "connected",
+        //     actions: assign({
+        //       client: undefined,
+        //       transport: undefined,
+        //     }),
+        //   },
+        onError: {
+          target: "done",
+          actions: assign({
+            client: undefined,
+            transport: undefined,
+          }),
+        },
+      },
+    },
+    done: {
+      type: "final",
+    },
+  },
+});
+
+// export function fromMcpClient(
+//   url: URL,
+//   options: {
+//     info: ConstructorParameters<typeof Client>[0];
+//     client?: ConstructorParameters<typeof Client>[1];
+//     transport?: TransportFactory;
+//     oauthProvider?: OAuthClientProvider;
+//   }
+// ) {
+
+//   return mcpClientMachine;
+// }
+
+// Helper functions
+async function fetchTools(client: Client): Promise<Tool[]> {
+  let toolsAgg: Tool[] = [];
+  let toolsResult: ListToolsResult = { tools: [] };
+  do {
+    toolsResult = await client
+      .listTools({
+        cursor: toolsResult.nextCursor,
+      })
+      .catch(capabilityErrorHandler({ tools: [] }, "tools/list"));
+    toolsAgg = toolsAgg.concat(toolsResult.tools);
+  } while (toolsResult.nextCursor);
+  return toolsAgg;
+}
+
+async function fetchResources(client: Client): Promise<Resource[]> {
+  let resourcesAgg: Resource[] = [];
+  let resourcesResult: ListResourcesResult = { resources: [] };
+  do {
+    resourcesResult = await client
+      .listResources({
+        cursor: resourcesResult.nextCursor,
+      })
+      .catch(capabilityErrorHandler({ resources: [] }, "resources/list"));
+    resourcesAgg = resourcesAgg.concat(resourcesResult.resources);
+  } while (resourcesResult.nextCursor);
+  return resourcesAgg;
+}
+
+async function fetchPrompts(client: Client): Promise<Prompt[]> {
+  let promptsAgg: Prompt[] = [];
+  let promptsResult: ListPromptsResult = { prompts: [] };
+  do {
+    promptsResult = await client
+      .listPrompts({
+        cursor: promptsResult.nextCursor,
+      })
+      .catch(capabilityErrorHandler({ prompts: [] }, "prompts/list"));
+    promptsAgg = promptsAgg.concat(promptsResult.prompts);
+  } while (promptsResult.nextCursor);
+  return promptsAgg;
+}
+
+async function fetchResourceTemplates(
+  client: Client
+): Promise<ResourceTemplate[]> {
+  let templatesAgg: ResourceTemplate[] = [];
+  let templatesResult: ListResourceTemplatesResult = {
+    resourceTemplates: [],
+  };
+  do {
+    templatesResult = await client
+      .listResourceTemplates({
+        cursor: templatesResult.nextCursor,
+      })
+      .catch(
+        capabilityErrorHandler(
+          { resourceTemplates: [] },
+          "resources/templates/list"
+        )
       );
-    }
-
-    return this.fetchPrompts();
-  }
-
-  async registerResourceTemplates(): Promise<ResourceTemplate[]> {
-    const serverCapabilities = this.serverCapabilities.get();
-    if (!serverCapabilities || !serverCapabilities.resources) {
-      return [];
-    }
-
-    return this.fetchResourceTemplates();
-  }
-
-  async fetchTools() {
-    let toolsAgg: Tool[] = [];
-    let toolsResult: ListToolsResult = { tools: [] };
-    do {
-      toolsResult = await this.client
-        .listTools({
-          cursor: toolsResult.nextCursor,
-        })
-        .catch(capabilityErrorHandler({ tools: [] }, "tools/list"));
-      toolsAgg = toolsAgg.concat(toolsResult.tools);
-    } while (toolsResult.nextCursor);
-    return toolsAgg;
-  }
-
-  async fetchResources() {
-    let resourcesAgg: Resource[] = [];
-    let resourcesResult: ListResourcesResult = { resources: [] };
-    do {
-      resourcesResult = await this.client
-        .listResources({
-          cursor: resourcesResult.nextCursor,
-        })
-        .catch(capabilityErrorHandler({ resources: [] }, "resources/list"));
-      resourcesAgg = resourcesAgg.concat(resourcesResult.resources);
-    } while (resourcesResult.nextCursor);
-    return resourcesAgg;
-  }
-
-  async fetchPrompts() {
-    let promptsAgg: Prompt[] = [];
-    let promptsResult: ListPromptsResult = { prompts: [] };
-    do {
-      promptsResult = await this.client
-        .listPrompts({
-          cursor: promptsResult.nextCursor,
-        })
-        .catch(capabilityErrorHandler({ prompts: [] }, "prompts/list"));
-      promptsAgg = promptsAgg.concat(promptsResult.prompts);
-    } while (promptsResult.nextCursor);
-    return promptsAgg;
-  }
-
-  async fetchResourceTemplates() {
-    let templatesAgg: ResourceTemplate[] = [];
-    let templatesResult: ListResourceTemplatesResult = {
-      resourceTemplates: [],
-    };
-    do {
-      templatesResult = await this.client
-        .listResourceTemplates({
-          cursor: templatesResult.nextCursor,
-        })
-        .catch(
-          capabilityErrorHandler(
-            { resourceTemplates: [] },
-            "resources/templates/list",
-          ),
-        );
-      templatesAgg = templatesAgg.concat(templatesResult.resourceTemplates);
-    } while (templatesResult.nextCursor);
-    return templatesAgg;
-  }
-
-  async cleanup() {
-    await this.transport.close();
-  }
+    templatesAgg = templatesAgg.concat(templatesResult.resourceTemplates);
+  } while (templatesResult.nextCursor);
+  return templatesAgg;
 }
 
 function capabilityErrorHandler<T>(empty: T, method: string) {
   return (e: { code: number }) => {
-    // server is badly behaved and returning invalid capabilities. This commonly occurs for resource templates
     if (e.code === -32601) {
       console.error(
         `The server advertised support for the capability ${
           method.split("/")[0]
-        }, but returned "Method not found" for '${method}'.`,
+        }, but returned "Method not found" for '${method}'.`
       );
       return empty;
     }
@@ -317,3 +936,227 @@ function capabilityErrorHandler<T>(empty: T, method: string) {
   };
 }
 
+export default mcpClientMachine;
+
+type Optional<T> = {
+  [K in keyof T]?: T[K];
+};
+
+export namespace MCPClient {
+  export type ConnectionState =
+    | "connecting"
+    | "discovering"
+    | "ready"
+    | "failed"
+    | "cleaning"
+    | "authenticating";
+
+  export type Error = {
+    message: string;
+    stack: string;
+    code: number;
+  };
+
+  export type ResourceData = {
+    name: string;
+    mimeType: string;
+    contents: any[];
+    uri?: string;
+  };
+
+  export type ConnectionInput = {
+    url: URL;
+    options: {
+      info: ConstructorParameters<typeof Client>[0];
+      client?: ConstructorParameters<typeof Client>[1];
+      transport?: TransportFactory;
+      auth?: AuthInfo;
+      session?: string;
+      authProvider?: OAuthClientProvider;
+      transportType?: string;
+      authConfig?: AuthConfig;
+    };
+  };
+
+  export type DiscoveryInput = {
+    client: Client;
+    serverCapabilities: ServerCapabilities;
+  };
+
+  export type NotificationHandlerInput = {
+    client: Client;
+    serverCapabilities: ServerCapabilities;
+    resources: Resource[];
+    prompts: Prompt[];
+    resourceTemplates: ResourceTemplate[];
+    tools: Tool[];
+  };
+
+  export type ResourceDataHandlerInput = {
+    client: Client;
+    auth: AuthInfo | undefined;
+    session: string | undefined;
+    url: URL;
+  };
+
+  export type ResourceReaderInput = {
+    client: Client;
+    resource: {
+      uri: string;
+      name: string;
+      mimeType: string;
+    };
+  };
+
+  export namespace Updates {
+    export type Tools = {
+      type: "@updates.tools";
+      tools: Tool[];
+    };
+    export type ResourceUpdate = {
+      type: "@updates.resource";
+    } & Resource;
+    export type Resources = {
+      type: "@updates.resources";
+      resources: Resource[];
+    };
+    export type Prompts = {
+      type: "@updates.prompts";
+      prompts: Prompt[];
+    };
+    export type ResourceTemplates = {
+      type: "@updates.resourceTemplates";
+      resourceTemplates: ResourceTemplate[];
+    };
+    export type Notifications = {
+      type: "@updates.notifications";
+      notifications: Notification[];
+    };
+    export type ResourceDataUpdate = {
+      type: "@updates.resources.data";
+    } & ResourceData;
+
+    export type EmittedEvent =
+      | Tools
+      | Resources
+      | Prompts
+      | ResourceTemplates
+      | Notifications
+      | ResourceDataUpdate
+      | ResourceUpdate;
+
+    export type Event = EmittedEvent;
+  }
+
+  export namespace Request {
+    export type Event<
+      T extends ZodType<object> = ZodType<object>,
+      Method extends string = string
+    > = {
+      type: `request`;
+      request: McpRequest & { method: Method };
+      resultSchema: T;
+      options?: IdleRequestOptions;
+      onResponse?: (response: z.infer<T>) => void | Promise<void>;
+    };
+
+    export type ToolRequest<
+      T extends typeof CallToolResultSchema = typeof CallToolResultSchema
+    > = Event<T, "tools/call">;
+
+    export type ToolResponse<ToolResult extends typeof CallToolResultSchema> = {
+      type: "@mcp.response.tool";
+      request: CallToolRequest;
+    };
+  }
+  export type Request<T extends ZodType<object> = ZodType<object>> = {
+    type: "request";
+    request: McpRequest;
+    resultSchema: T;
+    options?: IdleRequestOptions;
+    onResponse?: (response: z.infer<T>) => void | Promise<void>;
+  };
+
+  export type Response<T extends ZodType<object> = ZodType<object>> = {
+    type: "@mcp.response";
+    response: z.infer<T>;
+  };
+
+  export type Event =
+    | {
+        type: "read-resource";
+        uri: string;
+        name: string;
+        mimeType: string;
+      }
+    | {
+        type: "ping";
+      }
+    | {
+        type: "reconnect";
+      }
+    | {
+        type: "retry";
+      }
+    | {
+        type: "cleanup";
+      }
+    | {
+        type: "authenticate";
+        authCode?: string;
+      }
+    | {
+        type: "@mcp.error";
+        message: string;
+        stack?: string;
+        code?: number;
+      }
+    | Updates.Event;
+
+  export type Input = {
+    url: URL;
+    options?: {
+      authProvider?: OAuthClientProvider;
+      info: ConstructorParameters<typeof Client>[0];
+      client?: ConstructorParameters<typeof Client>[1];
+      transport?: TransportFactory;
+      auth?: AuthInfo;
+      session?: string;
+      transportType?: string;
+    };
+  };
+
+  export type Context = {
+    url: URL;
+    options: {
+      info: ConstructorParameters<typeof Client>[0];
+      client?: ConstructorParameters<typeof Client>[1];
+      transport?: TransportFactory;
+      auth?: AuthInfo;
+      session?: string;
+      authProvider?: InMemoryOAuthClientProvider;
+      transportType?: string;
+      authConfig?: AuthConfig;
+    };
+    instructions: string | undefined;
+    tools: Tool[];
+    prompts: Prompt[];
+    resources: Resource[];
+    resourceData: Record<string, ResourceData>;
+    resourceTemplates: ResourceTemplate[];
+    serverCapabilities: ServerCapabilities | undefined;
+    error?:
+      | {
+          message: string;
+          stack?: string;
+          code?: number;
+        }
+      | undefined;
+    client: Client | undefined;
+    transport?: ReturnType<TransportFactory> | undefined;
+    retries: number;
+    pendingResourceReads: Set<string>;
+  };
+}
+
+export type MCPClient = ActorRefFromLogic<typeof mcpClientMachine>;

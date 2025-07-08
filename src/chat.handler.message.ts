@@ -1,10 +1,10 @@
 import { fromEventAsyncGenerator } from "@cxai/stream";
 import { generateText } from "ai";
 import { azure } from "@ai-sdk/azure";
-import { Chat  } from "./chat";
+import { Chat  } from "./chat.type";
 import { Session ,Tools} from "./chat.handler.thread";
 import { aiTools } from "./chat.handler.tools";
-import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
+import { MCPClient } from "./mcp.client";
 
 /**
  * Extend the generic MessageInput with an optional prompt field.
@@ -91,7 +91,7 @@ const mcpMessage = fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessage
   return "done";
 });
 
-export function fromMcpMessageHandler(client:McpClient){
+export function fromMcpMessageHandler(client:MCPClient){
    return fromEventAsyncGenerator<Chat.Say.Event|Tools.Event,MCPMessageInput,Session.Event>(async function* ({
     system,
     input: { prompt, messages },

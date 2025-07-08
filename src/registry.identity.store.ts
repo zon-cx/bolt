@@ -1,16 +1,19 @@
-import { MCPClientManager } from "./registry.mcp.client";
+import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { connectYjs } from "./store.yjs";
 import { yMapIterate } from "@cxai/stream";
-import { Server  } from "@modelcontextprotocol/sdk/server/index.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import * as Y from "yjs";
+import { env } from "process";
+import { ActorRefFromLogic,createActor } from "xstate";
+import mcpAgent, { ServerConfig } from "./registry.mcp.client";
+import { NamespacedDataStore } from "./registry.mcp.client.namespace";
+import { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import {z} from "zod"
+import { ServerSchema } from "./registry.mcp.client";
 
-export const mcpAgents: Record<string, MCPClientManager> = {};
-  
-export  type serverConfig = {
-  id: string;
-  url: string;
-  name: string;
-  version: string;
-};
+
+
+export type serverConfig = z.output<typeof ServerSchema>
 
 export type agentConfig = {
   id: string;
@@ -18,72 +21,56 @@ export type agentConfig = {
   created: string;
 };
 
-const doc = connectYjs("mcp:server");
-const agentServerStore = (agentId: string) => {
-  return doc.getMap<serverConfig>(`${agentId}`);
+const doc = connectYjs("@mcp.registry");
+
+type Session = {
+  id: string;
+  created: string;
+  auth: AuthInfo;
 };
 
- const agentsStore = doc.getMap<agentConfig>("agents");
-
- 
+const agentsStore = doc.getMap<agentConfig>("agents");
+const sessionsStore = doc.getMap<Session>("sessions");
 
 export class MCPAgentManager {
-  public mcpAgents: Record<string, MCPClientManager & agentConfig> = {};
-  constructor( public mcpServer?:Server,public store = agentsStore) {
-    this.initFromStore();
+  public mcpAgents: Record<string, ActorRefFromLogic<typeof mcpAgent> & agentConfig> = {};
+  constructor(public store: Y.Map<agentConfig> = agentsStore) {
   }
 
 
-  async initFromStore() {
-    for await (const [id] of yMapIterate(this.store)) {
-      const config = this.store.get(id);
-      if (!config) continue;
-      this.initAgent({
-        id,
-        name: config.name,
-        created: config.created,
-      });
-    }
-  }
-
-
-  initAgent(
-    id: string | (Partial<agentConfig> & { id: string })  ) {
-    const info = {
-      name: typeof id === "string" ? id : id.name,
-      created: new Date().toISOString(),
-      ...(this.store.get(typeof id === "string" ? id : id.id) || {}),
-      ...(typeof id === "string" ? { id: id } : id),
-    };
-    if (this.mcpAgents[info.id]) {
-      return this.mcpAgents[info.id];
-    }
-    return this.createAgent(info);
-  }
-
-
-  createAgent({
+  init({
+    session,
+    auth,
     id,
-    name,
-    created,
-  }: Partial<agentConfig> & { id: string }) {
+  }: {
+    session?: string;
+    auth: AuthInfo;
+    id?: string;
+    name?: string;
+  }) {
+    const agentId = id || (auth?.extra?.sub as string) || "default";
+    const agentName = (auth?.extra?.name as string) || agentId;
+    const agentData = this.store.get(agentId) || {};
 
-    agentsStore.set(id, {
-      id,
-      name: name || id,
-      created: created || new Date().toISOString(),
+    const agent = agentsStore.set(agentId, {
+      id: agentId,
+      name: agentName,
+      created: new Date().toISOString(),
+      ...agentData,
+    }); 
+
+    const sessionData = sessionsStore.set(session || agentId, {
+      id: session || agentId,
+      auth,
+      created: new Date().toISOString(),
     });
 
-    const agent = new MCPClientManager(id, "1.0.0", agentServerStore(id));
-    if(!!this.mcpServer) {
-      agent.bindToMcpServer(this.mcpServer);
-    } 
+    return {
+      ...agent,
+      session: sessionData,
+    }
 
-    this.mcpAgents[id] = Object.assign(agent, agentsStore.get(id)!); 
- 
-
-    return this.mcpAgents[id]!;
-  } 
+  }
 
   async listAgents() {
     return Array.from(this.store.entries()).map(([id, config]) => config);
@@ -93,8 +80,8 @@ export class MCPAgentManager {
     delete this.mcpAgents[id];
     this.store.delete(id);
   }
-
 }
- 
 
 export const mcpAgentManager = new MCPAgentManager();
+
+

@@ -1,17 +1,17 @@
-import { env } from "node:process";
+import {env} from "node:process";
 import slack from "@slack/bolt";
-import { ActorRef, waitFor } from "xstate";
-import { fromMcpSession, Tools } from "./chat.handler.thread.ts";
+import {ActorRef, ActorRefFromLogic, createActor, waitFor} from "xstate";
+import {fromMcpSession} from "./chat.handler.thread.ts";
 import yjsActor from "./chat.store.ts";
-import { AllAssistantMiddlewareArgs } from "@slack/bolt/dist/Assistant";
+import {AllAssistantMiddlewareArgs} from "@slack/bolt/dist/Assistant";
 import messages from "./chat.ui.slack.messages.ts";
-import { type Chat } from "./chat.type.ts";
-import { type serverConfig } from "./registry.identity.store.ts";
-import { trace } from "@opentelemetry/api";
-import { InMemoryOAuthClientProvider } from "./mcp.client.auth.ts";
-import { MCPClientConnection } from "./mcp.client.ts";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {Session, Tools} from "./chat.type.ts";
+import {type serverConfig} from "./registry.identity.store.ts";
+import {trace} from "@opentelemetry/api";
+import {InMemoryOAuthClientProvider} from "./mcp.client.auth.ts";
+import {StreamableHTTPClientTransport} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {CallToolResult} from "@modelcontextprotocol/sdk/types.js";
+import mcpClientMachine from "./mcp.client.ts";
 
 const { App, LogLevel } = slack;
 const { Assistant } = slack;
@@ -29,47 +29,39 @@ function listener(
   >
 ) {
   return function listene(
-    actor: ActorRef<
-      any,
-      any,
-      Chat.Messages.Event | Chat.Say.Event | Tools.Event
-    >
+    actor: ActorRef<any, any, Session.Event>
   ) {
     const { say, setStatus, setSuggestedPrompts, setTitle } = args;
-
-    actor.on("@message.assistant", (event) => {
-      const { content } = event;
-      say(content.toString());
+ 
+    actor.on("@chat.message", async ({ message }) => {
+     await say(message);
     });
-    actor.on("@chat.message", ({ message }) => {
-      say(message);
+    actor.on("@chat.blocks", async ({ blocks }) => {
+      await say({ blocks });
     });
-    actor.on("@chat.blocks", ({ blocks }) => {
-      say({ blocks });
+    actor.on("@chat.status", async ({ status }) => {
+      await  setStatus(status);
     });
-    actor.on("@chat.status", ({ status }) => {
-      setStatus(status);
+    actor.on("@chat.title", async ({ title }) => {
+      await  setTitle(title);
     });
-    actor.on("@chat.title", ({ title }) => {
-      setTitle(title);
+    actor.on("@chat.prompts",async ({ prompts }) => {
+      await setSuggestedPrompts({ prompts });
     });
-    actor.on("@chat.prompts", ({ prompts }) => {
-      setSuggestedPrompts({ prompts });
-    });
-    actor.on("@tool.call", (event) => {
+    actor.on("@tool.call",async (event) => {
       console.log("tool call", event);
-      say(messages.listTools("calling tool", [event.toolName]));
+      await say(messages.listTools("calling tool", [event.toolName]));
 
       // say(messages.toolRequest([{toolName:event.toolName, toolArgs:event.args as Record<string, unknown> }]));
     });
-    actor.on("@tool.result", (event) => {
+    actor.on("@tool.result", async (event) => {
       console.log("tool result", event);
       // say(messages.toolResult([{toolName:event.toolName, toolArgs:event.args as Record<string, unknown> }]));
     });
-    actor.on("@tool.available", (event) => {
+    actor.on("@tool.available", async (event) => {
       console.log("tool available", event);
 
-      say(
+     await say(
         messages.listToolsMessage(
           "available tools",
           new Map(Object.entries(event.tools))
@@ -112,10 +104,15 @@ const assistant = new Assistant({
   }) => {
     const userId = event.assistant_thread.user_id;
     const id = event.assistant_thread.thread_ts;
+    await setStatus("connecting...");
+
     const ctx = await getThreadContext();
     console.log("thread context", ctx, context);
     const oauthProvider = slackOAuthProvider(userId);
+    await setStatus("connecting...");
     oauthProvider.authorizationUrl.subscribe(async (url) => {
+     await setStatus("authorizing...");
+
       const result = await say({
         blocks: messages.loginMessage(url?.toString() || ""),
       });
@@ -123,27 +120,30 @@ const assistant = new Assistant({
         channel: event.assistant_thread.channel_id,
         message_ts: result.ts || event.assistant_thread.thread_ts
        }))
+      await  setStatus("connecting...");
     });
     const connection = await mcpConnection({
       oauthProvider,
       client,
-      server: new URL(env.MCP_REGISTRY_URL!),
+      server: new URL(env.MCP_GATEWAY_URL!),
       user: userId,
     });
-    if (connection.connectionState.get() === "ready") {
-      const input = {
-        bot: context,
-        thread: event.assistant_thread,
-      };
+    console.log("thread started", connection.getSnapshot().value);
+
+     await waitFor(connection, (state) => state.matches("ready"));
+    await setStatus("connected...");
       logger.debug(
         "Thread started for user " +
           event.assistant_thread.user_id +
           " with thread ts " +
           event.assistant_thread.thread_ts
       );
-
-      const assistant = await yjsActor(fromMcpSession(connection.client!), {
-        input,
+      
+      const assistant = await yjsActor(fromMcpSession(connection), {
+        input:{
+            bot: context,
+            thread: event.assistant_thread,
+          },
         doc: `@assistant/${id}`,
         logger: log(logger),
         onCreate: listener({ say, setStatus, setSuggestedPrompts, setTitle }),
@@ -152,8 +152,7 @@ const assistant = new Assistant({
       waitFor(assistant, (state) => state.matches("listening")).then(() => {
         console.log("thread started", assistant.getPersistedSnapshot());
       });
-    }
-  },
+    },
 
   /**
    * `assistant_thread_context_changed` is sent when a user switches channels
@@ -162,8 +161,9 @@ const assistant = new Assistant({
    * method (either the DefaultAssistantContextStore or custom, if provided).
    * https://api.slack.com/events/assistant_thread_context_changed
    */
-  threadContextChanged: async ({ logger, saveThreadContext }) => {
+  threadContextChanged: async ({ logger, saveThreadContext, context, event }) => {
     await saveThreadContext().catch(logger.error);
+ 
   },
 
   /**
@@ -201,7 +201,7 @@ const assistant = new Assistant({
       ("thread_ts" in message && message.thread_ts) ||
       message.event_ts ||
       message.ts;
-
+    await  setStatus("connecting...");
     const oauthProvider = slackOAuthProvider(userId);
     oauthProvider.authorizationUrl.subscribe(async (url) => {
      const result = await say({
@@ -212,16 +212,16 @@ const assistant = new Assistant({
         message_ts: result.message?.ts || result.ts || message.ts
        }))
     });
- 
     const connection = await mcpConnection({
       oauthProvider,
       client,
-      server: new URL(env.MCP_REGISTRY_URL!),
+      server: new URL(env.MCP_GATEWAY_URL!),
       user: userId,
     });
-
+    await waitFor(connection, (state) => state.matches("ready"));
+    await setStatus("connected...");
     console.log("userMessage", message);
-    const assistant = await yjsActor(fromMcpSession(connection.client!), {
+    const assistant = yjsActor(fromMcpSession(connection), {
       input: context,
       doc: `@assistant/${id}`,
       logger: log(logger),
@@ -230,7 +230,8 @@ const assistant = new Assistant({
 
     if ("text" in message && !!message.text && "user" in message) {
       console.log("sending message");
-      assistant.send({
+      await assistant.send({
+        //@ts-ignore
         timestamp: message.ts,
         role: "user",
         user: message.user,
@@ -259,8 +260,12 @@ const app = new App({
       method: "GET",
       handler: async (req, res) => {
         res.writeHead(200, { "Content-Type": "text/html" });
-        res.end(
-          "<h1>Slack MCP Chat</h1><p>Install application <a>https://api.slack.com/apps/A08RC4RM7JN</a></p>"
+        res.end(`<div >
+          <h1>Slack MCP Chat</h1>
+          <a href="https://slack.com/oauth/v2/authorize?client_id=${env.SLACK_BOT_CLIENT_ID}&scope=app_mentions:read,assistant:write,bookmarks:read,calls:read,calls:write,canvases:read,canvases:write,channels:history,channels:join,channels:read,channels:write.invites,chat:write,chat:write.customize,commands,dnd:read,emoji:read,files:read,files:write,groups:history,groups:read,groups:write,groups:write.invites,groups:write.topic,im:history,im:read,im:write,im:write.topic,incoming-webhook,links:read,metadata.message:read,mpim:history,mpim:read,mpim:write,mpim:write.topic,pins:read,reactions:read,reactions:write,users:read,users:write,workflow.steps:execute,workflows.templates:read,workflows.templates:write,links.embed:write,links:write,usergroups:write&user_scope=">
+            <img alt="Add to Slack" height="40" width="139" src="https://platform.slack-edge.com/img/add_to_slack.png" srcSet="https://platform.slack-edge.com/img/add_to_slack.png 1x, https://platform.slack-edge.com/img/add_to_slack@2x.png 2x" />
+            </a>
+            </div>`
         );
       },
     },
@@ -287,6 +292,10 @@ const app = new App({
   ],
 });
 
+app.event("message", async ({ event, client, logger }) => {
+  console.log("message!#", event);
+});
+
 app.assistant(assistant);
 
 app.action("connect", async ({ ack, client, logger, body, action }) => {
@@ -308,13 +317,13 @@ app.action("connect", async ({ ack, client, logger, body, action }) => {
     const connection = await mcpConnection({
       oauthProvider: slackOAuthProvider(body.user.id),
       client,
-      server: new URL(env.MCP_REGISTRY_URL!),
+      server: new URL(env.MCP_GATEWAY_URL!),
       user: body.user.id,
     });
-
+    await waitFor(connection, (state) => state.matches("ready"));
     // Connect to the new server
-    const result = await connection.client.callTool(  {
-      name: "connect",
+    const result = await connection.getSnapshot().context.client!.callTool(  {
+      name: "@registry:connect",
       arguments: {
         url,
         name,
@@ -355,14 +364,14 @@ app.action("disconnect", async ({ ack, body, logger, action, client }) => {
     const connection = await mcpConnection({
       oauthProvider: slackOAuthProvider(body.user.id),
       client,
-      server: new URL(env.MCP_REGISTRY_URL!),
+      server: new URL(env.MCP_GATEWAY_URL!),
       user: body.user.id,
     });
     logger.info(`Disconnecting from server: ${serverId}`);
-
+    await waitFor(connection, (state) => state.matches("ready"));
     // Disconnect the server
-    const result = await connection.client.callTool({
-      name: "disconnect",
+    const result = await connection.getSnapshot().context.client!.callTool({
+      name: "@registry:disconnect",
       arguments: {
         id: serverId,
       },
@@ -400,19 +409,18 @@ app.event("app_home_opened", async ({ event, client, logger }) => {
       },
     });
   });
-
-  try {
+  try { 
     await publishHome({
       connection: await mcpConnection({
         oauthProvider,
         client,
-        server: new URL(env.MCP_REGISTRY_URL!),
+        server: new URL(env.MCP_GATEWAY_URL!),
         user: user,
       }),
       client,
       user: event.user,
     });
-  } catch (error) {
+  } catch (error:any) {
     logger.error("Error publishing home view:", error);
     await client.chat.postMessage({
       channel: event.user,
@@ -436,7 +444,7 @@ app.event("app_home_opened", async ({ event, client, logger }) => {
   }
 });
 
-const connections = new Map<string, MCPClientConnection>();
+const connections = new Map<string, ActorRefFromLogic<typeof mcpClientMachine>>();
 async function mcpConnection({
   oauthProvider,
   client,
@@ -447,66 +455,75 @@ async function mcpConnection({
   client: slack.webApi.WebClient;
   server: URL;
   user: string;
-}): Promise<MCPClientConnection> {
+}): Promise<ActorRefFromLogic<typeof mcpClientMachine>> {
   if (
-    connections.has(user) &&
-    connections.get(user)!.connectionState.get() === "ready"
+    connections.has(user)
   ) {
     return connections.get(user)!;
   }
 
-  const connection = new MCPClientConnection(server, {
+  const connection = createActor(mcpClientMachine, {
     id: oauthProvider.id,
-    info: {
-      name: "Slack MCP Client",
-      version: "1.0.0",
-    },
-    client: {
-      capabilities: {},
-    },
-    transport: () =>
-      new StreamableHTTPClientTransport(new URL(env.MCP_REGISTRY_URL!), {
+    input: {
+      url: server,
+      options: {
+        info: {
+          name: "Slack MCP Client",
+          version: "1.0.0",
+        },
         authProvider: oauthProvider,
-      }),
+        session: oauthProvider.id,
+      },
+    },
   });
-  await connection.init();
-  if (connection.connectionState.get() === "ready") {
-    connections.set(user, connection);
-    return connection;
-  }
 
-  if (connection.connectionState.get() === "failed") {
-    console.error("Failed to connect to MCP server", connection.error.get());
-    await client.chat.postMessage({
-      channel: user,
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `Failed to connect to MCP server: ${
-              connection.error.get()?.message
-            }`,
+  connection.subscribe(async (state) => {
+    if(state.matches("failed")){
+      console.error("Failed to connect to MCP server", state.context.error);
+      await client.chat.postMessage({
+        channel: user,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `Failed to connect to MCP server: ${
+                state.context.error?.message
+              }`,
+            },
           },
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: "```" + connection.error.get()?.stack + "```",
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "```" + state.context.error?.stack + "```",
+            },
           },
-        },
-      ],
-    });
-  }
-  if (connection.connectionState.get() === "authenticating") {
-    const authCode = await oauthProvider.waitForCode();
-    await new StreamableHTTPClientTransport(new URL(env.MCP_REGISTRY_URL!), {
-      authProvider: oauthProvider,
-    }).finishAuth(authCode);
-    await oauthProvider.tokensAsync();
-    return await mcpConnection({ oauthProvider, client, server, user });
-  }
+        ],
+      });
+    }
+  });
+  connection.subscribe(async (state) => {
+    console.log("connection state", state.value);
+    if(state.matches("authenticating")){
+      console.log("authenticating");
+      const authCode = await oauthProvider.waitForCode();
+      // await new StreamableHTTPClientTransport(new URL(env.MCP_GATEWAY_URL!), {
+      //   authProvider: oauthProvider,
+      // }).finishAuth(authCode);
+      await oauthProvider.tokensAsync();
+      connection.send({type:"reconnect"});
+
+    }
+  });
+  
+ 
+
+  connection.start();
+  connections.set(user, connection);
+
+  await waitFor(connection, (state) => state.matches("ready"));
+  connection.send({type:"ping"}); 
 
   return connection;
 }
@@ -517,26 +534,23 @@ const CALLBACK_URL = `${
 const oauthProviders = new Map<string, InMemoryOAuthClientProvider>();
 
 function slackOAuthProvider(user: string): InMemoryOAuthClientProvider {
-  const provider =
-    oauthProviders.get(user) ||
-    oauthProviders
-      .set(
-        user,
-        new InMemoryOAuthClientProvider(
-          CALLBACK_URL,
-          {
-            client_name: "Slack MCP Client",
-            redirect_uris: [CALLBACK_URL],
-            grant_types: ["authorization_code", "refresh_token"],
-            response_types: ["code"],
-            scope: "openid profile email agent",
-          },
-          user
-        )
-      )
-      .get(user)!;
-
-  return provider;
+  return oauthProviders.get(user) ||
+      oauthProviders
+          .set(
+              user,
+              new InMemoryOAuthClientProvider(
+                  CALLBACK_URL,
+                  {
+                    client_name: "Slack MCP Client",
+                    redirect_uris: [CALLBACK_URL],
+                    grant_types: ["authorization_code", "refresh_token"],
+                    response_types: ["code"],
+                    scope: "openid profile email agent",
+                  },
+                  user
+              )
+          )
+          .get(user)!;
 }
 
 async function publishHome({
@@ -544,36 +558,20 @@ async function publishHome({
   client,
   user,
 }: {
-  connection: MCPClientConnection;
+  connection: ActorRefFromLogic<typeof mcpClientMachine>;
   client: slack.webApi.WebClient;
   user: string;
 }) {
-  if (connection.connectionState.get() === "ready") {
-    const {structuredContent:info, content:infoContent} = await connection.client.callTool({
-      name: "info",
+    await waitFor(connection, (state) => state.matches("ready"));
+
+    const {structuredContent:info, content:infoContent} = await connection.getSnapshot().context.client!.callTool({
+      name: "@registry:info",
       arguments: {},
     }) as CallToolResult & {structuredContent:{id:string, name:string, version:string, url:string, connections:number} }
     console.log("info", info);
 
     // Get connections
-    const {isError, content, structuredContent:{connections}} = await connection.client.callTool({
-      name: "list-connections",
-      arguments: {},
-    }) as CallToolResult & {structuredContent:{connections: (serverConfig & {status:string})[] }, content:{text:string}[]}
-
-    console.log(
-      "listConnections",
-      isError
-        ? content.map((e:any) => e.text)
-        : connections
-    );
-    if (isError) {
-      throw new Error(
-        `Failed to list connections: ${
-          content.map((e:any) => e.text) || "Unknown error"
-        }`
-      );
-    }
+    const connections = await Object.values(connection.getSnapshot().context.resourceData).filter((e:any) => e.uri?.startsWith("urn:mcp:server")).flatMap((e:any) => (e.contents)); 
 
    await client.views.publish({
       user_id: user,
@@ -692,7 +690,6 @@ async function publishHome({
       },
     ];
   }
-}
 
  
 

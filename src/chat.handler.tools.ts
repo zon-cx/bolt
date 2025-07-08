@@ -1,20 +1,20 @@
 import { jsonSchema,  Schema,  tool, ToolExecutionOptions } from "ai";
-import {CallToolRequestSchema, CallToolResult, CallToolResultSchema, Tool as McpTool} from "@modelcontextprotocol/sdk/types.js";
-import {Client as McpClient} from "@modelcontextprotocol/sdk/client/index.js";
-
-export async function aiTools<TOOLS extends McpTool[], TClient extends McpClient &{listTools:()=>Promise<{tools:TOOLS}>} >(client: TClient) {
-    const {tools}= await client.listTools();
+import {  CallToolResult, CallToolResultSchema, Tool as McpTool} from "@modelcontextprotocol/sdk/types.js";
+import { MCPClient } from "./mcp.client";
+import {z} from "zod";
+export async function aiTools<TOOLS extends McpTool[]>(client:MCPClient) {
+    const {tools}= client.getSnapshot().context;
     return tools.reduce(
       (acc, t) => ({
         ...acc,
-        [t.name.replace(":","_")]: toTool(t, client),
+        [t.name.replace(":","_").replace("@","_")]: toTool(t, client),
       }),
       {} as MCPToolSet<TOOLS>
     );
   
     function toTool(
       { name, description, inputSchema }: McpTool,
-      client: McpClient
+      client: MCPClient
     ) {
       const parameters =jsonSchema({
         ...inputSchema,
@@ -35,7 +35,7 @@ export async function aiTools<TOOLS extends McpTool[], TClient extends McpClient
           console.log("tool-execute-not-aborted",args,options);
 
           // options?.abortSignal?.throwIfAborted();
-          const result = await client.request({ method: 'tools/call', params: { name, arguments: args } },
+          const result = await client.getSnapshot().context.client!.request({ method: 'tools/call', params: { name, arguments: args } },
             CallToolResultSchema,
             {
               signal: options?.abortSignal,
