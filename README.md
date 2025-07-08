@@ -84,6 +84,31 @@ MCP Url: https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp
 
 ## 📦 Components
 
+### 1. MCP Router (`registry.router.mcp.server.ts`)
+- **Purpose**: Personal MCP server gateway that provides each user with their own MCP server space
+- **Features**:
+  - **Personal Server Spaces**: Each user gets `/mcp/{user-id}` endpoint
+  - **Registry Tools Integration**: Built-in tools for server discovery and management
+  - **Authentication Tools**: Automatic `@auth:*` tools for OAuth flows
+  - **Server Aggregation**: Combines multiple MCP servers into single endpoint
+  - **Authentication & Authorization**: OAuth-based user management
+  - **URL Sharing**: Users can share their personal MCP server URLs
+  - **Transport Handling**: HTTP/SSE transport support
+  - **Session Management**: Persistent connections and state
+
+
+### 2. Registry Server (`registry.mcp.server.ts`)
+- **Purpose**: Simple MCP server for agent registration and management as placeholder to any registry
+- **Features**:
+  - **Agent Registration**: Register and discover MCP agents
+  - **Resource Management**: Manage MCP resources across the network
+  - **Tool Proxying**: Proxy tools between different MCP servers
+  - **Authentication Handling**: OAuth-based authentication for agents
+  - **YJS-based Collaborative State**: Real-time collaborative state management
+  - **Server Discovery**: Tools for finding and connecting to MCP servers
+
+## Client Examples
+
 ### 1. Slack Assistant (`chat.ui.slack.ts`)
 - **Purpose**: AI-powered Slack bot that connects to personal MCP servers
 - **Features**:
@@ -106,27 +131,7 @@ MCP Url: https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp
   - **Interactive Tool Testing**: Test tools directly in the interface
   - **URL Sharing**: Get your personal MCP server URL for sharing
 
-### 3. Registry Server (`registry.mcp.server.ts`)
-- **Purpose**: Central MCP server for agent registration and management
-- **Features**:
-  - **Agent Registration**: Register and discover MCP agents
-  - **Resource Management**: Manage MCP resources across the network
-  - **Tool Proxying**: Proxy tools between different MCP servers
-  - **Authentication Handling**: OAuth-based authentication for agents
-  - **YJS-based Collaborative State**: Real-time collaborative state management
-  - **Server Discovery**: Tools for finding and connecting to MCP servers
-
-### 4. MCP Router (`registry.router.mcp.server.ts`)
-- **Purpose**: Personal MCP server gateway that provides each user with their own MCP server space
-- **Features**:
-  - **Personal Server Spaces**: Each user gets `/mcp/{user-id}` endpoint
-  - **Registry Tools Integration**: Built-in tools for server discovery and management
-  - **Authentication Tools**: Automatic `@auth:*` tools for OAuth flows
-  - **Server Aggregation**: Combines multiple MCP servers into single endpoint
-  - **Authentication & Authorization**: OAuth-based user management
-  - **URL Sharing**: Users can share their personal MCP server URLs
-  - **Transport Handling**: HTTP/SSE transport support
-  - **Session Management**: Persistent connections and state
+## Server Examples
 
 ### 5. Whoami MCP Server (`whoami.mcp.server.ts`)
 - **Purpose**: Simple MCP server for testing downstream authentication flows, use with @registry:connect
