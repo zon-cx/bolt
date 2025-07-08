@@ -29,11 +29,11 @@ applications:
     routes:
       - route: 'https://registry.cfapps.eu12.hana.ondemand.com'
     stack: cflinuxfs4
-    memory: 512M
+    memory: 2048M
     instances: 1
     version: 0.0.2
     env:
-      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_OPTIONS: "--max-old-space-size=1024 --max-http-header-size=80000"
       NODE_ENV: production
       LOG_SENSITIVE_CONNECTION_DATA: true
       LOG_REMOTE_USER: true
@@ -90,7 +90,7 @@ applications:
       - route: 'https://mcp-router.cfapps.eu12.hana.ondemand.com'
     command: npm run start:router
     stack: cflinuxfs4
-    memory: 1024M
+    memory: 2048M
     instances: 1
     version: 0.0.2
     env:
@@ -153,7 +153,6 @@ applications:
     health-check-type: none
 
     stack: cflinuxfs4
-    memory: 524M
     instances: 1
     version: 0.0.2
     env:

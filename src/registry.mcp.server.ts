@@ -18,6 +18,7 @@ import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {OAuthTokensSchema} from "@modelcontextprotocol/sdk/shared/auth.js";
 import { ServerConfig } from "./registry.mcp.client";
 import { AuthSchema } from "./registry.mcp.client.auth";
+import { memoryMonitor } from "./memory-monitor";
 
 // Add cleanup tracking
 const cleanupTimeouts = new Map<string, NodeJS.Timeout>();
@@ -28,25 +29,6 @@ const transports = {
     streamable: {} as Record<string, StreamableHTTPServerTransport>,
     sse: {} as Record<string, SSEServerTransport>
 };
-
-// Add cleanup function
-function cleanupTransport(sessionId: string) {
-    console.log(`Cleaning up transport for session ${sessionId}`);
-    if (transports.streamable[sessionId]) {
-        const transport = transports.streamable[sessionId];
-        transport.close();
-        delete transports.streamable[sessionId];
-    }
-    if (cleanupTimeouts.has(sessionId)) {
-        clearTimeout(cleanupTimeouts.get(sessionId));
-        cleanupTimeouts.delete(sessionId);
-    }
-}
-
-// Add transport count tracking
-function getActiveTransportCount(): number {
-    return Object.keys(transports.streamable).length;
-}
 
 const doc =  connectYjs("@mcp.registry");
 
@@ -627,4 +609,64 @@ export const ListConnectionsResultSchema = CallToolResultSchema.extend({
 
     return { ...val, [extrasKey]: extras };
   });
+}
+
+// Add process cleanup handlers
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received, cleaning up...');
+    cleanupAll();
+    process.exit(0);
+});
+
+process.on('SIGINT', () => {
+    console.log('SIGINT received, cleaning up...');
+    cleanupAll();
+    process.exit(0);
+});
+
+function cleanupAll() {
+    // Clean up all transports
+    Object.keys(transports.streamable).forEach(sessionId => {
+        cleanupTransport(sessionId);
+    });
+    Object.keys(transports.sse).forEach(sessionId => {
+        cleanupTransport(sessionId);
+    });
+    
+    // Clear all timeouts
+    cleanupTimeouts.forEach(timeout => clearTimeout(timeout));
+    cleanupTimeouts.clear();
+    
+    // Stop memory monitor
+    memoryMonitor.stop();
+    
+    // Final memory check
+    memoryMonitor.logMemoryUsage();
+}
+
+// Add cleanup function
+function cleanupTransport(sessionId: string) {
+    console.log(`Cleaning up transport for session ${sessionId}`);
+    if (transports.streamable[sessionId]) {
+        const transport = transports.streamable[sessionId];
+        transport.close();
+        delete transports.streamable[sessionId];
+    }
+    if (transports.sse[sessionId]) {
+        const transport = transports.sse[sessionId];
+        transport.close();
+        delete transports.sse[sessionId];
+    }
+    if (cleanupTimeouts.has(sessionId)) {
+        clearTimeout(cleanupTimeouts.get(sessionId));
+        cleanupTimeouts.delete(sessionId);
+    }
+    
+    // Use memory monitor for logging
+    memoryMonitor.logMemoryUsage();
+}
+
+// Add transport count tracking
+function getActiveTransportCount(): number {
+    return Object.keys(transports.streamable).length;
 }

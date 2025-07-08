@@ -12,7 +12,7 @@
     "simple": "tsx --env-file=.env src/simple.ts",
     "dashboard": "tsx --env-file=.env src/registry.identity.dashboard.tsx",
     "registry": "PORT=8080 tsx --env-file=.env src/registry.mcp.server.ts",
-    "router": "PORT=8090  tsx --env-file=.env src/registry.router.mcp.server.ts",
+    "router": "PORT=8090  tsx --env-file=.env.local src/registry.router.mcp.server.ts",
     "build": "npm run build:pkgroll",
     "build:pkgroll": "npx pkgroll  --clear-dist --dist ./dist --shims  --treeshake   --target=node22.16.0 -y",
     "build:mta": "mbt build -p=cf --mtar-name=archive.0.1.mtar",

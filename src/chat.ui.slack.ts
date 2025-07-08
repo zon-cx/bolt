@@ -571,24 +571,7 @@ async function publishHome({
     console.log("info", info);
 
     // Get connections
-    const {isError, content, structuredContent:{connections}} = await connection.getSnapshot().context.client!.callTool({
-      name: "@registry:list",
-      arguments: {},
-    }) as CallToolResult & {structuredContent:{connections: (serverConfig & {status:string})[] }, content:{text:string}[]}
-
-    console.log(
-      "listConnections",
-      isError
-        ? content.map((e:any) => e.text)
-        : connections
-    );
-    if (isError) {
-      throw new Error(
-        `Failed to list connections: ${
-          content.map((e:any) => e.text) || "Unknown error"
-        }`
-      );
-    }
+    const connections = await Object.values(connection.getSnapshot().context.resourceData).filter((e:any) => e.uri?.startsWith("urn:mcp:server")).flatMap((e:any) => (e.contents)); 
 
    await client.views.publish({
       user_id: user,

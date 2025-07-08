@@ -66,7 +66,7 @@ const clientManagerSetup = setup({
         const observer = (event: Y.YMapEvent<ServerConfig>) => {
           for (const [key] of event.changes.keys.entries()) {
             const config = store.get(key);
-            if (config && !config.status) {
+            if (config && !config.status && config.url) {
               sendBack({
                 auth,
                 sessionId,
@@ -101,7 +101,7 @@ const clientManagerSetup = setup({
           for (const [id, resource] of Object.entries(snapshot.context.resourceData)) {
             const {contents} = resource;
             const mcpActors = actors(); 
-            if (!mcpActors[id]) {
+            if (!mcpActors[id] && contents[0].url) {
               // Add to store instead of sending connect event
               store.set(id, {
                 id,
@@ -242,6 +242,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
             auth: context.auth,
             sessionId: context.sessionId,
             store: context.store,
+            mcpActors: context.mcpActors,
           }),
         },
         {
