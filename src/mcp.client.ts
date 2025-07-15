@@ -3,19 +3,15 @@ import {
   setup,
   assign,
   ActorLogic,
-  Values,
   emit,
-  spawnChild,
   fromPromise,
   fromCallback,
-  sendTo,
   raise,
   ActorRefFromLogic,
   AnyEventObject,
 } from "xstate";
 import {
   ToolListChangedNotificationSchema,
-  type ClientCapabilities,
   type Resource,
   type Tool,
   type Prompt,
@@ -30,7 +26,6 @@ import {
   type Notification,
   type Request as McpRequest,
   CallToolRequest,
-  CallToolResult,
   CallToolResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -43,7 +38,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { AuthConfig } from "./registry.mcp.client.auth.js";
 import { z, ZodType } from "zod";
-import { InMemoryOAuthClientProvider, RemoteOAuthClientProvider } from "./mcp.client.auth.js";
+import { InMemoryOAuthClientProvider } from "./mcp.client.auth.js";
 export type TransportFactory = () =>
   | StreamableHTTPClientTransport
   | SSEClientTransport;
@@ -152,20 +147,21 @@ const mcpClientSetup = setup({
             error.message?.includes("Authorization") ||
             error.message?.includes("HTTP 401")
           ) {
-            console.log("Unauthorized error", error);
+            console.log("Unauthorized error", url, error);
             return {
+              url:url.href,
               client,
               transport,
               serverCapabilities: undefined,
               unauthorized: error,
             };
           }
-          console.error("Failed to initialize client:", error);
+          console.error("Failed to initialize client:", url.href, error);
 
           try {
             await transport.close();
           } catch (closeError) {
-            console.error("Error closing transport:", closeError);
+            console.error("Error closing transport:", url.href,closeError);
           }
 
           throw error;

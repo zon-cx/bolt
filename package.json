@@ -11,8 +11,8 @@
     "web": "tsx --env-file=.env src/chat.ui.web.tsx",
     "simple": "tsx --env-file=.env src/simple.ts",
     "dashboard": "tsx --env-file=.env src/registry.identity.dashboard.tsx",
-    "registry": "PORT=8080 tsx --env-file=.env src/registry.mcp.server.ts",
-    "router": "PORT=8090  tsx --env-file=.env.local src/registry.router.mcp.server.ts",
+    "registry": "PORT=8080 BASE_URL=http://localhost:8080 tsx --env-file=.env src/registry.mcp.server.ts",
+    "router": "PORT=8090 BASE_URL=http://localhost:8090  tsx --env-file=.env.local src/registry.router.mcp.server.ts",
     "build": "npm run build:pkgroll",
     "build:pkgroll": "npx pkgroll  --clear-dist --dist ./dist --shims  --treeshake   --target=node22.16.0 -y",
     "build:mta": "mbt build -p=cf --mtar-name=archive.0.1.mtar",
@@ -27,7 +27,7 @@
     "start:web": "node ./dist/chat.ui.web.cjs",
     "start:whoami": "node ./dist/whoami.mcp.server.cjs",
     "node-with-import": "node --import ./start.js /.main.mjs",
-    "inspector": "npx @modelcontextprotocol/inspector "
+    "inspector": "npx @modelcontextprotocol/inspector@latest "
   },
   "keywords": [],
   "author": "",
@@ -37,7 +37,7 @@
     "@ai-sdk/azure": "^1.3.23",
     "@hocuspocus/provider": "^3.1.1",
     "@hono/node-server": "^1.14.1",
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.15.1",
     "@opentelemetry/api": "^1.9.0",
     "@slack/bolt": "^4.3.0",
     "@statelyai/inspect": "^0.4.0",
