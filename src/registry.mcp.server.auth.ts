@@ -7,6 +7,9 @@ import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { connectYjs } from "./store.yjs";
 import { hash } from "node:crypto";
+import { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import express, { Response } from "express";
 
 const GIGYA_ISSUER =
   "https://gigya.authz.id/oidc/op/v1.0/4_yCXuvQ52Ux52BdaQTxUVhg";
@@ -18,8 +21,8 @@ export const proxyProvider = new ProxyOAuthServerProvider({
     authorizationUrl: `${GIGYA_ISSUER}/authorize`,
     tokenUrl: `${GIGYA_ISSUER}/token`,
     registrationUrl: `${GIGYA_ISSUER}/register`,
-    revocationUrl: `${GIGYA_ISSUER}/revoke`, // optional, if supported by Gigya
-  },
+    revocationUrl: `${GIGYA_ISSUER}/revoke`,
+   },
 
   verifyAccessToken: async (token) => {
     const { azp, exp, iss } = jwtDecode(token ) as JwtPayload & {azp?:string}
@@ -73,9 +76,18 @@ export const proxyProvider = new ProxyOAuthServerProvider({
     return {
       issuer: iss,
       scopes: ["openid", "profile", "email"],
-      token,
+      token, 
+        //When the token expires (in seconds since epoch).
+        //exp=>   expires_in
+        //          RECOMMENDED.  The lifetime in seconds of the access token.  For
+        //          example, the value "3600" denotes that the access token will
+        //          expire in one hour from the time the response was generated.
+        //          If omitted, the authorization server SHOULD provide the
+        //          expiration time via other means or document the default value.
+      expiresAt: Date.now() + (exp || 1) * 1000,
       extra:userInfo,
       clientId: azp || "default-client",
+     resource: new URL(`${env.BASE_URL || "http://localhost:8080"}/oauth/protected-resource/mcp`),
     };
   },
   getClient: async (client_id) => {
@@ -95,17 +107,57 @@ export const proxyProvider = new ProxyOAuthServerProvider({
   },
 });
 
+// proxyProvider.authorize = async (client: OAuthClientInformationFull, params: AuthorizationParams, res: Response) => {
+//   console.log("authorize", client, params, res)
+//   params.scopes= params.scopes || ["openid", "profile", "email"]
+//   await proxyProvider.authorize(client, params, res)
+// }
 export const authRouter = mcpAuthRouter({
   provider: proxyProvider,
-  issuerUrl: new URL("https://mcp-auth.val.run"),
-  baseUrl: new URL("https://mcp-auth.val.run"),
+  issuerUrl: new URL(env.BASE_URL || "http://localhost:8090"),
+  baseUrl: new URL(env.BASE_URL || "http://localhost:8090"),
+   
+  // baseUrl: new URL("https://mcp-auth.val.run"),
   serviceDocumentationUrl: new URL("https://docs.example.com/"),
   scopesSupported: ["openid", "profile", "email"],
 });
+export const protectedResourcesRouter = express.Router();
+
+protectedResourcesRouter.use(express.json());
+protectedResourcesRouter.use(express.urlencoded({ extended: true }));
+//
+// protectedResourcesRouter.post("token", (req, res) => {
+//     console.log("token request", req.headers);
+//     res.status(501).send("Not Implemented");
+//     console.log("token response", res.statusCode, res.statusMessage);
+// });
+protectedResourcesRouter.get(
+  "/.well-known/oauth-protected-resource/mcp",
+  (req, res) => {
+   console.log("mcp resource metadata request", req.headers);
+    res.json({
+        "resource": env.BASE_URL,
+        "authorization_servers": [
+            "https://mcp-auth.val.run"
+        ],
+        "scopes_supported": [
+            "openid",
+            "profile",
+            "email"
+        ],
+        "resource_documentation": "https://docs.example.com/"
+    });
+    console.log("mcp resource metadata response", res.statusCode, res.statusMessage);
+  }
+);
+ 
+
+
+
 
 export const requireAuth = requireBearerAuth({
   verifier: proxyProvider,
-  requiredScopes: ["openid", "profile", "email"],
+   requiredScopes: ["openid", "profile", "email"],
 });
 
 export function getAgentAuthInfo(

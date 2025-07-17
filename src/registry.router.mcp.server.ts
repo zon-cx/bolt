@@ -19,23 +19,19 @@ import {env} from "node:process";
 import {InMemoryEventStore} from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
 import {ActorRefFromLogic, createActor} from "xstate";
 
-import {authRouter, requireAuth,} from "./registry.mcp.server.auth";
+import {authRouter, protectedResourcesRouter, requireAuth,} from "./registry.mcp.server.auth";
 import {AuthInfo} from "@modelcontextprotocol/sdk/server/auth/types.js";
 import clientManagerMachine, {ServerConfig,} from "./registry.mcp.client";
 import {connectYjs} from "./store.yjs";
 import {NamespacedDataStore} from "./registry.mcp.client.namespace";
-import { jwtDecode } from "jwt-decode";
-import { InMemoryOAuthClientProvider, RemoteOAuthClientProvider } from "./mcp.client.auth";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { InMemoryOAuthClientProvider } from "./mcp.client.auth";
  
 const app = express();
 app.use(express.json());
 app.use(authRouter);
+app.use(protectedResourcesRouter);
 
 const doc = connectYjs("@mcp.registry");
-const store = doc.getMap<ServerConfig>("servers");
-const mcpSessions =  new Map<string, ActorRefFromLogic<typeof clientManagerMachine>>();
 const clientManagers = {} as Record<string, any>;
 const dataStores = {} as Record<string, NamespacedDataStore>;
 
@@ -331,7 +327,7 @@ app.use(
 );
 
 // POST handler for client-to-server communication
-app.all("/mcp/:id", requireAuth, async (req, res) => {
+app.all("/mcp/:id", async (req, res) => {
   const id = req.params.id;
   const session = req.header("mcp-session-id") as string | undefined;
   let transport: StreamableHTTPServerTransport;
@@ -391,7 +387,7 @@ app.get("/sse",requireAuth, async (req, res) => {
     transport
   );
 });
-app.get("/sse/:id",requireAuth, async (req, res) => {
+app.get("/sse/:id", async (req, res) => {
    const transport = new SSEServerTransport(`/messages/${req.params.id}`, res);
   transports.sse[transport.sessionId] = transport;
 
