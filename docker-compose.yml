@@ -1,0 +1,44 @@
+
+services:
+  mcp-router:
+    build:
+      context: .
+      dockerfile: mcps/router/Dockerfile
+    ports:
+      - "8090:80"
+    environment:
+      - NODE_ENV=production
+      - PORT=80
+      - REGISTRY_URL=http://mcp-registry
+    env_file:
+      - env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mcp-network
+
+  mcp-registry:
+    build:
+      context: .
+      dockerfile: mcps/registry/Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      - NODE_ENV=production
+      - PORT=80
+      
+    env_file:
+      - env
+    restart: unless-stopped
+    command: ["npm", "run", "start:registry"]
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge 

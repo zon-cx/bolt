@@ -7,9 +7,7 @@ import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { connectYjs } from "./store.yjs";
 import { hash } from "node:crypto";
-import { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
-import express, { Response } from "express";
+import express from "express";
 
 const GIGYA_ISSUER =
   "https://gigya.authz.id/oidc/op/v1.0/4_yCXuvQ52Ux52BdaQTxUVhg";

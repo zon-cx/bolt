@@ -6,8 +6,11 @@
   "bin": "./dist/chat.ui.slack.js",
   "packageManager": "yarn@1.22.22",
   "scripts": {
+    "deploy:router:docker:harbor": "docker tag mcp-roouter mg1-harbor.gigya.net/mcp-router:latest && docker push mg1-harbor.gigya.net/mcp-router:latest",
+    "deploy:router:docker": "docker tag mcp-router mcp-router:latest && docker push mcp-router:latest",
+    "build:router:docker": "docker build -t mcp-router -f mcps/router/Dockerfile .",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
-    "dev": "tsx   --env-file=.env.local src/chat.ui.slack.ts",
+    "dev": "PORT=8080 BASE_URL=http://localhost:8080 tsx   --env-file=.env.local src/chat.ui.slack.ts",
     "web": "tsx --env-file=.env src/chat.ui.web.tsx",
     "simple": "tsx --env-file=.env src/simple.ts",
     "dashboard": "tsx --env-file=.env src/registry.identity.dashboard.tsx",
@@ -35,35 +38,37 @@
   "type": "module",
   "dependencies": {
     "@ai-sdk/azure": "^1.3.23",
+    "@cxai/stream": "^1.0.20",
     "@hocuspocus/provider": "^3.1.1",
-    "@hono/node-server": "^1.14.1",
     "@modelcontextprotocol/sdk": "^1.15.1",
+    "yjs": "^13.6.26"
+
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.14.1",
     "@opentelemetry/api": "^1.9.0",
     "@slack/bolt": "^4.3.0",
     "@statelyai/inspect": "^0.4.0",
+    "@types/node": "^20.11.18",
     "@xstate/store": "^3.6.2",
     "ai": "^4.3.15",
+    "autoprefixer": "^10.4.21",
     "dotenv": "^16.5.0",
     "fetch-to-node": "^2.1.0",
-    "hono": "^4.7.9",
+    "hono": "^4.8.5",
     "jwt-decode": "^4.0.0",
     "lucide-react": "^0.509.0",
     "node-fetch": "^3.3.2",
+    "node-jose": "^2.2.0",
     "openai": "^4.97.0",
+    "postcss": "^8.5.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "slack-edge": "^1.3.8",
-    "xstate": "^5.19.2",
-    "y-websocket": "^3.0.0",
-    "yjs": "^13.6.26"
-  },
-  "devDependencies": {
-    "@cxai/stream": "^1.0.20",
-    "@types/node": "^20.11.18",
-    "autoprefixer": "^10.4.21",
-    "postcss": "^8.5.3",
     "tailwindcss": "^4.1.6",
-    "tsx": "^4.19.4"
+    "tsx": "^4.19.4",
+    "xstate": "^5.19.2",
+    "y-websocket": "^3.0.0"
   },
   "engines": {
     "yarn": "1.22.22",
@@ -74,8 +79,6 @@
       "dependencies": {
         "y-protocols": "^1.0.6"
       },
-      "main": "./dist/yjs.cjs",
-      "module": "./dist/yjs.mjs",
       "exports": {
         ".": {}
       }

@@ -20,6 +20,8 @@ import { ServerConfig } from "./registry.mcp.client";
 import { AuthSchema } from "./registry.mcp.client.auth";
 import { memoryMonitor } from "./memory-monitor";
 import * as Y from "yjs";
+// import {Jwt} from "hono/dist/types/utils/jwt";
+import {Request, Response, NextFunction} from "express";
 // Add cleanup tracking
 const cleanupTimeouts = new Map<string, NodeJS.Timeout>();
 const MAX_TRANSPORT_LIFETIME = 5 * 60 * 1000; // 5 minutes
@@ -60,10 +62,7 @@ const mcpServer = new McpServer({
     name: "mcp-manager",
     version: "1.0.0",
 }, {
-    capabilities: {
-        prompts: {
-            listChanged: true,
-        },
+    capabilities: { 
         resources: {
             listChanged: true,
             subscribe: true,
@@ -71,11 +70,22 @@ const mcpServer = new McpServer({
         tools: {
             listChanged: true,
         },
-        completions: {},
         logging: {},
     },
 });
 
+const mcpResourceServer = new McpServer({
+    name: "mcp-manager",
+    version: "1.0.0",
+}, {
+    capabilities: {
+        resources: {
+            listChanged: true,
+            subscribe: true,
+        },
+        logging: {},
+    },
+});
 
 mcpServer.resource(
     "server",
@@ -124,6 +134,52 @@ mcpServer.resource(
     }
 );
 
+mcpResourceServer.resource(
+    "server",
+    new ResourceTemplate("mcp://{id}", {
+        list: async (extra) => {
+            const store = agentStores[extra.sessionId || "default"] ;
+            const servers = Array.from(store.entries()).map(([key, value]) => ({
+                ...value,
+                id: key
+            }));
+            return {
+                resources: servers.map(server => ({
+                    uri: `mcp://${server.id}`,
+                    name: server.name || server.id,
+                    description: `MCP server at ${server.url}`,
+                    mimeType: "application/json"
+                }))
+            };
+        }
+    }),
+    {
+        title: "MCP Server",
+        description: "MCP server configuration by ID",
+        mimeType: "application/json"
+    },
+    async (uri, params, extra) => {
+        const store = agentStores[extra.sessionId || "default"] ;
+        const serverId = String(params.id);
+        const server = store.get(serverId);
+        if (!server) {
+            return {
+                contents: [{
+                    uri: uri.href,
+                    text: JSON.stringify({ error: "Server not found" }, null, 2),
+                    mimeType: "application/json"
+                }]
+            };
+        }
+        return {
+            contents: [{
+                uri: uri.href,
+                text: JSON.stringify(server, null, 2),
+                mimeType: "application/json"
+            }]
+        };
+    }
+);
 mcpServer.registerTool("list", {
         outputSchema: {connections:z.array(ServerSchema)},
         description: "List all available MCP servers",
@@ -446,7 +502,7 @@ async function connectSession(sessionId: string, {session, auth, id}: {
     session?: string;
     auth: AuthInfo;
     id?: string;
-}, transport: StreamableHTTPServerTransport): Promise<void> {
+}, transport: StreamableHTTPServerTransport, server:McpServer): Promise<void> {
     const agent = mcpAgentManager.init({session, auth, id});
     const store = doc.getMap<ServerConfig>(agent.id);
     const connectionCallback = () => {
@@ -459,7 +515,7 @@ async function connectSession(sessionId: string, {session, auth, id}: {
     agents[sessionId] = agent;
 
     // Connect the MCP server to the transport
-    await mcpServer.connect(transport);
+    await server.connect(transport);
     // Clean up transport when closed
     transport.onclose = () => {
         console.log(`Transport for session ${sessionId} closed`);
@@ -505,7 +561,78 @@ app.use(async (req, res, next) => {
     await next();
     console.log(`[LOG] [DONE] ${req.method} ${req.url} ${res.statusCode}`);
 });
-app.all("/mcp/:id", async (req, res) => {
+
+ 
+// export function injectAnonymousAuth({ tokenEndpoint, requiredScopes = [], resourceMetadataUrl, privateKey }) {
+//     return async (req: Request, res:Response, next:NextFunction) => {
+//         // Check if the request has an Authorization header
+//         const authHeader = req.headers.authorization;
+//         if (!authHeader) { 
+//             const jwt = await Jwt.sign({
+//                 sub:`urn:mcp:session:${req.header("mcp-session-id") || randomUUID()}`,
+//                 agent: req.header("User-Agent"),
+//                 ip: req.ip,
+//                 exp: Math.floor(Date.now() / 1000) + 60 * 60, // 1 hour expiration
+//                 scope: requiredScopes.join(" "),
+//             },privateKey, "EdDSA");
+//            
+//             const {access_token} =  await fetch(tokenEndpoint, {
+//                 method: "POST",
+//                 headers: {
+//                     "Content-Type": "form-urlencoded",
+//                     "Accept": "application/json",
+//                 },
+//                 body: new URLSearchParams({
+//                     //jwt bearer
+//                     grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+//                     scope: requiredScopes.join(" "),
+//                     resource_metadata_url: resourceMetadataUrl,
+//                     assertion:jwt
+//                 })
+//             }).then(res => res.json()).then(data => {
+//                 if (data.error) {
+//                     throw new Error(`Error fetching access token: ${data.error}`);
+//                 }
+//                 return data as {access_token: string, token_type: string, expires_in: number};
+//             }).catch(error => {
+//                 console.error("Error fetching access token:", error);
+//                 res.status(500).json({ error:error.message?? "Internal server error", isError: true });
+//                 throw error;       
+//             });
+//             req.headers["Authorization"]= `Bearer ${access_token}`;
+//                
+//         }
+//         next();
+//     }
+// }
+// , injectAnonymousAuth({})
+app.all("/mcp/:id", requireAuth,async (req, res) => {
+    const id = req.params.id;
+    const session = req.header("mcp-session-id") as string | undefined;
+    let transport: StreamableHTTPServerTransport;
+   
+    if (session && transports.streamable[session]) {
+        transport = transports.streamable[session];
+    } else {
+        const sessionId = session || randomUUID();
+        transport =new StreamableHTTPServerTransport({
+            eventStore: new InMemoryEventStore(),
+            sessionIdGenerator: () => sessionId,
+            onsessioninitialized: (sessionId) => {
+                transports.streamable[sessionId] = transport;
+            },
+        })
+        await connectSession(
+            sessionId,
+            { auth: req.auth as AuthInfo, id },
+            transport,
+            mcpServer
+        );
+    }
+    await transport.handleRequest(req, res, req.body);
+});
+
+app.all("/mcp/:id/readonly", async (req, res) => {
     const id = req.params.id;
     const session = req.header("mcp-session-id") as string | undefined;
     let transport: StreamableHTTPServerTransport;
@@ -524,7 +651,8 @@ app.all("/mcp/:id", async (req, res) => {
         await connectSession(
             sessionId,
             { auth: req.auth as AuthInfo, id },
-            transport
+            transport,
+            mcpResourceServer
         );
     }
     await transport.handleRequest(req, res, req.body);
@@ -548,7 +676,8 @@ app.all("/mcp", requireAuth, async (req, res) => {
         await connectSession(
             sessionId,
             { auth: req.auth as AuthInfo, id: req.params.id },
-            transport
+            transport,
+            mcpServer
         );
     }
     await transport.handleRequest(req, res, req.body);

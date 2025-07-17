@@ -33,7 +33,7 @@ import { env } from "node:process";
 import { ServerConfig } from "./registry.mcp.client.js";
 // Configuration
 
-const authState =  connectYjs("@mcp.auth");
+const authState =  connectYjs("@mcp.oauth");
 
 async function logRedirect(url: URL) {
   console.log(`mock redirect to: ${url.toString()}`);

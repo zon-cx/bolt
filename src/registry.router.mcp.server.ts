@@ -300,6 +300,16 @@ async function connectSession(
   };
 }
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.status(200).json({ 
+    status: "healthy", 
+    service: "mcp-router",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 app.use(async (req, res, next) => {
   console.log(`[LOG] ${req.method} ${req.url}`);
   console.log("Headers:", req.headers);
