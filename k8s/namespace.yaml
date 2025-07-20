@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-gate
+  labels:
+    name: mcp-gate
+    app: mcp-gate 

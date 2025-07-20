@@ -1,0 +1,41 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mcp-gate-ingress
+  namespace: mcp-gate
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: mcp-gate.example.com  # Replace with your actual domain
+    http:
+      paths:
+      - path: /slack
+        pathType: Prefix
+        backend:
+          service:
+            name: mcp-slack-service
+            port:
+              number: 80
+      - path: /router
+        pathType: Prefix
+        backend:
+          service:
+            name: mcp-router-service
+            port:
+              number: 80
+      - path: /registry
+        pathType: Prefix
+        backend:
+          service:
+            name: mcp-registry-service
+            port:
+              number: 80
+      - path: /inspector
+        pathType: Prefix
+        backend:
+          service:
+            name: mcp-inspector-service
+            port:
+              number: 6274 

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-config
+  namespace: mcp-gate
+data:
+  NODE_ENV: "production"
+  REGISTRY_URL: "http://mcp-registry-service:80"
+  BASE_URL: "http://localhost:8090"
+  DANGEROUSLY_OMIT_AUTH: "true"
+  CLIENT_PORT: "6274"
+  SERVER_PORT: "6277" 
