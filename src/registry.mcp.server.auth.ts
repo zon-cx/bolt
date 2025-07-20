@@ -85,7 +85,7 @@ export const proxyProvider = new ProxyOAuthServerProvider({
       expiresAt: Date.now() + (exp || 1) * 1000,
       extra:userInfo,
       clientId: azp || "default-client",
-     resource: new URL(`${env.BASE_URL || "http://localhost:8080"}/oauth/protected-resource/mcp`),
+      resource: new URL(`${env.BASE_URL || "http://localhost:8080"}/oauth/protected-resource/mcp`),
     };
   },
   getClient: async (client_id) => {
