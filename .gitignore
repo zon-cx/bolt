@@ -12,3 +12,4 @@ env
 /ref/
 /keys/
 .env.local
+.vercel

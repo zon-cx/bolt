@@ -1,7 +1,8 @@
 
 services:
-  mcp-router:
-    build:
+  mcp-router: 
+    image: mcp-router
+    build: 
       context: .
       dockerfile: mcps/router/Dockerfile
     ports:
@@ -10,6 +11,7 @@ services:
       - NODE_ENV=production
       - PORT=80
       - REGISTRY_URL=http://mcp-registry
+      - BASE_URL=http://localhost:8090
     env_file:
       - env
     restart: unless-stopped
@@ -23,11 +25,10 @@ services:
       - mcp-network
 
   mcp-registry:
+    image: mcp-registry
     build:
       context: .
       dockerfile: mcps/registry/Dockerfile
-    ports:
-      - "8080:80"
     environment:
       - NODE_ENV=production
       - PORT=80
@@ -36,6 +37,23 @@ services:
       - env
     restart: unless-stopped
     command: ["npm", "run", "start:registry"]
+    networks:
+      - mcp-network
+      
+  mcp-inspector:
+    image: mcp-inspector
+    build:
+      context: mcps/inspector
+      dockerfile: Dockerfile
+    ports:
+      - "6274:6274"
+      - "6277:6277"
+    environment:
+      DANGEROUSLY_OMIT_AUTH: true
+      CLIENT_PORT: 6274
+      SERVER_PORT: 6277
+   
+    restart: unless-stopped
     networks:
       - mcp-network
 

@@ -26,9 +26,13 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=8090
+ENV HOSTNAME="0.0.0.0"
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
+
+# Copy node_modules from deps stage
+COPY --from=deps /app/node_modules ./node_modules
 
 # Copy the built application
 COPY --from=builder /app/dist ./dist
@@ -45,10 +49,8 @@ RUN chown nextjs:nodejs .next
 # Switch to non-root user
 USER nextjs
 
-EXPOSE 8080
+EXPOSE ${PORT}
 
-ENV PORT=8080
-ENV HOSTNAME="0.0.0.0"
-
+ 
 # Start the router server
 CMD ["node", "./dist/registry.router.mcp.server.cjs"] 

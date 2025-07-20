@@ -6,11 +6,12 @@
   "bin": "./dist/chat.ui.slack.js",
   "packageManager": "yarn@1.22.22",
   "scripts": {
+    "start": "npm run start:router",
     "deploy:router:docker:harbor": "docker tag mcp-roouter mg1-harbor.gigya.net/mcp-router:latest && docker push mg1-harbor.gigya.net/mcp-router:latest",
     "deploy:router:docker": "docker tag mcp-router mcp-router:latest && docker push mcp-router:latest",
     "build:router:docker": "docker build -t mcp-router -f mcps/router/Dockerfile .",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
-    "dev": "PORT=8080 BASE_URL=http://localhost:8080 tsx   --env-file=.env.local src/chat.ui.slack.ts",
+    "dev": "PORT=8090 BASE_URL=http://localhost:8090 tsx   --env-file=.env.local src/chat.ui.slack.ts",
     "web": "tsx --env-file=.env src/chat.ui.web.tsx",
     "simple": "tsx --env-file=.env src/simple.ts",
     "dashboard": "tsx --env-file=.env src/registry.identity.dashboard.tsx",
