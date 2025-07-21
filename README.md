@@ -4,45 +4,63 @@ A comprehensive Model Context Protocol (MCP) implementation featuring Slack inte
 
 ## 🚀 Overview
 
-This project implements a **personal MCP server network** where each user gets their own MCP server space with built-in registry tools. The system consists of:
+This project implements an **MCP Identity Gate** concept with personal MCP server networks, registry aggregation, and enterprise-grade authorization capabilities. The system consists of:
 
+**MCP Servers - Core Components**:
+- **MCP Registry**: Server metadata aggregator with dynamic capabilities management
+- **MCP Router**: Gateway with transport, authorization, and routing capabilities
 - **Personal MCP Servers**: Each user gets `/mcp/{user-id}` with registry tools
+
+**Client Applications - Examples**:
 - **Slack Assistant**: AI-powered Slack bot that connects to personal MCP servers
 - **Web Dashboard**: React-based interface for managing personal MCP server spaces
-- **Registry Server**: Central server for MCP agent discovery and management
-- **MCP Router**: Gateway that provides personal server spaces for each user
 - **Inspector**: Development tools for testing personal MCP servers
 
-**Key Concept**: Users authenticate and get their own MCP server space where they can add custom servers, and the registry tools are always available for server management.
+
+**Planned Features** (TBD):
+- **Authorization Layer**: Dynamic policy guardians and scope control with OAuth 2.0 support
+- **Agent Directory**: Complete agent lifecycle management from onboarding to policy assignment
+
+**Key Concept**: Users authenticate and get their own MCP server space where they can add custom servers, with comprehensive registry tools and routing capabilities. Authorization policies and agent management capabilities are planned for future releases.
 
 ## 🏗️ Architecture
 
-The system implements a **personal MCP server network** where each user gets their own MCP server space through the router. Here's how it works:
+The system implements an **MCP Identity Gate** with personal MCP server networks, registry aggregation, and authorization capabilities. Here's the enhanced architecture:
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Slack Bot     │    │  Web Dashboard  │    │   Inspector     │
-│   (Assistant)   │    │   (React UI)    │    │   (Dev Tools)   │
+│   Slack Bot     │    │  Cline          │    │   Inspector     │
+│   (Assistant)   │    │   (IDE)         │    │   (Dev Tools)   │
 │   Client        │    │   Client        │    │   Client        │
 └─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
           │                      │                      │
           └──────────────────────┼──────────────────────┘
                                  │
                     ┌─────────────▼─────────────┐
-                    │      MCP Router           │
+                    │      MCP Router - Server  │
                     │   (Personal MCP Workspace)│
+                    │   (MCP Gate - Transport)  │
                     │   https://mcp-router.     │
                     │   cfapps.eu12.hana.       │
                     │   ondemand.com/mcp        │
+                    │   • PEP & PDP             │
+                    │   • Token Exchange        │
+                    │   • Request Routing       │
                     └─────────────┬─────────────┘
                                   │
                     ┌─────────────▼─────────────┐
-                    │  User Personal MCP Server │
-                    │  /mcp/{user-id}           │
-                    │  • Registry Tools         │
-                    │  • Custom Servers         │
-                    │  • Personal URL           │
-                    └───────────────────────────┘
+                    │  MCP Registry             │
+                    │  (Server Metadata         │
+                    │   Aggregator)             │
+                    │   • tools/list            │
+                    │   • prompts/list          │
+                    │   • completions/list      │
+                    │   • resources/list        │
+                    │   • Change Notifications  │
+                    │   • Generic Tools Support │
+                    └─────────────┬─────────────┘
+                                  │
+           
 ```
 
 ### Personal MCP Server Concept
@@ -57,6 +75,236 @@ https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp/{user-id}
 - **Custom Servers**: Ability to add their own MCP servers
 - **Personal URL**: Shareable MCP server URL for other clients
 - **Server Management**: Tools to manage connected servers
+
+
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Slack Bot     │    │  Web Dashboard  │    │   Inspector     │
+│   (Assistant)   │    │   (React UI)    │    │   (Dev Tools)   │
+│   Client        │    │   Client        │    │   Client        │
+└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
+          │                      │                      │
+          └──────────────────────┼──────────────────────┘
+                                 │
+                    ┌─────────────▼─────────────┐
+                    │      MCP Router           │
+                    │   (Personal MCP Workspace)│
+                    │   (MCP Gate - Transport)  │
+                    │   https://mcp-router.     │
+                    │   cfapps.eu12.hana.       │
+                    │   ondemand.com/mcp        │
+                    │   • PEP & PDP             │
+                    │   • Token Exchange        │
+                    │   • Request Routing       │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  MCP Registry             │
+                    │  (Server Metadata         │
+                    │   Aggregator)             │
+                    │   • tools/list            │
+                    │   • prompts/list          │
+                    │   • completions/list      │
+                    │   • resources/list        │
+                    │   • Change Notifications  │
+                    │   • Generic Tools Support │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  User Personal MCP Server │
+                    │  /mcp/{user-id}           │
+                    │  • Registry Tools         │
+                    │  • Custom Servers         │
+                    │  • Personal URL           │
+                    │  • X MCP Server Example   │
+                    └───────────────────────────┘
+```
+
+### Current Architecture (POC Implementation)
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Slack Bot     │    │  Web Dashboard  │    │   Inspector     │
+│   (Assistant)   │    │   (React UI)    │    │   (Dev Tools)   │
+│   Client        │    │   Client        │    │   Client        │
+└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
+          │                      │                      │
+          └──────────────────────┼──────────────────────┘
+                                 │
+                    ┌─────────────▼─────────────┐
+                    │  MCP Registry             │
+                    │  (Server Metadata         │
+                    │   Aggregator)             │
+                    │   • tools/list            │
+                    │   • prompts/list          │
+                    │   • completions/list      │
+                    │   • resources/list        │
+                    │   • Change Notifications  │
+                    │   • Generic Tools Support │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │      MCP Router           │
+                    │   (Personal MCP Workspace)│
+                    │   (MCP Gate - Transport)  │
+                    │   https://mcp-router.     │
+                    │   cfapps.eu12.hana.       │
+                    │   ondemand.com/mcp        │
+                    │   • PEP & PDP             │
+                    │   • Token Exchange        │
+                    │   • Request Routing       │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  User Personal MCP Server │
+                    │  /mcp/{user-id}           │
+                    │  • Registry Tools         │
+                    │  • Custom Servers         │
+                    │  • Personal URL           │
+                    │  • X MCP Server Example   │
+                    └───────────────────────────┘
+```
+
+### Future Architecture (With Authorization PEP)
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Slack Bot     │    │  Web Dashboard  │    │   Inspector     │
+│   (Assistant)   │    │   (React UI)    │    │   (Dev Tools)   │
+│   Client        │    │   Client        │    │   Client        │
+└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
+          │                      │                      │
+          └──────────────────────┼──────────────────────┘
+                                 │
+                    ┌─────────────▼─────────────┐
+                    │  MCP Registry             │
+                    │  (Server Metadata         │
+                    │   Aggregator)             │
+                    │   • tools/list            │
+                    │   • prompts/list          │
+                    │   • completions/list      │
+                    │   • resources/list        │
+                    │   • Change Notifications  │
+                    │   • Generic Tools Support │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │      MCP Router           │
+                    │   (Personal MCP Workspace)│
+                    │   (MCP Gate - Transport)  │
+                    │   https://mcp-router.     │
+                    │   cfapps.eu12.hana.       │
+                    │   ondemand.com/mcp        │
+                    │   • PEP & PDP             │
+                    │   • Token Exchange        │
+                    │   • Request Routing       │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  Authorization PEP        │
+                    │  (Policy Enforcement      │
+                    │   Point)                  │
+                    │   • Request Validation    │
+                    │   • Policy Evaluation     │
+                    │   • Token Validation      │
+                    │   • Access Control        │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  Identity Provider (IDP)  │
+                    │  • OAuth 2.0 / OIDC       │
+                    │  • User Authentication    │
+                    │  • Token Issuance         │
+                    │  • Consent Management     │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  User Personal MCP Server │
+                    │  /mcp/{user-id}           │
+                    │  • Registry Tools         │
+                    │  • Custom Servers         │
+                    │  • Personal URL           │
+                    │  • X MCP Server Example   │
+                    └───────────────────────────┘
+```
+
+### Enterprise Architecture (With ORD & Identity Broker)
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Slack Bot     │    │  Web Dashboard  │    │   Inspector     │
+│   (Assistant)   │    │   (React UI)    │    │   (Dev Tools)   │
+│   Client        │    │   Client        │    │   Client        │
+└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
+          │                      │                      │
+          └──────────────────────┼──────────────────────┘
+                                 │
+                    ┌─────────────▼─────────────┐
+                    │  MCP Registry             │
+                    │  (Server Metadata         │
+                    │   Aggregator)             │
+                    │   • tools/list            │
+                    │   • prompts/list          │
+                    │   • completions/list      │
+                    │   • resources/list        │
+                    │   • Change Notifications  │
+                    │   • Generic Tools Support │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │      MCP Router           │
+                    │   (Personal MCP Workspace)│
+                    │   (MCP Gate - Transport)  │
+                    │   https://mcp-router.     │
+                    │   cfapps.eu12.hana.       │
+                    │   ondemand.com/mcp        │
+                    │   • PEP & PDP             │
+                    │   • Token Exchange        │
+                    │   • Request Routing       │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  Authorization PEP       │
+                    │  (Policy Enforcement      │
+                    │   Point)                 │
+                    │   • Request Validation    │
+                    │   • Policy Evaluation     │
+                    │   • Token Validation      │
+                    │   • Access Control        │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  Identity Broker          │
+                    │  • Multi-IDP Support      │
+                    │  • Identity Federation    │
+                    │  • Attribute Mapping      │
+                    │  • Single Sign-On (SSO)   │
+                    │  • Identity Synchronization│
+                    │  • Agent Registration     │
+                    │  • OIDC App Management    │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  ORD (Open Resource       │
+                    │   Discovery)              │
+                    │   • Resource Discovery    │
+                    │   • API Catalog           │
+                    │   • Service Registry      │
+                    │   • Metadata Management   │
+                    │   • Version Control       │
+                    │   • Tool Binding          │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  User Personal MCP Server │
+                    │  /mcp/{user-id}           │
+                    │  • Registry Tools         │
+                    │  • Custom Servers         │
+                    │  • Personal URL           │
+                    │  • X MCP Server Example   │
+                    └───────────────────────────┘
+```
 
 ### Network of Interconnected Servers
 
@@ -84,28 +332,128 @@ MCP Url: https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp
 
 ## 📦 Components
 
-### 1. MCP Router (`registry.router.mcp.server.ts`)
-- **Purpose**: Personal MCP server gateway that provides each user with their own MCP server space
+### 1. MCP Registry (`registry.mcp.server.ts`) - Server Metadata Aggregator
+- **Purpose**: Comprehensive MCP server metadata aggregator with dynamic capabilities management
+- **Features**:
+  - **MCP List Methods**: Aggregated `tools/list`, `prompts/list`, `completions/list`, `resources/list`
+  - **Dynamic Change Notifications**: Listen to server's list changed notifications
+  - **Capabilities Aggregation**: Provide aggregated interface to MCP capabilities method
+  - **Protected Resources Metadata**: Aggregated protected resources with policy annotations
+  - **Generic Tools Support**: Built-in support for JIRA, Slack, Confluence, and other widely used tools
+  - **Configuration Push**: Push aggregated configuration to MCP Gate & Authorization Module
+  - **Server Version Management**: Import and maintain MCP server version information
+  - **Real-time Updates**: Propagate changes across the network dynamically
+
+### 2. MCP Router (`registry.router.mcp.server.ts`) - MCP Gate Transport
+- **Purpose**: Personal MCP server gateway with transport, authorization, and routing capabilities
 - **Features**:
   - **Personal Server Spaces**: Each user gets `/mcp/{user-id}` endpoint
   - **Registry Tools Integration**: Built-in tools for server discovery and management
   - **Authentication Tools**: Automatic `@auth:*` tools for OAuth flows
   - **Server Aggregation**: Combines multiple MCP servers into single endpoint
-  - **Authentication & Authorization**: OAuth-based user management
-  - **URL Sharing**: Users can share their personal MCP server URLs
-  - **Transport Handling**: HTTP/SSE transport support
+  - **PEP & PDP**: Policy Enforcement Point and Policy Decision Point
+  - **Token Exchange**: Downstream IDP token exchange for upstream requests
+  - **Request Routing**: Intelligent routing based on aggregated MCP capabilities
+  - **MCP Authorization Protocol**: Full support for MCP authorization specification
+  - **Transport Handling**: HTTP/SSE transport support with authentication
   - **Session Management**: Persistent connections and state
 
+### 3. Authorization Module (TBD )
+- **Purpose**: Comprehensive authorization system with policy management and scope control
+- **Features** (Planned):
+  - **Aggregated MCP Methods**: Use aggregated tools/list, prompts/list, completions/list, resources/list
+  - **Policy Management**: Dynamic policy templates and value lists based on aggregated data
+  - **Protected Resource Metadata**: Consume aggregated PRM and adapt with policies
+  - **Scope Management**: Update scopes and policies of applications dynamically
+  - **OAuth 2.0 Support**: Full OAuth 2.0 authorization flows
+  - **MCP Authorization Protocol**: Support for MCP authorization specification
+  - **Change Notifications**: Listen to server's list changed notifications and update policies
+  - **Token Management**: Handle upstream/downstream token exchange
 
-### 2. Registry Server (`registry.mcp.server.ts`)
-- **Purpose**: Simple MCP server for agent registration and management as placeholder to any registry
-- **Features**:
-  - **Agent Registration**: Register and discover MCP agents
-  - **Resource Management**: Manage MCP resources across the network
-  - **Tool Proxying**: Proxy tools between different MCP servers
-  - **Authentication Handling**: OAuth-based authentication for agents
-  - **YJS-based Collaborative State**: Real-time collaborative state management
-  - **Server Discovery**: Tools for finding and connecting to MCP servers
+### 4. Agent Directory (TBD - Planned for Future Release)
+- **Purpose**: Complete agent lifecycle management from onboarding to policy assignment
+- **Features** (Planned):
+  - **Agent Lifecycle Management**: Onboarding, policy assignment, authentication
+  - **Agent Schema Support**: Support for agent design and instance management
+  - **Custom Attributes**: Annotations for use in authorization policies
+  - **Authentication Methods**: Client ID + secret, mTLS, technical user support
+  - **OIDC RP Application**: Regular OIDC relying party with specific UI
+  - **Credential Provisioning**: Client ID + secret, certificates, JWT tokens
+  - **Policy Assignment**: Dynamic policy assignment based on agent attributes
+
+### 5. Identity Broker (TBD - Planned for Future Release)
+- **Purpose**: Central component for automated OIDC application management and agent registration
+- **Features** (Planned):
+  - **Multi-IDP Support**: Support for multiple identity providers
+  - **Identity Federation**: Federated identity across different systems
+  - **Attribute Mapping**: Map attributes between different identity systems
+  - **Single Sign-On (SSO)**: Unified authentication across services
+  - **Identity Synchronization**: Keep identities synchronized across systems
+  - **Agent Registration**: Automated agent registration as multi-tenant applications
+  - **OIDC App Management**: Automatic creation and management of OIDC applications
+  - **Credential Management**: Support for mTLS certificates, client secrets, and JWT authentication
+  - **Multi-tenant Support**: Enable agents across multiple customer tenants
+
+### 6. ORD (Open Resource Discovery) (TBD )
+- **Purpose**: Centralized resource discovery and API catalog management
+- **Features** (Planned):
+  - **Resource Discovery**: Discover and catalog available resources and APIs
+  - **API Catalog**: Comprehensive catalog of available APIs and services
+  - **Service Registry**: Registry of available services and their metadata
+  - **Metadata Management**: Manage metadata for resources and services
+  - **Version Control**: Track versions of APIs and services
+  - **Tool Binding**: Define and manage tool bindings for MCP servers
+  - **Service Integration**: Integrate with various service providers
+  - **Discovery APIs**: Provide APIs for resource discovery
+
+## 🔐 MCP Authorization Protocol Support
+
+The system fully supports the MCP Authorization Protocol specification (https://modelcontextprotocol.io/specification/draft/basic/authorization) with the following capabilities:
+
+### Authorization Server Protocol
+- **Grant & Consent Elicitation**: Complete OAuth 2.0 grant and consent flows
+- **Authentication & Step-up Tools**: Multi-factor authentication and step-up authentication
+- **SAP MCP Server Example**: Built-in support for SAP-based MCP servers
+- **Token Exchange**: Seamless token exchange between upstream and downstream IDPs
+
+### Policy Enforcement & Decision
+- **PEP (Policy Enforcement Point)**: Enforces authorization policies at the MCP gate
+- **PDP (Policy Decision Point)**: Makes authorization decisions based on aggregated policies
+- **Dynamic Policy Updates**: Real-time policy updates based on server capability changes
+- **Scope Management**: Dynamic scope assignment and validation
+
+### Enterprise Integration
+- **Node.js on BTP**: Built on Node.js runtime for SAP Business Technology Platform
+- **Server-side Gateway**: Acts as a server-side gateway for MCP client abstraction
+- **Open Source Reference**: Leverages open source MCP implementations as reference
+- **Production Ready**: Enterprise-grade implementation with comprehensive security
+
+## 🚧 What's Next - Planned Features
+
+### Authorization Module Implementation
+- **Policy Management System**: Dynamic policy templates and value lists
+- **Scope Management**: Update scopes and policies of applications dynamically
+- **Protected Resource Metadata**: Consume aggregated PRM and adapt with policies
+- **MCP Authorization Protocol**: Full implementation of MCP authorization specification
+- **Token Exchange**: Handle upstream/downstream token exchange
+
+### Agent Directory Implementation
+- **Agent Lifecycle Management**: Complete onboarding, policy assignment, and authentication
+- **Agent Schema Support**: Support for agent design and instance management
+- **Custom Attributes**: Annotations for use in authorization policies
+- **Authentication Methods**: Client ID + secret, mTLS, technical user support
+- **OIDC RP Application**: Regular OIDC relying party with specific UI
+- **Credential Provisioning**: Client ID + secret, certificates, JWT tokens
+
+### Enhanced Registry Capabilities
+- **Advanced Metadata Aggregation**: Enhanced tools/list, prompts/list, completions/list, resources/list
+- **Real-time Change Propagation**: Improved change notification system
+- **Generic Tools Integration**: Enhanced support for JIRA, Slack, Confluence, and other tools
+- **Configuration Management**: Advanced configuration push to MCP Gate & Authorization Module
+
+---
+
+**📋 For detailed future plans and roadmap, see [FUTURE_PLANS.md](./FUTURE_PLANS.md)**
 
 ## Client Examples
 
@@ -143,14 +491,17 @@ MCP Url: https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp
 
 ## 🛠️ Technology Stack
 
-- **Runtime**: Node.js 22.16.0
+- **Runtime**: Node.js 22.16.0 (SAP BTP Compatible)
 - **Language**: TypeScript
 - **Framework**: Express.js, Hono
 - **State Management**: XState
 - **UI**: React 19, Tailwind CSS
 - **Real-time**: YJS, WebSockets
-- **Authentication**: OAuth 2.0, JWT
+- **Authentication**: OAuth 2.0, JWT, mTLS
+- **Authorization**: MCP Authorization Protocol, PEP/PDP
 - **Protocol**: Model Context Protocol (MCP)
+- **Enterprise**: SAP BTP Integration, Agent Directory
+- **Registry**: Dynamic Metadata Aggregation, Change Notifications
 - **Build Tool**: pkgroll
 - **Package Manager**: Yarn 1.22.22
 
@@ -472,7 +823,13 @@ For issues and questions:
 
 ## 🔄 Version History
 
-- **v0.0.2**: Current version with full MCP implementation
+- **v0.0.3**: Enhanced MCP Identity Gate POC with registry and routing capabilities
+  - Added MCP Registry with metadata aggregation
+  - Enhanced MCP Router with transport and routing capabilities
+  - Basic PEP/PDP framework (TBD for full implementation)
+  - SAP BTP integration preparation
+  - Authorization Module and Agent Directory planned for future releases
+- **v0.0.2**: Full MCP implementation with personal server spaces
 - **v0.0.1**: Initial release with basic Slack integration
 
 ---
