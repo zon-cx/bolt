@@ -3,7 +3,7 @@ services:
   mcp-router: 
     image: mcp-router
     build: 
-      context: .
+      context: ..
       dockerfile: mcps/router/Dockerfile
     ports:
       - "8090:80"
@@ -27,7 +27,7 @@ services:
   mcp-registry:
     image: mcp-registry
     build:
-      context: .
+      context: ..
       dockerfile: mcps/registry/Dockerfile
     environment:
       - NODE_ENV=production
@@ -43,7 +43,7 @@ services:
   mcp-inspector:
     image: mcp-inspector
     build:
-      context: mcps/inspector
+      context: inspector
       dockerfile: Dockerfile
     ports:
       - "6274:6274"
