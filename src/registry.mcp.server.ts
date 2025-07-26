@@ -18,10 +18,7 @@ import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {OAuthTokensSchema} from "@modelcontextprotocol/sdk/shared/auth.js";
 import { ServerConfig } from "./router.mcp.client";
 import { AuthSchema } from "./router.mcp.client.auth";
-import { memoryMonitor } from "./memory-monitor";
 import * as Y from "yjs";
-// import {Jwt} from "hono/dist/types/utils/jwt";
-import {Request, Response, NextFunction} from "express";
 // Add cleanup tracking
 const cleanupTimeouts = new Map<string, NodeJS.Timeout>();
 const MAX_TRANSPORT_LIFETIME = 5 * 60 * 1000; // 5 minutes
