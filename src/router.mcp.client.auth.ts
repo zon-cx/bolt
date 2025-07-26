@@ -2,7 +2,7 @@ import { OAuthClientMetadata, OAuthTokens, OAuthTokensSchema } from "@modelconte
 import { z } from "zod";
 import { connectYjs } from "./store.yjs";
 import { InMemoryOAuthClientProvider } from "./mcp.client.auth";
-import { ServerConfig } from "./registry.mcp.client";
+import { ServerConfig } from "./router.mcp.client";
 import { env } from "node:process";
 import * as Y from "yjs";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";

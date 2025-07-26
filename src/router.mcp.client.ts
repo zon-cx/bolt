@@ -15,9 +15,9 @@ import * as Y from "yjs";
 import mcpClientMachine, { MCPClient } from "./mcp.client.js";
 import { env, version } from "node:process";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { NamespacedDataStore } from "./registry.mcp.client.namespace.js";
-import { AuthConfig, AuthSchema } from "./registry.mcp.client.auth.js";
-import { RemoteOAuthClientProvider } from "./registry.mcp.client.auth.js";
+import { NamespacedDataStore } from "./router.mcp.client.namespace.js";
+import { AuthConfig, AuthSchema } from "./router.mcp.client.auth.js";
+import { RemoteOAuthClientProvider } from "./router.mcp.client.auth.js";
 import { z } from "zod";
 
 export type ServerConfig = z.output<typeof ServerSchema>
@@ -175,8 +175,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                           name: id,
                           version: version || "1.0.0",
                         },
-                        auth: context.auth,
-                        session: context.sessionId,
+                         session: context.sessionId,
                         transportType: "streamable",
                         authProvider: authProvider,
                       },
@@ -258,7 +257,7 @@ const clientManagerMachine = clientManagerSetup.createMachine({
         // Handle new connections
         connect: {
           actions: enqueueActions(({ context, enqueue, event,self }) => {
-            const { url, name, version, id, type , transportType, auth} = event as any;
+            const { url, name, version, id, type , transportType} = event as any;
             
             // Emit connecting event
             enqueue.emit({
@@ -290,7 +289,6 @@ const clientManagerMachine = clientManagerSetup.createMachine({
                           name: name || id,
                           version: version || "1.0.0",
                         },
-                        auth: context.auth,
                         session: context.sessionId,
                         transportType: transportType || "streamable",
                         authProvider: authProvider

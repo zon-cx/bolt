@@ -5,11 +5,11 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import * as Y from "yjs";
 import { env } from "process";
 import { ActorRefFromLogic,createActor } from "xstate";
-import mcpAgent, { ServerConfig } from "./registry.mcp.client";
-import { NamespacedDataStore } from "./registry.mcp.client.namespace";
+import mcpAgent, { ServerConfig } from "./router.mcp.client";
+import { NamespacedDataStore } from "./router.mcp.client.namespace";
 import { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import {z} from "zod"
-import { ServerSchema } from "./registry.mcp.client";
+import { ServerSchema } from "./router.mcp.client";
 
 
 

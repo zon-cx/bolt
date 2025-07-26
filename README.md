@@ -344,7 +344,7 @@ MCP Url: https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp
   - **Server Version Management**: Import and maintain MCP server version information
   - **Real-time Updates**: Propagate changes across the network dynamically
 
-### 2. MCP Router (`registry.router.mcp.server.ts`) - MCP Gate Transport
+### 2. MCP Router (`router.mcp.server.ts`) - MCP Gate Transport
 - **Purpose**: Personal MCP server gateway with transport, authorization, and routing capabilities
 - **Features**:
   - **Personal Server Spaces**: Each user gets `/mcp/{user-id}` endpoint

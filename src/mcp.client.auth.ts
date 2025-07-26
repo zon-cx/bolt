@@ -28,9 +28,7 @@ import { randomFill, randomFillSync, randomUUID } from "node:crypto";
 import { createAtom } from "@xstate/store";
 import { jwtDecode } from "jwt-decode";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { AuthConfig } from "./registry.mcp.client.auth.js";
 import { env } from "node:process";
-import { ServerConfig } from "./registry.mcp.client.js";
 // Configuration
 
 const authState =  connectYjs("@mcp.oauth");

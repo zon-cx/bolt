@@ -53,4 +53,4 @@ EXPOSE ${PORT}
 
  
 # Start the router server
-CMD ["node", "./dist/registry.router.mcp.server.cjs"] 
+CMD ["node", "./dist/router.mcp.server.cjs"] 

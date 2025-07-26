@@ -19,11 +19,11 @@ import {env} from "node:process";
 import {InMemoryEventStore} from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
 import {ActorRefFromLogic, createActor} from "xstate";
 
-import {authRouter, protectedResourcesRouter, requireAuth,} from "./registry.mcp.server.auth";
+import {authRouter, protectedResourcesRouter, requireAuth,} from "./router.mcp.server.auth";
 import {AuthInfo} from "@modelcontextprotocol/sdk/server/auth/types.js";
-import clientManagerMachine, {ServerConfig,} from "./registry.mcp.client";
+import clientManagerMachine, {ServerConfig,} from "./router.mcp.client";
 import {connectYjs} from "./store.yjs";
-import {NamespacedDataStore} from "./registry.mcp.client.namespace";
+import {NamespacedDataStore} from "./router.mcp.client.namespace";
 import { InMemoryOAuthClientProvider } from "./mcp.client.auth";
  
 const app = express();
@@ -39,30 +39,9 @@ const dataStores = {} as Record<string, NamespacedDataStore>;
 app.get("/oauth/callback", async function (req,res) {
   const url = new URLSearchParams(req.url!.split("?")[1]);
   const state = url.get("state")!
-  const authCode =url.get("code")!;
-  // const oauthProvider = RemoteOAuthClientProvider.fromState(state);
-  // const {url:serverUrl, type:transportType} = store.get(oauthProvider.server) || {url:oauthProvider.serverUrl, type:"streamable"}
-  // const transport =  transportType === "streamable" ? 
-  //    new StreamableHTTPClientTransport(new URL(serverUrl), {authProvider: oauthProvider}) 
-  //    : new SSEClientTransport(new URL(serverUrl), {authProvider: oauthProvider})
-  // await transport.finishAuth(authCode); 
-
+  const authCode =url.get("code")!; 
   InMemoryOAuthClientProvider.finishAuth(state, authCode)
   res.send(`Successfully authenticated. You can close this window.`);
-  // console.log("OAuth callback ", oauthProvider.serverUrl);
-  //  console.log("OAuth callback successful");
-  // if (oauthProvider.tokens()) {
-  //   const { access_token } = oauthProvider.tokens()!;
-  //   const { sub, email, nickname, name } = jwtDecode(access_token) as {
-  //     sub: string;
-  //     email: string;
-  //     nickname: string;
-  //     name: string;
-  //   }; 
-  //   res.send(`Successfully authenticated ${oauthProvider.server}. You can close this window.`);
-  // } else {
-  //   res.send(`Failed to authenticate ${oauthProvider.server}. You can close this window.`);
-  // }
 })
     
 // Map to store transports by session ID

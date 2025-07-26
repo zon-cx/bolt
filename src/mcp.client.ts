@@ -36,7 +36,6 @@ import {
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { AuthConfig } from "./registry.mcp.client.auth.js";
 import { z, ZodType } from "zod";
 import { InMemoryOAuthClientProvider } from "./mcp.client.auth.js";
 export type TransportFactory = () =>
@@ -67,7 +66,6 @@ const mcpClientSetup = setup({
           transport: transportFactory,
           authProvider,
           transportType,
-          authConfig,
         } = options;
 
         console.log(
@@ -361,7 +359,13 @@ const mcpClientMachine = mcpClientSetup.createMachine({
   initial: "connecting",
   context: ({ input }) => ({
     url: input.url!,
-    options: input.options!,
+    options: input.options || {
+        info: {
+            name: "mcp-client",
+            version: "1.0.0",
+        },
+        transportType: "streamable", // default transport type
+    },
     instructions: undefined as string | undefined,
     tools: [] as Tool[],
     prompts: [] as Prompt[],
@@ -743,6 +747,7 @@ const mcpClientMachine = mcpClientSetup.createMachine({
           { type: "retry" }
         >(({ input, sendBack }) => {
          async function codeFlow() {
+           //TODO race with `input.authProvider.tokensAsync();` to support more flows
            const code = await  input.authProvider?.waitForCode()
            const transport = input.transport;
            await transport.finishAuth(code);
@@ -750,17 +755,7 @@ const mcpClientMachine = mcpClientSetup.createMachine({
             type: "authenticate",
           });
          }
-         codeFlow();
-
-          async function authenticate() {
-            const tokens = await 
-              input.authProvider .tokensAsync();
-            console.log("tokens", tokens);
-            sendBack({
-              type: "authenticate",
-            });
-          }
-          // authenticate();
+         codeFlow(); 
         }),
         input: ({ context }) => ({
           authProvider: context.options.authProvider!,
@@ -817,13 +812,7 @@ const mcpClientMachine = mcpClientSetup.createMachine({
           }
         ),
         input: ({ context }) => ({ transport: context.transport! }),
-        //   onDone: {
-        //     target: "connected",
-        //     actions: assign({
-        //       client: undefined,
-        //       transport: undefined,
-        //     }),
-        //   },
+  
         onError: {
           target: "done",
           actions: assign({
@@ -839,20 +828,7 @@ const mcpClientMachine = mcpClientSetup.createMachine({
   },
 });
 
-// export function fromMcpClient(
-//   url: URL,
-//   options: {
-//     info: ConstructorParameters<typeof Client>[0];
-//     client?: ConstructorParameters<typeof Client>[1];
-//     transport?: TransportFactory;
-//     oauthProvider?: OAuthClientProvider;
-//   }
-// ) {
 
-//   return mcpClientMachine;
-// }
-
-// Helper functions
 async function fetchTools(client: Client): Promise<Tool[]> {
   let toolsAgg: Tool[] = [];
   let toolsResult: ListToolsResult = { tools: [] };
@@ -970,7 +946,6 @@ export namespace MCPClient {
       session?: string;
       authProvider?: OAuthClientProvider;
       transportType?: string;
-      authConfig?: AuthConfig;
     };
   };
 
@@ -1116,7 +1091,6 @@ export namespace MCPClient {
       info: ConstructorParameters<typeof Client>[0];
       client?: ConstructorParameters<typeof Client>[1];
       transport?: TransportFactory;
-      auth?: AuthInfo;
       session?: string;
       transportType?: string;
     };
@@ -1124,16 +1098,7 @@ export namespace MCPClient {
 
   export type Context = {
     url: URL;
-    options: {
-      info: ConstructorParameters<typeof Client>[0];
-      client?: ConstructorParameters<typeof Client>[1];
-      transport?: TransportFactory;
-      auth?: AuthInfo;
-      session?: string;
-      authProvider?: InMemoryOAuthClientProvider;
-      transportType?: string;
-      authConfig?: AuthConfig;
-    };
+    options: Exclude<Input["options"],undefined>;
     instructions: string | undefined;
     tools: Tool[];
     prompts: Prompt[];

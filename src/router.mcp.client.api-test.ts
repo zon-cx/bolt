@@ -2,11 +2,12 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createActor } from "xstate";
 import { Map as YMap } from "yjs";
-import clientManagerMachine, { type ServerConfig } from "./registry.mcp.client.js";
+import clientManagerMachine, { type ServerConfig } from "./router.mcp.client.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import * as dotenv from "dotenv";
 import { connectYjs } from "./store.yjs.js";
-import {NamespacedDataStore} from "@/registry.mcp.client.namespace.ts";
+import {NamespacedDataStore} from "@/router.mcp.client.namespace.ts";
+import {type} from "node:os";
 
 dotenv.config();
 
@@ -105,10 +106,17 @@ app.get("/server/:id/tools", (c) => {
 });
 
 app.post("/connect", async (c) => {
-  const body = await c.req.json<ServerConfig>();
-  const id = body.id ?? body.url; // simple id
-  store.set(id, body);
-  actor.send({ type: "connect", ...body, id });
+  const {name, url, type, ...body} = await c.req.json<ServerConfig>();
+  const id = name ?? url;
+  store.set(id, {
+    name: name,
+    type,
+    id,
+    url,
+    status: undefined,
+    ...body
+  });
+  actor.send({ type: "connect", transport:type, ...body, id });
   return c.json({ ok: true });
 });
 

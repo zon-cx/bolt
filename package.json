@@ -16,7 +16,7 @@
     "simple": "tsx --env-file=.env src/simple.ts",
     "dashboard": "tsx --env-file=.env src/registry.identity.dashboard.tsx",
     "registry": "PORT=8080 BASE_URL=http://localhost:8080 tsx --env-file=.env src/registry.mcp.server.ts",
-    "router": "PORT=8090 BASE_URL=http://localhost:8090  tsx --env-file=.env.local src/registry.router.mcp.server.ts",
+    "router": "PORT=8090 BASE_URL=http://localhost:8090  tsx --env-file=.env.local src/router.mcp.server.ts",
     "build": "npm run build:pkgroll",
     "build:pkgroll": "npx pkgroll  --clear-dist --dist ./dist --shims  --treeshake   --target=node22.16.0 -y",
     "build:mta": "mbt build -p=cf --mtar-name=archive.0.1.mtar",
@@ -24,7 +24,7 @@
     "push-env": "./push-env.sh",
     "build:copypackage": "cp package.json ./dist/ && cp package-lock.json ./dist/ || true",
     "build:tsup": "pnpx tsup ./src/chat.app.slack.ts --outDir ./dist --target=esnext --format esm --treeshake --shims --publicDir ",
-    "start:router": "node ./dist/registry.router.mcp.server.cjs",
+    "start:router": "node ./dist/router.mcp.server.cjs",
     "start:registry": "node ./dist/registry.mcp.server.cjs",
     "start:dashboard": "node ./dist/registry.identity.dashboard.cjs",
     "start:slack": "node ./dist/chat.ui.slack.cjs",
@@ -97,9 +97,9 @@
       "bin": "./dist/chat.ui.web.js"
     },
     "./router": {
-      "require": "./dist/registry.router.mcp.server.cjs",
-      "import": "./dist/registry.router.mcp.server.mjs",
-      "bin": "./dist/registry.router.mcp.server.js"
+      "require": "./dist/router.mcp.server.cjs",
+      "import": "./dist/router.mcp.server.mjs",
+      "bin": "./dist/router.mcp.server.js"
     },
     "./dashboard": {
       "require": "./dist/registry.identity.dashboard.cjs",
