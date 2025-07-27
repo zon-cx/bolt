@@ -9,24 +9,24 @@ import { connectYjs } from "./store.yjs";
 import { hash } from "node:crypto";
 import express from "express";
 
-const GIGYA_ISSUER =
+const ISSUER =
   "https://gigya.authz.id/oidc/op/v1.0/4_yCXuvQ52Ux52BdaQTxUVhg";
 
 const authState =  connectYjs("@mcp.auth").getMap<Record<string, unknown>>("tokens");
 
 export const proxyProvider = new ProxyOAuthServerProvider({
   endpoints: {
-    authorizationUrl: `${GIGYA_ISSUER}/authorize`,
-    tokenUrl: `${GIGYA_ISSUER}/token`,
-    registrationUrl: `${GIGYA_ISSUER}/register`,
-    revocationUrl: `${GIGYA_ISSUER}/revoke`,
+    authorizationUrl: `${ISSUER}/authorize`,
+    tokenUrl: `${ISSUER}/token`,
+    registrationUrl: `${ISSUER}/register`,
+    revocationUrl: `${ISSUER}/revoke`,
    },
 
   verifyAccessToken: async (token) => {
     const { azp, exp, iss } = jwtDecode(token ) as JwtPayload & {azp?:string}
     console.log("verifyAccessToken", azp);
     async function attemptVerify():Promise<Record<string, unknown>> { 
-        const response = await fetch(`${GIGYA_ISSUER}/userinfo`, {
+        const response = await fetch(`${ISSUER}/userinfo`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -114,8 +114,6 @@ export const authRouter = mcpAuthRouter({
   provider: proxyProvider,
   issuerUrl: new URL(env.BASE_URL || "http://localhost:8090"),
   baseUrl: new URL(env.BASE_URL || "http://localhost:8090"),
-   
-  // baseUrl: new URL("https://mcp-auth.val.run"),
   serviceDocumentationUrl: new URL("https://docs.example.com/"),
   scopesSupported: ["openid", "profile", "email"],
 });
@@ -123,32 +121,17 @@ export const protectedResourcesRouter = express.Router();
 
 protectedResourcesRouter.use(express.json());
 protectedResourcesRouter.use(express.urlencoded({ extended: true }));
-//
-// protectedResourcesRouter.post("token", (req, res) => {
-//     console.log("token request", req.headers);
-//     res.status(501).send("Not Implemented");
-//     console.log("token response", res.statusCode, res.statusMessage);
-// });
-protectedResourcesRouter.get(
-  "/.well-known/oauth-protected-resource/mcp",
-  (req, res) => {
-   console.log("mcp resource metadata request", req.headers);
-    res.json({
-        "resource": env.BASE_URL,
-        "authorization_servers": [
-            "https://mcp-auth.val.run"
-        ],
-        "scopes_supported": [
-            "openid",
-            "profile",
-            "email"
-        ],
-        "resource_documentation": "https://docs.example.com/"
-    });
-    console.log("mcp resource metadata response", res.statusCode, res.statusMessage);
-  }
+
+
+protectedResourcesRouter.get("/.well-known/openid-configuration", async (req, res) => {
+    console.log("openid-configuration request", req.headers);
+    const config = await fetch(`${ISSUER}/.well-known/openid-configuration`).then(response => response.json());
+    res.setHeader('Content-Type', 'application/json');
+    res.json(config);
+    console.log("openid-configuration response", res.statusCode, res.statusMessage);
+    }
 );
- 
+
 
 
 
