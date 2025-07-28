@@ -1,0 +1,92 @@
+name: Pack repository with Repomix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repomix.yaml'
+      - 'src/**'
+      - 'tests/**'
+  pull_request:
+    branches: [main]
+
+jobs:
+  pack-repo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # ratchet:actions/checkout@v4
+
+      - name: Pack repository with Repomix
+        uses: yamadashy/repomix/.github/actions/repomix@df2707647d876fdb66f37c86adcc3efab0b37a3d # ratchet:yamadashy/repomix/.github/actions/repomix@main
+        with:
+          output: repomix-output.xml
+
+      - name: Upload Repomix output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # ratchet:actions/upload-artifact@v4
+        with:
+          name: repomix-output.xml
+          path: repomix-output.xml
+          retention-days: 30
+          
+          
+  pack-matrix:
+    name: Test Node.js ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [ 18, 20, 22 ]
+        include:
+          - node-version: 18
+            test-case: "minimal"
+          - node-version: 20
+            test-case: "basic"
+          - node-version: 22
+            test-case: "full"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # ratchet:actions/checkout@v4
+
+      - name: Run Repomix Action (Minimal)
+        if: matrix['test-case'] == 'minimal'
+        uses: yamadashy/repomix/.github/actions/repomix@df2707647d876fdb66f37c86adcc3efab0b37a3d # ratchet:yamadashy/repomix/.github/actions/repomix@main
+        with:
+          output: "repomix-minimal-output.txt"
+
+      - name: Run Repomix Action (Basic)
+        if: matrix['test-case'] == 'basic'
+        uses: yamadashy/repomix/.github/actions/repomix@df2707647d876fdb66f37c86adcc3efab0b37a3d # ratchet:yamadashy/repomix/.github/actions/repomix@main
+        with:
+          directories: "src"
+          include: "**/*.ts"
+          output: "repomix-basic-output.txt"
+          compress: "true"
+
+      - name: Run Repomix Action (Full)
+        if: matrix['test-case'] == 'full'
+        uses: yamadashy/repomix/.github/actions/repomix@df2707647d876fdb66f37c86adcc3efab0b37a3d # ratchet:yamadashy/repomix/.github/actions/repomix@main
+        with:
+          directories: "src tests"
+          include: "**/*.ts,**/*.md"
+          ignore: "**/*.test.ts"
+          output: "repomix-full-output.txt"
+          compress: "true"
+          additional-args: "--no-file-summary"
+
+      - name: Upload result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # ratchet:actions/upload-artifact@v4
+        with:
+          name: repomix-output-node${{ matrix.node-version }}
+          path: repomix-*-output.txt
+
+
+
+
+
+
+
+
+
+
+ 
+  
