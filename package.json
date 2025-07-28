@@ -1,5 +1,5 @@
 {
-  "name": "agent-mcp-identity",
+  "name": "mcp-identity",
   "version": "0.0.2",
   "description": "",
   "main": "./dist/chat.ui.slack.js",
@@ -31,7 +31,8 @@
     "start:web": "node ./dist/chat.ui.web.cjs",
     "start:whoami": "node ./dist/whoami.mcp.server.cjs",
     "node-with-import": "node --import ./start.js /.main.mjs",
-    "inspector": "npx @modelcontextprotocol/inspector@latest "
+    "inspector": "npx @modelcontextprotocol/inspector@latest ",
+    "watch": "cds-ts w"
   },
   "keywords": [],
   "author": "",
@@ -43,7 +44,6 @@
     "@hocuspocus/provider": "^3.1.1",
     "@modelcontextprotocol/sdk": "^1.15.1",
     "yjs": "^13.6.26"
-
   },
   "devDependencies": {
     "@hono/node-server": "^1.14.1",
@@ -68,6 +68,7 @@
     "slack-edge": "^1.3.8",
     "tailwindcss": "^4.1.6",
     "tsx": "^4.19.4",
+    "typescript": "^5",
     "xstate": "^5.19.2",
     "y-websocket": "^3.0.0"
   },
@@ -116,5 +117,36 @@
       "import": "./dist/registry.mcp.server.mjs",
       "bin": "./dist/registry.mcp.server.js"
     }
+  },
+  "cds": {
+    "requires": {
+      "auth": {
+        "kind": "ias",
+        "config": {
+          "validation": {
+            "x5t": {
+              "enabled": false
+            },
+            "proofToken": {
+              "enabled": false
+            }
+          }
+        },
+        "[development]": {
+          "kind": "mocked",
+          "users": {
+            "alice": {
+              "tenant": "t1",
+              "roles": [
+                "admin"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "imports": {
+    "#cds-models/*": "./@cds-models/*/index.js"
   }
 }
