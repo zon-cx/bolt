@@ -35,6 +35,8 @@ fetch("https://fidm.eu1.gigya.com/fidm.oidc.op.setConfig", {
           "http://localhost:6274/oauth/callback",
           "https://localhost:3000/auth/callback/gigya",
           "https://mcp.authz.id/auth/callback/gigya",
+          "https://mcp-inspector.cfapps.eu12.hana.ondemand.com/login/callback",
+          "https://mcp-inspector-server.cfapps.eu12.hana.ondemand.com/oauth/callback",
         ],
       }),
     ["customScopes"]: "{}",

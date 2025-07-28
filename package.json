@@ -7,6 +7,8 @@
   "packageManager": "yarn@1.22.22",
   "scripts": {
     "start": "npm run start:router",
+    "deploy": "cf push registry && cf push router  && cf push inspector && cf push slack ",
+    "before-deploy": "npm run build",
     "deploy:router:docker:harbor": "docker tag mcp-roouter mg1-harbor.gigya.net/mcp-router:latest && docker push mg1-harbor.gigya.net/mcp-router:latest",
     "deploy:router:docker": "docker tag mcp-router mcp-router:latest && docker push mcp-router:latest",
     "build:router:docker": "docker build -t mcp-router -f mcps/router/Dockerfile .",

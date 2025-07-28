@@ -1,14 +1,53 @@
-id: assistant
+id: mcp-identity-gate
 applications:
-  - name: slack
-    command: npm run start:slack
-    health-check-type: process
+  - name: inspector
     routes:
-      - route: 'https://slack.cfapps.eu12.hana.ondemand.com'
+      - route: https://mcp-inspector.cfapps.eu12.hana.ondemand.com
+    command: npm run inspector
     stack: cflinuxfs4
-    memory: 512M
+    memory: 4096M
     instances: 1
-    version: 0.0.2 
+    version: 0.0.2
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      CLIENT_PORT: 8080
+      SERVER_PORT: 8080
+      DANGEROUSLY_OMIT_AUTH: true
+      HOST: '0.0.0.0' 
+      MCP_PROXY_FULL_ADDRESS:  https://mcp-inspector-server.cfapps.eu12.hana.ondemand.com
+
+  - name: inspector-server
+    memory: 2048M
+    routes:
+      - route: 'https://mcp-inspector-server.cfapps.eu12.hana.ondemand.com'
+    command: npm run inspector
+    readiness-health-check-type: none
+    health-check-type: none
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack
+
+    stack: cflinuxfs4
+    instances: 1
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      SERVER_PORT: 8080
+      DANGEROUSLY_OMIT_AUTH: true
+      HOST: '0.0.0.0'
+      ALLOWED_ORIGINS: 'https://mcp-inspector.cfapps.eu12.hana.ondemand.com'
+
+  - name: router
+    routes:
+      - route: 'https://mcp-gate.cfapps.eu12.hana.ondemand.com'
+    command: npm run start:router
+    stack: cflinuxfs4
+    memory: 4096M
+    instances: 1
+    version: 0.0.2
     env:
       NODE_OPTIONS: --max-http-header-size=80000
       NODE_ENV: production
@@ -16,20 +55,18 @@ applications:
       LOG_REMOTE_USER: true
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
-      MCP_INSPECTOR_URL: 'https://inspector.cfapps.eu12.hana.ondemand.com'
-      MCP_REGISTRY_URL: 'https://registry.cfapps.eu12.hana.ondemand.com/mcp'
-      MCP_GATEWAY_URL: 'https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp'
-      BASE_URL: 'https://slack.cfapps.eu12.hana.ondemand.com'
+      BASE_URL: https://mcp-gate.cfapps.eu12.hana.ondemand.com
+      MCP_REGISTRY_URL: https://mcp-discovery.cfapps.eu12.hana.ondemand.com/mcp
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
-  - name: registry
+
+  - name: discovery
     command: npm run start:registry
     health-check-type: process
     routes:
-      - route: 'https://registry.cfapps.eu12.hana.ondemand.com'
+      - route: 'https://mcp-discovery.cfapps.eu12.hana.ondemand.com'
     stack: cflinuxfs4
-    memory: 2048M
+    memory: 6144M
     instances: 1
     version: 0.0.2
     env:
@@ -39,125 +76,35 @@ applications:
       LOG_REMOTE_USER: true
       LOG_REFERER: true
       YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
-      MCP_GATEWAY_URL: 'https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp'
-      BASE_URL: 'https://registry.cfapps.eu12.hana.ondemand.com'
+      MCP_DASHBOARD_URL: 'https://mcp-dashboard.cfapps.eu12.hana.ondemand.com'
+      MCP_GATEWAY_URL: 'https://mcp-gate.cfapps.eu12.hana.ondemand.com/mcp'
+      BASE_URL: 'https://mcp-discovery.cfapps.eu12.hana.ondemand.com'
     buildpacks:
       - https://github.com/cloudfoundry/nodejs-buildpack
-  - name: web
-    command: npm run start:web
-    routes:
-      - route: 'https://assistant.cfapps.eu12.hana.ondemand.com'
-    stack: cflinuxfs4
-    memory: 512M
-    instances: 3
-    version: 0.0.2
-    env:
-      NODE_OPTIONS: --max-http-header-size=80000
-      NODE_ENV: production
-      LOG_SENSITIVE_CONNECTION_DATA: true
-      LOG_REMOTE_USER: true
-      LOG_REFERER: true
-      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      MCP_GATEWAY_URL: 'https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp'
-      MCP_DASHBOARD_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
-      BASE_URL: 'https://assistant.cfapps.eu12.hana.ondemand.com'
-    buildpacks:
-      - https://github.com/cloudfoundry/nodejs-buildpack
+ 
 
-  - name: dashboard
-    routes:
-      - route: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
-    command: npm run start:dashboard
-    stack: cflinuxfs4
-    memory: 512M
-    instances: 1
-    version: 0.0.2
-    env:
-      NODE_OPTIONS: --max-http-header-size=80000
-      NODE_ENV: production
-      LOG_SENSITIVE_CONNECTION_DATA: true
-      LOG_REMOTE_USER: true
-      LOG_REFERER: true
-      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      BASE_URL: 'https://dashboard.cfapps.eu12.hana.ondemand.com'
-      MCP_REGISTRY_URL: https://registry.cfapps.eu12.hana.ondemand.com/mcp
-      MCP_GATEWAY_URL: https://mcp-router.cfapps.eu12.hana.ondemand.com/mcp
-    buildpacks:
-      - https://github.com/cloudfoundry/nodejs-buildpack
-  - name: router
-    routes:
-      - route: 'https://mcp-router.cfapps.eu12.hana.ondemand.com'
-    command: npm run start:router
-    stack: cflinuxfs4
-    memory: 2048M
-    instances: 1
-    version: 0.0.2
-    env:
-      NODE_OPTIONS: --max-http-header-size=80000
-      NODE_ENV: production
-      LOG_SENSITIVE_CONNECTION_DATA: true
-      LOG_REMOTE_USER: true
-      LOG_REFERER: true
-      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      BASE_URL: 'https://mcp-router.cfapps.eu12.hana.ondemand.com'
-      MCP_REGISTRY_URL: https://registry.cfapps.eu12.hana.ondemand.com/mcp
-    buildpacks:
-      - https://github.com/cloudfoundry/nodejs-buildpack
-  - name: whoami
-    routes:
-      - route: 'https://whoami.cfapps.eu12.hana.ondemand.com'
-
-    command: npm run start:whoami
-    stack: cflinuxfs4
-    memory: 524M
-    instances: 1
-    version: 0.0.2
-
-    env:
-      NODE_OPTIONS: --max-http-header-size=80000
-      NODE_ENV: production
-      LOG_SENSITIVE_CONNECTION_DATA: true
-      LOG_REMOTE_USER: true
-      LOG_REFERER: true
-      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
-      BASE_URL: 'https://whoami.cfapps.eu12.hana.ondemand.com'
-    buildpacks:
-      - https://github.com/cloudfoundry/nodejs-buildpack
-      
-  - name: inspector
-    routes:
-      - route: 'https://inspector.cfapps.eu12.hana.ondemand.com'
-      - route: 'https://inspector-proxy.cfapps.eu12.hana.ondemand.com'
-        port: 8081
-    command: npm run inspector
-    stack: cflinuxfs4
-    memory: 256M
-    instances: 1
-    version: 0.0.2
-    env:
-      NODE_OPTIONS: --max-http-header-size=80000
-      NODE_ENV: production
-      CLIENT_PORT: 8080
-      SERVER_PORT: 8081
-
-      MCP_PROXY_FULL_ADDRESS: 'https://inspector-proxy.cfapps.eu12.hana.ondemand.com:8081'
-    buildpacks:
-      - https://github.com/cloudfoundry/nodejs-buildpack
-
-  - name: inspector-server
-    routes:
-      - route: 'https://inspector-server.cfapps.eu12.hana.ondemand.com'
-    command: npm run inspector
-    readiness-health-check-type: none
-    health-check-type: none
-
-    stack: cflinuxfs4
-    instances: 1
-    version: 0.0.2
-    env:
-      NODE_OPTIONS: --max-http-header-size=80000
-      NODE_ENV: production
-      SERVER_PORT: 8080
-    buildpacks:
-      - https://github.com/cloudfoundry/nodejs-buildpack
+services:
+    - name: mcp-identity-ias
+      type: org.cloudfoundry.managed-service
+      parameters:
+      service: identity
+      service-plan: application
+      service-name: ias
+      config:
+          display-name: MCP Identity Service
+          multi-tenant: true
+          oauth2-configuration:
+          public-client: true
+          redirect-uris:
+              - https://*.${DOMAIN}/login/callback
+          xsuaa-cross-consumption: true
+          default-attributes:
+            email: "mail"
+            tenant_id: "${app_tid}"
+            groups: "applicationGroups"
+            first_name: "firstName"
+            last_name: "lastName"
+            assertion-attributes:
+              email: "mail"
+              groups: "applicationGroups"
+ 

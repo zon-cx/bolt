@@ -18,3 +18,4 @@
 
 - https://github.com/copilotkit/open-mcp-client
 
+- https://developers.cloudflare.com/agents/model-context-protocol/authorization/
