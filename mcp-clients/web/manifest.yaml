@@ -1,0 +1,21 @@
+applications:
+  - name: web
+    command: npm run start
+    routes:
+      - route: 'https://assistant.${DOMAIN}'
+    stack: cflinuxfs4
+    memory: 512M
+    instances: 3
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      LOG_SENSITIVE_CONNECTION_DATA: true
+      LOG_REMOTE_USER: true
+      LOG_REFERER: true
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
+      MCP_GATEWAY_URL: 'https://mcp-router.${DOMAIN}/mcp'
+      MCP_DASHBOARD_URL: 'https://dashboard.${DOMAIN}'
+      BASE_URL: 'https://assistant.${DOMAIN}'
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack 

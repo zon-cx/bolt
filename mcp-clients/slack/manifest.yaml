@@ -1,0 +1,24 @@
+applications:
+  - name: slack
+    command: npm run start
+    health-check-type: process
+    routes:
+      - route: 'https://slack.${DOMAIN}'
+    stack: cflinuxfs4
+    memory: 512M
+    instances: 1
+    version: 0.0.2 
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      LOG_SENSITIVE_CONNECTION_DATA: true
+      LOG_REMOTE_USER: true
+      LOG_REFERER: true
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
+      MCP_DASHBOARD_URL: 'https://dashboard.${DOMAIN}'
+      MCP_INSPECTOR_URL: 'https://inspector.${DOMAIN}'
+      MCP_REGISTRY_URL: 'https://registry.${DOMAIN}/mcp'
+      MCP_GATEWAY_URL: 'https://mcp-router.${DOMAIN}/mcp'
+      BASE_URL: 'https://slack.${DOMAIN}'
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack 

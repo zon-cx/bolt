@@ -1,0 +1,106 @@
+### MCP Client XState API Tests
+### Base URL: http://localhost:8788
+
+### Get current state
+GET http://localhost:8788/state
+
+### Get available tools
+GET http://localhost:8788/tools
+
+### Get available resources
+GET http://localhost:8788/resources
+
+### Get resource templates
+GET http://localhost:8788/resource-templates
+
+### Get prompts
+GET http://localhost:8788/prompts
+
+### Test Completion with Resource Template
+
+### Complete with resource template (registry)
+POST http://localhost:8788/test-complete
+Content-Type: application/json
+
+{
+  "ref": {
+    "type": "ref/resource",
+    "uri": "urn:mcp:server/registry"
+  },
+  "argument": {
+    "name": "registry",
+    "value": "test value"
+  }
+}
+
+### Complete with namespaced resource template
+POST http://localhost:8788/test-complete
+Content-Type: application/json
+
+{
+  "ref": {
+    "type": "ref/resource",
+    "uri": "@registry:urn:mcp:server/registry"
+  },
+  "argument": {
+    "name": "registry",
+    "value": "test value"
+  }
+}
+
+### Complete with prompt
+POST http://localhost:8788/test-complete
+Content-Type: application/json
+
+{
+  "ref": {
+    "type": "ref/prompt",
+    "name": "test-prompt"
+  },
+  "argument": {
+    "arg": "test argument"
+  }
+}
+
+### Test Tool Calls
+
+### List available servers
+POST http://localhost:8788/call-tool
+Content-Type: application/json
+
+{
+  "name": "list",
+  "arguments": {}
+}
+
+### Get server info
+POST http://localhost:8788/call-tool
+Content-Type: application/json
+
+{
+  "name": "info",
+  "arguments": {}
+}
+
+### Connect to a new server
+POST http://localhost:8788/call-tool
+Content-Type: application/json
+
+{
+  "name": "connect",
+  "arguments": {
+    "url": "https://example.com/mcp",
+    "name": "Example Server"
+  }
+}
+
+### Test Resource Reading
+
+### Read a specific resource
+POST http://localhost:8788/read-resource/registry
+
+### Read another resource
+POST http://localhost:8788/read-resource/store
+
+### Retry connection
+POST http://localhost:8788/retry 

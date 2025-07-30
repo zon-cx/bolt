@@ -1,11 +1,16 @@
 const { URLSearchParams } = require("url");
 
+
+
+
 fetch("https://fidm.eu1.gigya.com/fidm.oidc.op.setConfig", {
   method: "POST",
   headers: {
     "content-type": "multipart/form-data;",
   },
   body: new URLSearchParams({
+    ["userkey"]: process.env.CDC_USER_KEY,
+    ["secret"]: process.env.CDC_USER_SECRET,
     ["issuer"]: "https://gigya.authz.id/oidc/op/v1.0/4_yCXuvQ52Ux52BdaQTxUVhg",
     ["proxyPage"]: "https://gigya.authz.id/pages/login",
     ["dynamicClientRegistration"]:

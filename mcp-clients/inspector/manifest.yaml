@@ -1,0 +1,39 @@
+applications:
+  - name: inspector
+    routes:
+      - route: 'https://inspector.${DOMAIN}'
+      - route: 'https://inspector-proxy.${DOMAIN}'
+        port: 8081
+    command: npm run inspector
+    stack: cflinuxfs4
+    memory: 256M
+    instances: 1
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      CLIENT_PORT: 8080
+      SERVER_PORT: 8081
+      DANGEROUSLY_OMIT_AUTH: true
+      HOST: '0.0.0.0'
+      MCP_PROXY_FULL_ADDRESS: 'https://inspector.${DOMAIN}'
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack
+
+  - name: inspector-server
+    routes:
+      - route: 'https://inspector-server.${DOMAIN}'
+    command: npm run inspector
+    readiness-health-check-type: none
+    health-check-type: none
+    stack: cflinuxfs4
+    instances: 1
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      SERVER_PORT: 8080
+      DANGEROUSLY_OMIT_AUTH: true
+      HOST: '0.0.0.0'
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack 

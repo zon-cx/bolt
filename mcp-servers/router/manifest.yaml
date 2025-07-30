@@ -1,0 +1,21 @@
+applications:
+  - name: router
+    routes:
+      - route: 'https://mcp-id-gate.cfapps.eu12.hana.ondemand.com'
+    
+    command: npm run start
+    stack: cflinuxfs4
+    memory: 2048M
+    instances: 1
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      LOG_SENSITIVE_CONNECTION_DATA: true
+      LOG_REMOTE_USER: true
+      LOG_REFERER: true
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
+      BASE_URL: 'https://mcp-id-gate.cfapps.eu12.hana.ondemand.com'
+      MCP_REGISTRY_URL: https://mcp-registry.cfapps.eu12.hana.ondemand.com/mcp
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack 

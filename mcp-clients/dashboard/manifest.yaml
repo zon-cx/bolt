@@ -1,0 +1,21 @@
+applications:
+  - name: dashboard
+    routes:
+      - route: 'https://dashboard.${DOMAIN}'
+    command: npm run start
+    stack: cflinuxfs4
+    memory: 512M
+    instances: 1
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: --max-http-header-size=80000
+      NODE_ENV: production
+      LOG_SENSITIVE_CONNECTION_DATA: true
+      LOG_REMOTE_USER: true
+      LOG_REFERER: true
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
+      BASE_URL: 'https://dashboard.${DOMAIN}'
+      MCP_REGISTRY_URL: https://registry.${DOMAIN}/mcp
+      MCP_GATEWAY_URL: https://mcp-router.${DOMAIN}/mcp
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack 

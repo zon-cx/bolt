@@ -1,0 +1,22 @@
+applications:
+  - name: discovery
+    command: npm run start
+    health-check-type: process
+    routes:
+      - route: 'https://mcp-discovery.cfapps.eu12.hana.ondemand.com'
+    stack: cflinuxfs4
+    memory: 6144M
+    instances: 1
+    version: 0.0.2
+    env:
+      NODE_OPTIONS: "--max-old-space-size=1024 --max-http-header-size=80000"
+      NODE_ENV: production
+      LOG_SENSITIVE_CONNECTION_DATA: true
+      LOG_REMOTE_USER: true
+      LOG_REFERER: true
+      YJS_URL: 'wss://hp.cfapps.us10-001.hana.ondemand.com'
+      MCP_DASHBOARD_URL: 'https://mcp-dashboard.cfapps.eu12.hana.ondemand.com'
+      MCP_GATEWAY_URL: 'https://mcp-gate.cfapps.eu12.hana.ondemand.com/mcp'
+      BASE_URL: 'https://mcp-discovery.cfapps.eu12.hana.ondemand.com'
+    buildpacks:
+      - https://github.com/cloudfoundry/nodejs-buildpack 

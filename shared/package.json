@@ -1,0 +1,25 @@
+{
+  "name": "@mcp-identity/shared",
+  "version": "0.0.2",
+  "description": "Shared utilities and types for MCP Identity Gateway",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "npx pkgroll --clear-dist --dist ./dist --shims --treeshake --target=node22.16.0 -y",
+    "dev": "tsx --watch src/index.ts",
+    "test": "echo \"No tests specified\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.15.1",
+    "yjs": "^13.6.26"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.18",
+    "typescript": "^5",
+    "tsx": "^4.19.4"
+  },
+  "engines": {
+    "node": "22.16.0"
+  }
+} 
